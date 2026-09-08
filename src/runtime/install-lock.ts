@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { posix, resolve } from "node:path";
 import type { ProviderId } from "../domain/contracts.js";
 import { RouterError } from "../domain/errors.js";
 import { runCaptured, type CapturedProcess, type ProcessOptions } from "./child-process.js";
@@ -181,10 +181,24 @@ function parseInstallLock(value: unknown): InstallLock {
 export async function readInstallLock(path: string): Promise<InstallLock> {
     return parseInstallLock(JSON.parse(await readFile(path, "utf8")));
 }
-export function expandLockedPath(template: string, environment: NodeJS.ProcessEnv = process.env): string {
+// P01 (measured 2026-09-08 on WSL2): the lock is written with Windows variables
+// (%USERPROFILE%, %LOCALAPPDATA%, %APPDATA%), so on POSIX `doctor` died in
+// expandLockedPath before it could report a single component. A locked path that
+// cannot be expanded is a "missing" verdict for that component, never a fatal
+// for the whole diagnosis. On POSIX the Windows variables fall back to their
+// conventional equivalents and backslashes become path separators.
+const POSIX_PATH_FALLBACKS: Readonly<Record<string, (environment: NodeJS.ProcessEnv) => string | undefined>> = {
+    USERPROFILE: (environment) => environment["HOME"],
+    LOCALAPPDATA: (environment) => environment["XDG_DATA_HOME"] ?? (environment["HOME"] === undefined ? undefined : `${environment["HOME"]}/.local/share`),
+    APPDATA: (environment) => environment["XDG_CONFIG_HOME"] ?? (environment["HOME"] === undefined ? undefined : `${environment["HOME"]}/.config`),
+};
+export function expandLockedPath(template: string, environment: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
     const expanded = template.replace(/%([^%]+)%/gu, (_match: string, rawName: string) => {
         const name = rawName.toUpperCase();
-        const value = environment[name] ?? environment[rawName];
+        let value = environment[name] ?? environment[rawName];
+        if ((value === undefined || value.trim() === "") && platform !== "win32") {
+            value = POSIX_PATH_FALLBACKS[name]?.(environment);
+        }
         if (value === undefined || value.trim() === "") {
             throw new RouterError("adapter_unavailable", `Required path environment variable ${name} is unavailable.`, 503);
         }
@@ -193,7 +207,7 @@ export function expandLockedPath(template: string, environment: NodeJS.ProcessEn
     if (/%[^%]+%/u.test(expanded)) {
         throw new RouterError("adapter_unavailable", "A locked executable path could not be resolved.", 503);
     }
-    return resolve(expanded);
+    return platform === "win32" ? resolve(expanded) : posix.resolve(expanded.replaceAll("\\", "/"));
 }
 export async function sha256File(path: string): Promise<string> {
     return await new Promise<string>((resolveHash, rejectHash) => {
