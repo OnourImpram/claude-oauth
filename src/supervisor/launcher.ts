@@ -59,7 +59,7 @@ interface OAuthAgentDefinition {
     readonly description: string;
     readonly prompt: string;
     readonly model: string;
-    readonly tools: readonly string[];
+    readonly tools?: readonly string[];
     readonly maxTurns?: number;
 }
 interface OAuthAgentContract {
@@ -106,7 +106,9 @@ function oauthAgentContractsFor(mode: ClaudeClientMode): readonly OAuthAgentCont
                     description: `ChatGPT OAuth ${contract.displayName}. REQUIRED: invoke Agent with model="${clientModel}"; any other model is invalid.`,
                     prompt: `Use exact ${contract.displayName}. Complete the delegated task without provider fallback.`,
                     model: clientModel,
-                    tools: nativeOAuthAgentTools,
+                    // Clodex uses HTTP tool_use/tool_result translation, not the MCP session
+                    // bridge wired below. Users can add MCP names to this default tool list.
+                    tools: [...nativeOAuthAgentTools, "Skill"],
                 },
             };
         }),
@@ -117,11 +119,11 @@ function oauthAgentContractsFor(mode: ClaudeClientMode): readonly OAuthAgentCont
                 name: `${contract.alias}-delege`,
                 requiredSnapshotModel: contract.id,
                 definition: {
-                    description: `${lane} ${contract.displayName}. REQUIRED: invoke Agent with model="${clientModel}"; any other model is invalid. Read-only.`,
-                    prompt: `Use exact ${contract.upstreamModel} through ${lane}. Return read-only analysis text and perform no side effects.`,
+                    description: `${lane} ${contract.displayName}. REQUIRED: invoke Agent with model="${clientModel}"; any other model is invalid.`,
+                    prompt: `Use exact ${contract.upstreamModel} through ${lane}. Complete the delegated task without provider fallback.`,
                     model: clientModel,
-                    tools: [],
-                    maxTurns: 1,
+                    // Omission inherits the parent's available tools and adds no turn cap.
+                    // https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields
                 },
             };
         }),
@@ -196,15 +198,6 @@ function mergedOAuthAgentDefinitions(serialized: string | undefined, availableMo
         const configuredModel = (existing as Record<string, unknown>)["model"];
         if (typeof configuredModel !== "string" || patchedModelAlias(configuredModel, mode) !== definition.model) {
             throw new RouterError("invalid_request", `Reserved OAuth agent ${name} must keep its exact model route.`, 400);
-        }
-        if (definition.maxTurns !== undefined) {
-            const configuredMaxTurns = (existing as Record<string, unknown>)["maxTurns"];
-            const configuredTools = (existing as Record<string, unknown>)["tools"];
-            if (configuredMaxTurns !== definition.maxTurns ||
-                !Array.isArray(configuredTools) ||
-                configuredTools.length !== 0) {
-                throw new RouterError("invalid_request", `Reserved OAuth agent ${name} must keep its read-only single-turn bounds.`, 400);
-            }
         }
     }
     return JSON.stringify(definitions);
