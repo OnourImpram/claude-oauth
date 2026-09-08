@@ -386,16 +386,22 @@ export class AgentSessionRegistry {
         );
         session.bridge.setTools(tools);
         this.#sessions.set(sessionKey, session);
-        session.attach(
-            this.#startAgent({
-                prompt,
-                bridge: session.bridge,
-                mcpUrl: this.mcpUrlFor(sessionKey),
-                mcpHeaders: this.#mcpHeaders(),
-                model,
-                sessionKey,
-            }),
-        );
+        try {
+            session.attach(
+                this.#startAgent({
+                    prompt,
+                    bridge: session.bridge,
+                    mcpUrl: this.mcpUrlFor(sessionKey),
+                    mcpHeaders: this.#mcpHeaders(),
+                    model,
+                    sessionKey,
+                }),
+            );
+        } catch (error) {
+            session.cancel("agent startup failed");
+            this.#retire(sessionKey);
+            throw error;
+        }
         const outcome = await this.#settle(sessionKey, session, signal);
         return { sessionKey, outcome };
     }
