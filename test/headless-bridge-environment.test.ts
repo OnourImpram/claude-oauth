@@ -12,7 +12,7 @@ import { runAntigravityHeadless, type HeadlessProcessRequest } from "../src/anti
 // still updated with "1"). This test checks that the variable reaches the agy process with
 // its EXACT VALUE; negative arm: the test goes red when the variable carries the wrong
 // value or is not set at all.
-async function agyOrtami(source: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+async function agyEnvironment(source: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
     const home = mkdtempSync(join(tmpdir(), "agy-env-"));
     let seen: HeadlessProcessRequest | undefined;
     try {
@@ -35,24 +35,24 @@ async function agyOrtami(source: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> 
         rmSync(home, { recursive: true, force: true });
     }
     if (seen === undefined)
-        throw new Error("sahte kosucu hic cagrilmadi");
+        throw new Error("the fake runner was never called");
     return seen.environment;
 }
 
-describe("antigravity surec ortami", () => {
-    it("AGY_CLI_DISABLE_AUTO_UPDATE agy'ye TAM olarak \"true\" degeriyle gider", async () => {
-        const environment = await agyOrtami({ PATH: "C:\\Windows", USERPROFILE: "C:\\Users\\test" });
+describe("antigravity process environment", () => {
+    it("AGY_CLI_DISABLE_AUTO_UPDATE reaches agy with EXACTLY the value \"true\"", async () => {
+        const environment = await agyEnvironment({ PATH: "C:\\Windows", USERPROFILE: "C:\\Users\\test" });
         strictEqual(environment["AGY_CLI_DISABLE_AUTO_UPDATE"], "true");
         strictEqual(environment["AGY_CLI_HIDE_ACCOUNT_INFO"], "1");
     });
-    it("kaynak ortamdaki yanlis deger (\"1\" / \"0\") EZILIR -- guncelleyici yine kapali", async () => {
-        for (const kotu of ["1", "0", "false", ""]) {
-            const environment = await agyOrtami({ PATH: "C:\\Windows", AGY_CLI_DISABLE_AUTO_UPDATE: kotu });
-            strictEqual(environment["AGY_CLI_DISABLE_AUTO_UPDATE"], "true", `kaynak deger ${JSON.stringify(kotu)} ezilmedi`);
+    it("an incorrect source-environment value (\"1\" / \"0\") is OVERRIDDEN -- the updater remains disabled", async () => {
+        for (const incorrect of ["1", "0", "false", ""]) {
+            const environment = await agyEnvironment({ PATH: "C:\\Windows", AGY_CLI_DISABLE_AUTO_UPDATE: incorrect });
+            strictEqual(environment["AGY_CLI_DISABLE_AUTO_UPDATE"], "true", `source value ${JSON.stringify(incorrect)} was not overridden`);
         }
     });
-    it("negatif kol: degisken listesi kendi adiyla dogrulanir (yanlis ad gecmez)", async () => {
-        const environment = await agyOrtami({ PATH: "C:\\Windows" });
+    it("negative arm: the variable list is checked against its exact name (a wrong name is rejected)", async () => {
+        const environment = await agyEnvironment({ PATH: "C:\\Windows" });
         deepStrictEqual(Object.keys(environment).filter((key) => /AUTO_UPDATE/u.test(key)), ["AGY_CLI_DISABLE_AUTO_UPDATE"]);
     });
 });

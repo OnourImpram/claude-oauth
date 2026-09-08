@@ -10,10 +10,10 @@ import { spawnFailureGuard } from "../src/runtime/child-process.js";
 // Result: a single provider tied to a request that was not installed also blocked the
 // working providers from being written to the snapshot.
 
-const MISSING = join("C:", "hezarfen-boyle-bir-ikili-yok", "hayalet.exe");
+const MISSING = join("C:", "hezarfen-no-such-binary", "ghost.exe");
 
 describe("spawnFailureGuard", () => {
-    it("var olmayan bir ikili suereci DUSURMEZ, hatayi yakalar", async () => {
+    it("a missing binary DOES NOT CRASH the process; its error is captured", async () => {
         const child = spawn(MISSING, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
         const failure = spawnFailureGuard(child);
         await new Promise<void>((resolveWait) => { child.once("close", () => { resolveWait(); }); });
@@ -22,7 +22,7 @@ describe("spawnFailureGuard", () => {
         strictEqual(captured?.code, "ENOENT");
     });
 
-    it("dinleyici olmadan ayni spawn yakalanamayan 'error' uretir (negatif kontrol)", async () => {
+    it("without the listener the same spawn produces an uncatchable 'error' (negative control)", async () => {
         const child = spawn(MISSING, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
         // Without the guard nobody listens to this event and Node would drop the process.
         // Here we listen deliberately and prove the event is REALLY emitted -- so what the
@@ -33,7 +33,7 @@ describe("spawnFailureGuard", () => {
         strictEqual(emitted.code, "ENOENT");
     });
 
-    it("basarili spawn'da hicbir hata bildirmez", async () => {
+    it("reports no error for a successful spawn", async () => {
         const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: ["ignore", "pipe", "pipe"] });
         const failure = spawnFailureGuard(child);
         const code = await new Promise<number | null>((resolveWait) => {
@@ -43,7 +43,7 @@ describe("spawnFailureGuard", () => {
         strictEqual(failure(), undefined);
     });
 
-    it("okuyucu her cagrildiginda ayni sonucu verir (durum saklar, tuketmez)", async () => {
+    it("the reader returns the same result on every call (retains state without consuming it)", async () => {
         const child = spawn(MISSING, [], { stdio: ["ignore", "pipe", "pipe"] });
         const failure = spawnFailureGuard(child);
         await new Promise<void>((resolveWait) => { child.once("close", () => { resolveWait(); }); });

@@ -60,14 +60,14 @@ after(async () => {
 });
 
 describe("verifyClodexPackageLock", () => {
-    it("surum, SRI ve entrypoint bayti tutuyorsa ok doner", async () => {
+    it("returns ok when the version, SRI and entrypoint bytes match", async () => {
         const check = await verifyClodexPackageLock(lock, moduleRoot);
         strictEqual(check.status, "ok");
         strictEqual(check.detailCode, "locked_bytes_and_reported_version_match");
     });
 
     // The four below are the checks the stub NEVER performed. Each one is a negative control.
-    it("paket surumu sapinca drift bildirir", async () => {
+    it("reports drift when the package version diverges", async () => {
         const root = await writeTree({ version: "9.9.9", integrity: lock.clodex.integrity, entrypointBody: "export const cli = 1;\n" });
         const check = await verifyClodexPackageLock(lock, root);
         strictEqual(check.status, "drift");
@@ -75,7 +75,7 @@ describe("verifyClodexPackageLock", () => {
         await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
-    it("npm SRI sapinca drift bildirir", async () => {
+    it("reports drift when the npm SRI diverges", async () => {
         const root = await writeTree({ version: "2.11.1", integrity: `sha512-${"B".repeat(88)}`, entrypointBody: "export const cli = 1;\n" });
         const check = await verifyClodexPackageLock(lock, root);
         strictEqual(check.status, "drift");
@@ -83,7 +83,7 @@ describe("verifyClodexPackageLock", () => {
         await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
-    it("entrypoint bayti degisince drift bildirir", async () => {
+    it("reports drift when the entrypoint bytes change", async () => {
         const root = await writeTree({ version: "2.11.1", integrity: lock.clodex.integrity, entrypointBody: "export const cli = 2;\n" });
         const check = await verifyClodexPackageLock(lock, root);
         strictEqual(check.status, "drift");
@@ -91,7 +91,7 @@ describe("verifyClodexPackageLock", () => {
         await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
-    it("paket hic yoksa missing bildirir", async () => {
+    it("reports missing when the package is absent", async () => {
         const root = await writeTree({ version: "2.11.1", integrity: lock.clodex.integrity, entrypointBody: "", omitPackage: true });
         const check = await verifyClodexPackageLock(lock, root);
         strictEqual(check.status, "missing");
@@ -99,7 +99,7 @@ describe("verifyClodexPackageLock", () => {
         await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
-    it("kurulum kaydi yoksa missing bildirir", async () => {
+    it("reports missing when the installation record is absent", async () => {
         const root = await writeTree({ version: "2.11.1", integrity: lock.clodex.integrity, entrypointBody: "export const cli = 1;\n", omitInstallerRecord: true });
         const check = await verifyClodexPackageLock(lock, root);
         strictEqual(check.status, "missing");
@@ -107,9 +107,9 @@ describe("verifyClodexPackageLock", () => {
         await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
-    it("hicbir dalda hata firlatmaz: bozuk manifest bile rapora donusur", async () => {
+    it("no branch throws: even a corrupt manifest becomes a report", async () => {
         const root = await writeTree({ version: "2.11.1", integrity: lock.clodex.integrity, entrypointBody: "export const cli = 1;\n" });
-        await writeFile(join(root, "node_modules", PACKAGE, "package.json"), "bu JSON degil", "utf8");
+        await writeFile(join(root, "node_modules", PACKAGE, "package.json"), "this is not JSON", "utf8");
         const check = await verifyClodexPackageLock(lock, root);
         strictEqual(check.status, "drift");
         strictEqual(check.detailCode, "locked_package_manifest_unreadable");
@@ -118,12 +118,12 @@ describe("verifyClodexPackageLock", () => {
 });
 
 describe("reportedVersionMatches", () => {
-    it("cikti icindeki tam surumu bulur", () => {
+    it("finds the exact version in the output", () => {
         strictEqual(reportedVersionMatches("clodex v2.11.1", "2.11.1"), true);
         strictEqual(reportedVersionMatches("2.1.251 (Claude Code)", "2.1.251"), true);
     });
 
-    it("kismi eslesmeyi surum saymaz", () => {
+    it("does not accept a partial match as the version", () => {
         strictEqual(reportedVersionMatches("2.11.10", "2.11.1"), false);
         strictEqual(reportedVersionMatches("12.11.1", "2.11.1"), false);
         strictEqual(reportedVersionMatches("", "2.11.1"), false);
@@ -134,10 +134,10 @@ describe("reportedVersionMatches", () => {
     });
 });
 
-describe("kurulu agac", () => {
+describe("installed tree", () => {
     // This is not a unit test but the proof that the lock describes the REAL tree.
     // entrypointSha256 had gone stale precisely because no such check existed.
-    it("depodaki config/install-lock.json gercek node_modules ile tutarlidir", async (t) => {
+    it("the repository config/install-lock.json matches the actual node_modules", async (t) => {
         const repoRoot = resolve(import.meta.dirname, "..", "..");
         let real: InstallLock;
         try {
@@ -145,7 +145,7 @@ describe("kurulu agac", () => {
             await access(join(repoRoot, "node_modules", PACKAGE, "package.json"));
         }
         catch {
-            t.skip("kurulu node_modules yok (temiz checkout)");
+            t.skip("no installed node_modules (clean checkout)");
             return;
         }
         const check = await verifyClodexPackageLock(real, repoRoot);
@@ -160,24 +160,24 @@ describe("kurulu agac", () => {
 describe("reportedBuildCommitMatches", () => {
     const output = "grok 1.0.13 (5e9a58528b76)";
 
-    it("kilitteki kisa commit'i tanir", () => {
+    it("recognizes the short commit in the lock", () => {
         strictEqual(reportedBuildCommitMatches(output, "5e9a58528b76"), true);
     });
 
-    it("kilit tam commit tasiyorsa kisa cikti yine eslesir", () => {
+    it("short output still matches when the lock carries the full commit", () => {
         strictEqual(reportedBuildCommitMatches(output, "5e9a58528b76aaaaaaaaaaaaaaaaaaaaaaaaaaaa"), true);
     });
 
     // NEGATIVE ARM: proof that the gate can throw. Same version, different build.
-    it("BASKA bir commit'i reddeder", () => {
+    it("rejects a DIFFERENT commit", () => {
         strictEqual(reportedBuildCommitMatches(output, "77cd7eb675ba"), false);
     });
 
-    it("commit tasimayan ciktiyi reddeder", () => {
+    it("rejects output that carries no commit", () => {
         strictEqual(reportedBuildCommitMatches("grok 1.0.13", "5e9a58528b76"), false);
     });
 
-    it("buyuk/kucuk harf farkini yok sayar", () => {
+    it("ignores case differences", () => {
         strictEqual(reportedBuildCommitMatches(output, "5E9A58528B76"), true);
     });
 });
@@ -189,7 +189,7 @@ describe("sideProviderInstallDrift", () => {
     const check = (component: "node" | "claude" | "claude-shadow" | "clodex" | "grok" | "gemini" | "antigravity", status: "ok" | "missing" | "drift", detailCode = "x") =>
         ({ component, expectedVersion: "1", status, detailCode });
 
-    it("yan saglayici ihlalini saglayici adiyla dondurur, firlatmaz", () => {
+    it("returns side-provider drift with the provider name without throwing", () => {
         const drift = sideProviderInstallDrift(
             [check("claude", "ok"), check("antigravity", "drift", "locked_manifest_hash_mismatch"), check("grok", "ok")],
             ["antigravity", "grok"],
@@ -197,14 +197,14 @@ describe("sideProviderInstallDrift", () => {
         deepStrictEqual(drift, [{ component: "antigravity", provider: "google", status: "drift", detailCode: "locked_manifest_hash_mismatch" }]);
     });
 
-    it("istenmeyen bileseni saymaz; temiz kurulumda bos doner", () => {
+    it("ignores an unrequested component; returns an empty list for a clean installation", () => {
         deepStrictEqual(sideProviderInstallDrift([check("grok", "drift")], ["antigravity"]), []);
         deepStrictEqual(sideProviderInstallDrift([check("grok", "ok"), check("antigravity", "ok")], ["grok", "antigravity"]), []);
     });
 
     // NEGATIVE ARM: a main-path component is NOT a side provider -- it is not softened
     // here, requireInstallChecks still throws. That is exactly what separates the two gates.
-    it("ana yol bilesenini (claude/clodex) asla yumusatmaz", () => {
+    it("never downgrades a main-path component failure (claude/clodex)", () => {
         deepStrictEqual(sideProviderInstallDrift([check("claude", "drift"), check("clodex", "missing")], ["claude", "clodex"]), []);
         throws(() => requireInstallChecks([check("claude", "drift")], ["claude"]), /Pinned installation verification failed: claude/u);
     });
@@ -215,16 +215,16 @@ describe("sideProviderInstallDrift", () => {
 // passed `npm run check` GREEN; the divergence only showed up as a 503 on a running
 // installation. 06-Altyapi/scripts/civi-surukleme-kontrolu.py measures the RELEASE, not the
 // repository -- so this gap fell within no other gate's scope.
-describe("depo kilidi <-> depo yerel yamasi", () => {
-    it("install-lock.json localPatchSha256 depodaki yama dosyasinin ozetidir", async () => {
+describe("repository lock <-> repository local patch", () => {
+    it("install-lock.json localPatchSha256 is the digest of the repository patch file", async () => {
         const { createHash } = await import("node:crypto");
         const repoRoot = resolve(import.meta.dirname, "..", "..");
         const real = JSON.parse(await readFile(join(repoRoot, "config", "install-lock.json"), "utf8")) as InstallLock;
         const bytes = await readFile(join(repoRoot, real.clodex.localPatch));
         const digest = createHash("sha256").update(bytes).digest("hex").toUpperCase();
-        strictEqual(digest, real.clodex.localPatchSha256.toUpperCase(), "kilit ile yama dosyasi ayrismis");
+        strictEqual(digest, real.clodex.localPatchSha256.toUpperCase(), "the lock and the patch file have diverged");
         // POSITIVE CONTROL: does the instrument actually discriminate? Empty output is not evidence.
         const mutated = createHash("sha256").update(Buffer.concat([bytes, Buffer.from("\n")])).digest("hex").toUpperCase();
-        strictEqual(mutated === real.clodex.localPatchSha256.toUpperCase(), false, "ozet degisiklige duyarsiz");
+        strictEqual(mutated === real.clodex.localPatchSha256.toUpperCase(), false, "the digest is insensitive to a change");
     });
 });
