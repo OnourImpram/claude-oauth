@@ -63,7 +63,11 @@ describe("runCaptured timeout", () => {
 
     it("bounds a SIGTERM-resistant child (Linux arm meaningful, Windows kill is terminal)", async (t) => {
         await using scratch = await mkdtempDisposable(join(tmpdir(), "captured-timeout-"));
-        const timeoutMs = 1_000;
+        // 3 s, not 1 s: under a loaded machine (2026-09-08, full gate beside three other
+        // processes) a 1 s deadline expired before the child had installed its handler, and
+        // the test measured the host's load instead of the escalation. The margin bounds the
+        // settle time after the deadline; the deadline itself needs startup slack.
+        const timeoutMs = 3_000;
         const terminationGraceMs = 100;
         const margin = 2_000;
         const script = "const fs = require('node:fs'); process.on('SIGTERM', () => fs.writeFileSync('term', 'handled')); fs.writeFileSync('ready', String(process.pid)); setInterval(() => {}, 100);";
