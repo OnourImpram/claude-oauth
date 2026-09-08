@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -139,7 +140,9 @@ for (const shell of process.platform === "win32" ? ["powershell", "sh"] : ["sh"]
                 const output = JSON.parse(result.stdout.trim());
                 const isRouter = routerArgs.includes(args);
                 deepStrictEqual(output.args, args[0] === "--hezarfen-entrypoint=claude" ? args.slice(1) : args);
-                strictEqual(resolve(output.cwd), resolve(scratch));
+                // CI 2026-09-08: the runner's TEMP is an 8.3 short path (RUNNER~1) while the child reports
+                // the long form; compare the canonical paths, not the spellings.
+                strictEqual(realpathSync.native(output.cwd), realpathSync.native(scratch));
                 deepStrictEqual(output.present, isRouter ? routingVariables : []);
                 strictEqual(output.id, isRouter ? id : undefined);
             }
