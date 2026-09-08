@@ -32,6 +32,7 @@ export interface AgentModelAdapterOptions {
 interface CompiledPrompt {
     readonly text: string;
     readonly inputTokenUpperBound: number;
+    readonly continuationText: string;
 }
 interface CompletionMetadata {
     readonly providerRequestId?: string;
@@ -57,6 +58,24 @@ function blockSummary(block: Record<string, unknown>): { type: string; mediaType
         : source["type"] === "url" ? undefined : Buffer.byteLength(JSON.stringify(block), "utf8");
     return { type, mediaType, ...(bytes === undefined ? {} : { bytes }),
         text: `[${type}: media_type=${mediaType}, bytes=${bytes ?? "unknown (URL source)"}]` };
+}
+
+function normalizeMessages(messages: readonly unknown[]): { index: number; role: string; content: unknown }[] {
+    return messages.map((message, index) => {
+        if (!isRecord(message)) {
+            throw new RouterError("invalid_request", `messages[${index}] must be an object.`, 400);
+        }
+        const role = message["role"];
+        if (typeof role !== "string" || !["user", "assistant", "system", "developer"].includes(role)) {
+            const roleShape = typeof role === "string" && /^[a-z_]{1,24}$/u.test(role) ? role : typeof role;
+            throw new RouterError("invalid_request", `messages[${index}] has unsupported role shape ${roleShape}.`, 400);
+        }
+        return { index, role, content: message["content"] };
+    });
+}
+
+function currentConversationMessage(messages: ReturnType<typeof normalizeMessages>) {
+    return messages.findLast((message) => message.role === "user" || message.role === "assistant");
 }
 
 // Text compilation keeps a payload-free description; live MCP results also carry images.
@@ -127,10 +146,10 @@ function anthropicTools(value: unknown): readonly AnthropicToolDefinition[] | un
  * "new session", not an error.
  */
 export function extractToolResults(messages: readonly unknown[]): readonly ToolResultDelivery[] {
-    const last = messages.at(-1);
-    if (!isRecord(last) || last["role"] !== "user" || !Array.isArray(last["content"])) return [];
+    const last = currentConversationMessage(normalizeMessages(messages));
+    if (last?.role !== "user" || !Array.isArray(last.content)) return [];
     const output: ToolResultDelivery[] = [];
-    for (const block of last["content"]) {
+    for (const block of last.content) {
         if (!isRecord(block) || block["type"] !== "tool_result") continue;
         const id = block["tool_use_id"];
         if (typeof id !== "string" || id === "") continue;
@@ -238,20 +257,11 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     const bindingContext = systemText === "" ? [] : [systemText];
     const messageContext: { readonly index: number; readonly role: string; readonly text: string }[] = [];
     const conversation: { readonly index: number; readonly role: string; readonly text: string; readonly blocks: readonly string[] }[] = [];
-    for (const [index, message] of messages.entries()) {
-        if (!isRecord(message)) {
-            throw new RouterError("invalid_request", `messages[${index}] must be an object.`, 400);
-        }
-        if (!["user", "assistant", "system", "developer"].includes(String(message["role"]))) {
-            const roleShape = typeof message["role"] === "string" && /^[a-z_]{1,24}$/u.test(message["role"])
-                ? message["role"]
-                : typeof message["role"];
-            throw new RouterError("invalid_request", `messages[${index}] has unsupported role shape ${roleShape}.`, 400);
-        }
-        const role = message["role"] as string;
+    const normalized = normalizeMessages(messages);
+    for (const { index, role, content } of normalized) {
         const blocks = allowToolBlocks
-            ? toleratedBlocks(message["content"], `messages[${index}].content`)
-            : textBlocks(message["content"], `messages[${index}].content`);
+            ? toleratedBlocks(content, `messages[${index}].content`)
+            : textBlocks(content, `messages[${index}].content`);
         const text = blocks.join("\n\n");
         if (role === "system" || role === "developer") {
             messageContext.push({ index, role, text });
@@ -260,7 +270,8 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
             conversation.push({ index, role, text, blocks });
         }
     }
-    const current = conversation.at(-1);
+    const currentMessage = currentConversationMessage(normalized);
+    const current = conversation.find((entry) => entry.index === currentMessage?.index);
     if (current?.role !== "user") {
         throw new RouterError("invalid_request", "Agent-readonly routes require the current user request as the final message.", 400);
     }
@@ -356,7 +367,16 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     if (bytes > maximumCompiledPromptBytes) {
         throw new RouterError("invalid_request", "Compiled agent prompt exceeds the local safety limit.", 413);
     }
-    return { text: prompt, inputTokenUpperBound: Math.max(1, bytes) };
+    const currentContent = currentMessage?.content;
+    const instruction = Array.isArray(currentContent)
+        ? toleratedBlocks(currentContent.filter((block: unknown) => !isRecord(block) || block["type"] !== "tool_result"), "continuation").join("\n\n")
+        : "";
+    const continuationText = [
+        ...(bindingContext.length === 0 ? [] : ["BINDING SYSTEM AND PROJECT CONTEXT:", ...bindingContext]),
+        ...(trailingSystemContext.length === 0 ? [] : ["SESSION CAPABILITY CONTEXT:", ...trailingSystemContext]),
+        ...(instruction.trim() === "" ? [] : ["CURRENT USER INSTRUCTION:", instruction]),
+    ].join("\n\n");
+    return { text: prompt, inputTokenUpperBound: Math.max(1, bytes), continuationText };
 }
 function localUsage(inputTokenUpperBound: number, output: string): Record<string, number> {
     return {
@@ -659,18 +679,16 @@ export class AgentModelAdapter implements ProviderAdapter {
             throw new RouterError("invalid_request", "Agent routes require a messages array.", 400);
         }
         const results = extractToolResults(messages);
-        // On a resume turn there is NO compiled prompt: the agent is already inside the
-        // loop. The input upper bound is taken from the body size, not invented.
-        const inputTokenUpperBound = results.length > 0
-            ? Math.max(1, request.body.length)
-            : compilePrompt(request, true).inputTokenUpperBound;
+        // Validate continuations through the same compiler before releasing any call.
+        const compiled = compilePrompt(request, true);
+        const inputTokenUpperBound = compiled.inputTokenUpperBound;
         const runTurn = async (): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a
             // running ACP turn would be the agent finishing on its own.
-            if (results.length > 0) return (await sessions.resume(results, request.signal)).outcome;
+            if (results.length > 0) return (await sessions.resume(results, request.signal, compiled.continuationText)).outcome;
             return (await sessions.begin(
-                compilePrompt(request, true).text,
+                compiled.text,
                 deriveMcpTools(anthropicTools(request.envelope.tools)),
                 request.model.upstreamModel,
                 request.signal,

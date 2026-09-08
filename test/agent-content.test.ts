@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import { AgentModelAdapter, extractToolResults } from "../src/adapters/agent-model.js";
 import type { AdapterRequest, ModelRecord } from "../src/domain/contracts.js";
@@ -83,4 +83,55 @@ it("N01: base64 screenshot crosses adapter, registry and MCP response with its e
             ], isError: true,
         } });
     } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+});
+
+for (const trailingSystem of [false, true]) {
+    it(`B03: continuation preserves session and all user instructions, trailing system=${trailingSystem}`, async () => {
+        let continued = false;
+        const h = harness(async (_options, result) => {
+            const content = (result as { result: { content: { text?: string }[] } }).result.content;
+            const text = content.map((block) => block.text ?? "").join("\n");
+            ok(text.includes("Stop; do not modify any files."));
+            ok(text.includes("Explain the result in Turkish."));
+            ok(text.indexOf("CURRENT USER INSTRUCTION") > text.indexOf("tool finished"));
+            if (trailingSystem) ok(text.includes("New session capability rule"));
+            continued = true;
+        });
+        try {
+            const id = await openCall(h.adapter);
+            const continuation = request([
+                { role: "user", content: [
+                    { type: "text", text: "Stop; do not modify any files." },
+                    { type: "tool_result", tool_use_id: id, content: [{ type: "text", text: "tool finished" }, imageBlock] },
+                    { type: "text", text: "Explain the result in Turkish." },
+                ] },
+                ...(trailingSystem ? [{ role: "system", content: "New session capability rule" }] : []),
+            ]);
+            const response = await h.adapter.send(continuation);
+            strictEqual(response.status, 200);
+            strictEqual(h.starts(), 1, "system records must not start a new agent");
+            strictEqual(continued, true, "the parked MCP call must receive the new instruction");
+            strictEqual(h.sessions.unmatchedResultCount, 0);
+        } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+    });
+}
+
+it("B03: continuation validates incompatible controls before releasing a parked call", async () => {
+    const h = harness();
+    try {
+        const id = await openCall(h.adapter);
+        const next = request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "done" }] }]);
+        await rejects(h.adapter.send({ ...next, envelope: { ...next.envelope, thinking: { type: "enabled", budget_tokens: 1000 } } }),
+            /Explicit Anthropic thinking budgets/u);
+        strictEqual(h.started()?.bridge.pendingCount, 1);
+        strictEqual(h.received(), undefined);
+    } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+});
+
+it("B03: old results are not resumed after a newer logical user turn", () => {
+    deepStrictEqual(extractToolResults([
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "old", content: "done" }] },
+        { role: "user", content: "new instruction" },
+        { role: "system", content: "catalogue" },
+    ]), []);
 });

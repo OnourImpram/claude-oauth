@@ -17,6 +17,11 @@ repair entries below record the defects that have since been closed.
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
 
+### Fixed: B03 continuation identity and instructions (2026-09-08)
+
+- Result extraction and compilation use the same normalized conversation record. Trailing system records no longer start a second agent.
+- Continuations pass compiler validation before any result is released. All accompanying user text and current system context travel in labelled MCP result text, alongside preserved images. Tests inspect the parked reply and assert a single agent start; this is transport evidence, not model-compliance evidence.
+
 ### Fixed: N01 tool-result media (2026-09-08)
 
 - Base64 screenshots survive the adapter, session registry and shared MCP response on xAI and Google. Unsupported blocks and compiled history retain deterministic type, media-type and size summaries. URL-source size is unknown.

@@ -445,7 +445,7 @@ export class AgentSessionRegistry {
      * An id nobody minted, or one whose session is gone, is an unmatched result
      * -- counted and reported, never swallowed (spec §7.3).
      */
-    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal): Promise<BeginResult> {
+    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = ""): Promise<BeginResult> {
         if (signal?.aborted) {
             throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);
         }
@@ -477,7 +477,16 @@ export class AgentSessionRegistry {
                 continue;
             }
             this.#calls.delete(result.toolUseId);
-            if (session.bridge.deliverToolResult(result.toolUseId, result.content, result.isError, result.contentBlocks)) {
+            // ACP is still inside session/prompt. Its pending MCP reply is the transport
+            // available now; label operator context separately from tool output and send
+            // it on every reply so concurrently waiting calls cannot miss it.
+            // Source: https://agentclientprotocol.com/protocol/prompt-turn
+            const context = continuationText === "" ? "" : `\n\nROUTER CONTINUATION CONTEXT (instructions for the active turn):\n${continuationText}`;
+            const contentBlocks = result.contentBlocks === undefined ? undefined : [
+                ...result.contentBlocks,
+                ...(context === "" ? [] : [{ type: "text" as const, text: context }]),
+            ];
+            if (session.bridge.deliverToolResult(result.toolUseId, result.content + context, result.isError, contentBlocks)) {
                 delivered += 1;
             }
         }
