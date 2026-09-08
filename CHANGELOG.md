@@ -17,6 +17,13 @@ repair entries below record the defects that have since been closed.
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
 
+### Fixed: P01 install lock paths on POSIX (2026-09-08)
+
+- `expandLockedPath` resolves the Windows variables the lock is written with to their POSIX
+  equivalents (`HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`) and converts separators, so `doctor`
+  runs on Linux and reports each component instead of aborting on the first path. Windows
+  behaviour unchanged (negative arm in the test). The lock still pins only Windows binaries.
+
 ### Fixed: N05 capsule listener authentication (2026-09-08)
 
 - The OpenAI capsule runs a generated copy of pinned Clodex 2.11.1. The original dependency
