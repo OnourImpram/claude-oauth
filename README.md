@@ -1,6 +1,6 @@
 # claude-oauth
 
-Run other models inside Claude Code over their own OAuth sessions — **without replacing the native
+Run other models inside Claude Code over their own OAuth sessions, **without replacing the native
 Claude path.** `claude` stays native. `claude-oauth` opens the router.
 
 > **Status: pre-release. Not ready to use, and deliberately not pretending otherwise.**
@@ -18,16 +18,16 @@ skills, MCP servers, permission prompts. A model router that only forwards text 
 into a chat box.
 
 The goal here is the opposite: **every model reachable through the router should be able to use the
-same Claude Code surface** — the `Agent` tool, skills, MCP servers such as Playwright, file
+same Claude Code surface**, the `Agent` tool, skills, MCP servers such as Playwright, file
 editing under the same permission rules. Since 2026-09-08 the Google lane reaches that surface for real
 (G01 below, with a live receipt). The native permission paths in Google and xAI are now constrained
 (B01 below); permission inheritance through a separate `Agent` child session remains unmeasured.
 
 Two audiences, both intentional:
 
-1. **Developers** — switch models mid-workflow, run several in parallel, cross-check one against
+1. **Developers:** switch models mid-workflow, run several in parallel, cross-check one against
    another, inside the tool they already use.
-2. **Students** — extend a free provider tier (for example Google's student Gemini offer, subject to
+2. **Students:** extend a free provider tier (for example Google's student Gemini offer, subject to
    Google's own terms) into Claude Code, so the harness itself is learnable without a paid plan.
 
 This is meant to grow the harness's adoption, not to route around anyone. The native path is
@@ -36,7 +36,7 @@ own endpoint.
 
 ## How it sits inside Claude Code
 
-`claude-oauth` starts a **real Claude Code process** — the same binary you already have — and
+`claude-oauth` starts a **real Claude Code process**, the same binary you already have, and
 points that process's upstream endpoint at a loopback router it runs alongside. Claude Code keeps
 its own tools, permission prompts, skills and MCP configuration; only the model behind the
 `/v1/messages` call changes. When the selected model is a Claude model, the router forwards to
@@ -54,11 +54,11 @@ claude-oauth  ─▶  Claude Code process  ─▶  loopback router  ─┬─▶
 | Lane | What actually runs | Whose software | Pinned in `config/install-lock.json` |
 |---|---|---|---|
 | Google | Antigravity CLI `agy`, headless, one process per call | Google | `antigravity.version` |
-| xAI | `grok` over ACP (Agent Client Protocol), long-lived sessions — at most four live at once — so a tool loop can cross Claude Code's per-turn HTTP requests | xAI | `grok.version` |
-| OpenAI | **Clodex** (`@bman654/clodex`), a third-party bridge, run as a local capsule with the `openai-oauth` provider | [bman654/clodex](https://github.com/bman654/clodex), MIT-licensed npm package, with local patches in `config/` | `clodex.version`, `clodex.localPatchSha256` |
+| xAI | `grok` over ACP (Agent Client Protocol), long-lived sessions, at most four live at once, so a tool loop can cross Claude Code's per-turn HTTP requests | xAI | `grok.version` |
+| OpenAI | **Clodex** (`@bman654/clodex`), a third-party bridge, run as a local capsule with the `openai-oauth` provider | [bman654/clodex](https://github.com/bman654/clodex), MIT-licensed npm package, with repository-owned shadow and capsule patches | `clodex.version`, `clodex.localPatchSha256`, `clodex.capsuleEntrypointSha256` |
 
 Each lane authenticates as **you**, on your own plan: the Google and xAI lanes run those vendors'
-own CLIs; the OpenAI lane does **not** run OpenAI's `codex` CLI — it runs Clodex, which speaks to
+own CLIs; the OpenAI lane does **not** run OpenAI's `codex` CLI, it runs Clodex, which speaks to
 OpenAI over your ChatGPT/Codex-plan OAuth session. Earlier drafts of this project described all
 three lanes as "the provider's own official CLI"; that was wrong for OpenAI and is corrected here.
 
@@ -73,7 +73,7 @@ three lanes as "the provider's own official CLI"; that was wrong for OpenAI and 
   routed model (`gemini-delege`, `grok-delege`, `sol-delege`, …) so a Claude model can hand a task
   to another model through the `Agent` tool. Today the Google and xAI delegates run with
   `tools: []` and a single turn, and the OpenAI delegates with a fixed list of six built-in tools
-  and no MCP or `Skill` (N03) — they answer, they do not drive the harness.
+  and no MCP or `Skill` (N03), they answer, they do not drive the harness.
 
 Switching back to a Claude model in the same session is the same `/model` command. There is no
 mode to remember: the native `claude` command never enters any of this.
@@ -81,9 +81,9 @@ mode to remember: the native `claude` command never enters any of this.
 ## What it does not do
 
 - It does **not** modify, patch, or proxy the native Claude path. `claude` talks to
-  `api.anthropic.com` as it did before installation — that is the claim measured below.
+  `api.anthropic.com` as it did before installation, that is the claim measured below.
 - It does **not** bypass any provider's authentication. Each lane uses your own account's OAuth
-  session — through the vendor's CLI for Google and xAI, through Clodex for OpenAI.
+  session, through the vendor's CLI for Google and xAI, through Clodex for OpenAI.
 - It does **not** grant entitlements. If a provider's plan does not include a model, the router
   cannot conjure it. Quota exhaustion surfaces as quota exhaustion.
 
@@ -113,24 +113,24 @@ repository-verified guarantee. Closing that gap is a release blocker (B05).
 
 These are open defects, found by review and independent measurement. They are listed because a
 pre-release README that hides them is worthless. Ids are stable across this file,
-`SECURITY.md`, `CHANGELOG.md` and the project page. Repaired items are in the changelog, not here.
+`SECURITY.md`, `CHANGELOG.md` and the project page. Repair status is marked in the rows below and recorded in the changelog.
 
 | Id | Severity | What is wrong |
 |---|---|---|
 | B01 | **Native paths repaired; Agent NOT_RUN** | **Google direct route: PASS, 2026-09-08.** Call-scoped settings allow only the bridge MCP server and deny native `write_file`, `command`, `browser`, `execute_url`, and `unsandboxed` actions. Live Claude Code Write denial leaves no file; a native `write_to_file` fallback is also denied, while MCP still parks and returns the denial. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. `Agent` permission inheritance: **NOT_RUN (requires a separate Agent child-session harness)**. |
-| ~~B02~~ | ~~High~~ | **Repaired 2026-09-07 (`b5caf0e`).** A `role:"system"` message arriving after the last user message was dropped silently while compiling the request — measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own `SESSION CAPABILITY CONTEXT` section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface. |
+| ~~B02~~ | ~~High~~ | **Repaired 2026-09-07 (`b5caf0e`).** A `role:"system"` message arriving after the last user message was dropped silently while compiling the request, measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own `SESSION CAPABILITY CONTEXT` section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface. |
 | B03 | High | An xAI continuation request can lose both the session id and the new user instruction. |
 | B04 | High | The workspace write check does not write the file it checks; a path race is open. |
 | B05 | High | This tree contains no launcher shim, so the native/router separation cannot be verified from the repository. |
 | B06 | High | The long-context advertisement is written into `max_input_tokens`, a protocol capacity contract, above the pinned snapshot value. A client obeying the advertised limit may build a request the transport does not accept. Unproven either way. |
 | ~~G01~~ | ~~High~~ | **Repaired 2026-09-08.** The Google lane now carries the same tool loop the xAI lane has. The objection that kept it away was that `agy mcp add` writes the session nonce into the operator's persistent config; the lane instead runs inside a **call-scoped configuration home** (`USERPROFILE` redirected, identity files hard-linked, never copied), so the operator's own `mcp_config.json` is never opened for writing. Live receipt: the router logged `agent_tool_call_parked`, Claude Code executed the MCP tool 213 ms later, one `tool_use` block crossed the stream, and the model returned a string it could not otherwise know. NOT claimed: a multi-step loop, or the `Agent` sub-loop. |
-| G02 | High | A non-empty `.mcp.json` in the project root — Claude Code's standard project MCP file — makes the xAI lane refuse to start (503). Fail-closed, but it is a denial of the lane in any repository that has one. |
-| ~~G03~~ | ~~High~~ | **Repaired 2026-09-08.** A session parked on a tool call set `running = false` and so looked idle; at the cap the oldest such session was cancelled mid-loop. The naive guard reopens the process leak this reclaim exists to close, because an unaddressable session IS a parked one — so the discriminator is age: a 60 s grace window. Negative control on both edges: removing the guard fails the new arm, making it unconditional fails the old one. |
-| G04–G08 | High / suspected | `thinking`/`image`/`document` blocks in history are rejected with 422 on the agent lanes; the last text block of a multi-block user message is taken as "the request"; delegate agents get no tools; the live xAI MCP handshake has not been shown from this tree. |
+| G02 | High | A non-empty `.mcp.json` in the project root, Claude Code's standard project MCP file, makes the xAI lane refuse to start (503). Fail-closed, but it is a denial of the lane in any repository that has one. |
+| ~~G03~~ | ~~High~~ | **Repaired 2026-09-08.** A session parked on a tool call set `running = false` and so looked idle; at the cap the oldest such session was cancelled mid-loop. The naive guard reopens the process leak this reclaim exists to close, because an unaddressable session IS a parked one, so the discriminator is age: a 60 s grace window. Negative control on both edges: removing the guard fails the new arm, making it unconditional fails the old one. |
+| G04 to G08 | High / suspected | `thinking`/`image`/`document` blocks in history are rejected with 422 on the agent lanes; the last text block of a multi-block user message is taken as "the request"; delegate agents get no tools; the live xAI MCP handshake has not been shown from this tree. |
 | N01 | High | Image blocks inside a tool result are reduced to an empty string, so a Playwright screenshot returns as a successful, empty tool result. |
 | N03 | High | Generated `*-delege` agents carry `tools: []` and `maxTurns: 1`; a user definition that widens them is rejected. |
 | N04 | High | A changed tool catalogue on a continuation request does not reach the live MCP session. |
-| N05 | High | The OpenAI capsule's own loopback port does not enforce the transport nonce; a local process could reach it without going through the router. |
+| ~~N05~~ | ~~High~~ | **Repaired 2026-09-08.** The capsule runs a hash-pinned patched copy of Clodex and receives its session nonce only through the child environment. Measured with an anonymous scratch home, missing/wrong/correct `x-api-key`: catalog and health **401/401/200**, malformed JSON messages **401/401/400**. Empty nonce, missing patch anchors and patched hash drift prevent startup. |
 | N06 | Medium | On POSIX, a helper that ignores SIGTERM keeps the timeout waiting; there is no escalation to SIGKILL. Unmeasured on Linux. |
 
 B01's measured Google native-write bypass is closed. The live check covers direct routing with
@@ -165,7 +165,7 @@ several of the findings above.
 What you **cannot** do from this tree yet: install it as the maintainer runs it. There is no
 launcher shim (B05), no release builder documented, and the install lock pins binaries at
 machine-specific Windows locations. `node dist/src/cli.js doctor` will tell you, component by
-component, what it cannot find — that is the intended behaviour, not a bug to report.
+component, what it cannot find, that is the intended behaviour, not a bug to report.
 
 ## Contributing
 
@@ -179,7 +179,7 @@ report a leak by location and type, never by value. Anything exploitable goes to
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 Apache-2.0 was chosen over MIT for its explicit patent grant and its `NOTICE` mechanics: this
 project integrates several vendors' client software and a third-party bridge, and downstream

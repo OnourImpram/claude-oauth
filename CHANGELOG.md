@@ -11,11 +11,23 @@ This is the first version made readable outside the maintainer's machine. It is 
 usable release**: the open defects listed in the README under *Known gaps* — B01 (permission
 boundary not applied to Google/xAI subagents), B02 (trailing system message dropped), B05
 (launcher shim not in this tree), G01 (Google lane not connected to the Claude Code tool
-surface), N01 (image tool results reduced to empty strings), N05 (OpenAI capsule port does not
-enforce the nonce) among them — are why. Nothing below closes any of those.
+surface), N01 (image tool results reduced to empty strings) among them — are why. Subsequent
+repair entries below record the defects that have since been closed.
 
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
+
+### Fixed: N05 capsule listener authentication (2026-09-08)
+
+- The OpenAI capsule runs a generated copy of pinned Clodex 2.11.1. The original dependency
+  stays unchanged. Unique patch anchors and a separate `capsuleEntrypointSha256` lock gate
+  reject drift before the child starts. Copies are removed at shutdown or startup failure.
+- Local quick mode takes its password only from the child environment and refuses a missing
+  or empty nonce. Health, startup polling and readiness use the same session authentication.
+- Anonymous scratch-home tests measure missing/wrong/correct headers: catalog and health
+  401/401/200; malformed JSON messages 401/401/400. No live provider credentials are used.
+- `node scripts/test-n05-mutations.mjs` runs the full suite against removed authorization,
+  empty-nonce and patched-hash guards, then restores source and lock bytes from memory.
 
 ### Fixed — diagnostics channel (Antigravity lane)
 
