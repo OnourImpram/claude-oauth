@@ -1,3 +1,4 @@
+import { SUPERVISOR_DETAIL_CODE_LIMIT } from "../domain/contracts.js";
 import { createServer, createConnection, type Socket } from "node:net";
 import { once } from "node:events";
 import { readdir } from "node:fs/promises";
@@ -156,7 +157,7 @@ function parseSupervisorStatus(value: unknown): SupervisorStatus {
             typeof provider["oauthReady"] !== "boolean" ||
             typeof provider["adapterReady"] !== "boolean" ||
             (provider["detailCode"] !== undefined &&
-                (typeof provider["detailCode"] !== "string" || provider["detailCode"].length > 128))) {
+                (typeof provider["detailCode"] !== "string" || provider["detailCode"].length > SUPERVISOR_DETAIL_CODE_LIMIT))) {
             throw new Error("invalid supervisor provider status");
         }
         return {

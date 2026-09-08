@@ -1,3 +1,4 @@
+import { SUPERVISOR_DETAIL_CODE_LIMIT } from "./contracts.js";
 import type { ModelRecord, ProviderModelRecord, ProviderReadiness } from "./contracts.js";
 export const OPENAI_CONTEXT_WINDOW_TOKENS = 1_050_000;
 export const OPENAI_MAXIMUM_OUTPUT_TOKENS = 128_000;
@@ -298,10 +299,26 @@ export function openAiSnapshotRouteDrift(models: readonly ModelRecord[], catalog
 export function clodexCatalogDriftDetailCode(drift: readonly OpenAiSnapshotRouteDrift[]): string {
     if (drift.length === 0)
         return "clodex_session_catalog_drift";
-    const detail = drift
-        .map((entry) => `${entry.id}=live${entry.liveContextWindow ?? "absent"}_snapshot${entry.snapshotContextWindow ?? "absent"}`)
-        .join(",");
-    return `clodex_session_catalog_drift:${detail}`;
+    const prefix = "clodex_session_catalog_drift:";
+    const parts = drift
+        .map((entry) => `${entry.id}=live${entry.liveContextWindow ?? "absent"}_snapshot${entry.snapshotContextWindow ?? "absent"}`);
+    // The code has to survive the IPC contract, so it is built up to the bound rather
+    // than assembled and then rejected. What does not fit is counted, not dropped
+    // silently: "+2 more" is a smaller loss than a status that never arrives.
+    const kept: string[] = [];
+    let used = prefix.length;
+    for (const part of parts) {
+        const cost = part.length + (kept.length === 0 ? 0 : 1);
+        const remainder = parts.length - kept.length - 1;
+        const suffix = remainder > 0 ? `,+${remainder}_more`.length : 0;
+        if (used + cost + suffix > SUPERVISOR_DETAIL_CODE_LIMIT)
+            break;
+        used += cost;
+        kept.push(part);
+    }
+    const dropped = parts.length - kept.length;
+    const detail = dropped === 0 ? kept.join(",") : [...kept, `+${dropped}_more`].join(",");
+    return `${prefix}${detail}`;
 }
 export const OPENAI_CATALOG_DRIFT_REMEDY = "FIX: claude-oauth models refresh -- the OpenAI lane stays closed until this RUN succeeds. If the live count differs from the lock, first set config/install-lock.json claudeShadow.openAiContextWindow to the measured count, then run refresh AGAIN (if the first refresh hits the shrink gate with 409, no snapshot is written).";
 export function openAiCatalogDriftReadiness(models: readonly ModelRecord[], catalog: readonly ProviderModelRecord[]): ProviderReadiness {

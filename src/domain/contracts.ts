@@ -18,6 +18,15 @@ export const ROUTER_ERROR_CODES = [
     "session_auth_required",
 ] as const;
 export type RouterErrorCode = (typeof ROUTER_ERROR_CODES)[number];
+// The supervisor IPC reader rejects a longer detailCode, and rejecting one field
+// discards the WHOLE status: a running session then disappears from discovery. The
+// bound lived only in the reader, so the producer was free to grow past it and did --
+// a real catalog drift produced ~187 characters against a 128 limit. Raising the
+// bound to 256 keeps the older, tested promise that EVERY drifting row is named --
+// two contracts collided and the informative one won, with truncation left as the
+// backstop for an absurd number of rows. It is one exported number now, referenced by
+// both sides, and a test pins it: the sides can no longer drift apart in silence.
+export const SUPERVISOR_DETAIL_CODE_LIMIT = 256;
 export type Capability = "messages" | "streaming" | "tools" | "vision" | "thinking";
 export const MODEL_EXECUTION_MODES = ["native-message-loop", "agent-readonly"] as const;
 export type ModelExecutionMode = (typeof MODEL_EXECUTION_MODES)[number];
