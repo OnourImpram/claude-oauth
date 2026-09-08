@@ -21,7 +21,10 @@ describe("doctor with the native binary missing", () => {
         let stderr = "";
         child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
         child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
-        const code = await new Promise<number>((resolveCode) => child.once("close", (value) => resolveCode(value ?? -1)));
+        const code = await new Promise<number>((resolveCode, rejectCode) => {
+            child.once("error", rejectCode);
+            child.once("close", (value) => resolveCode(value ?? -1));
+        });
         const combined = `${stdout}\n${stderr}`;
         strictEqual(combined.includes("cli_fatal"), false, `doctor died: ${combined.slice(0, 400)}`);
         ok(/"component":\s*"claude"/u.test(combined), "the claude component is reported");
