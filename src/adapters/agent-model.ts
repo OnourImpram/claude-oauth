@@ -111,7 +111,7 @@ function toolResultBlocks(value: unknown): readonly McpToolResultContent[] | und
             ...(summary.bytes === undefined ? {} : { contentBytes: summary.bytes }) });
         const source = isRecord(record["source"]) ? record["source"] : record;
         if (record["type"] === "image" && (source["type"] === "base64" || source === record) &&
-            typeof source["data"] === "string" && summary.mediaType.startsWith("image/")) {
+            typeof source["data"] === "string" && /^image\//iu.test(summary.mediaType)) {
             parts.push({ type: "image", data: source["data"], mimeType: summary.mediaType });
         }
     }

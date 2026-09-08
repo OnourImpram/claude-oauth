@@ -198,19 +198,21 @@ it("G04: the session lane and token counter accept mixed legacy history", async 
     } finally { await h.sessions.closeAllAndWait("test cleanup"); }
 });
 
-it("N01: native MCP images retain their payload on the live bridge", async () => {
-    const h = harness();
-    try {
-        const id = await openCall(h.adapter);
-        await h.adapter.send(request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id,
-            content: [{ type: "image", mimeType: "image/png", data: "AQID" }],
-        }] }]));
-        deepStrictEqual(h.received(), { jsonrpc: "2.0", id: 1, result: { isError: false, content: [
-            { type: "text", text: "[image: media_type=image/png, bytes=3]" },
-            { type: "image", mimeType: "image/png", data: "AQID" },
-        ] } });
-    } finally { await h.sessions.closeAllAndWait("test cleanup"); }
-});
+for (const mimeType of ["image/png", "IMAGE/PNG"]) {
+    it(`N01: native MCP images retain their payload on the live bridge (${mimeType})`, async () => {
+        const h = harness();
+        try {
+            const id = await openCall(h.adapter);
+            await h.adapter.send(request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id,
+                content: [{ type: "image", mimeType, data: "AQID" }],
+            }] }]));
+            deepStrictEqual(h.received(), { jsonrpc: "2.0", id: 1, result: { isError: false, content: [
+                { type: "text", text: `[image: media_type=${mimeType}, bytes=3]` },
+                { type: "image", mimeType, data: "AQID" },
+            ] } });
+        } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+    });
+}
 
 it("N01: embedded resources report known MIME type and payload bytes", () => {
     for (const resource of [

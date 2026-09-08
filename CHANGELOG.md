@@ -46,7 +46,7 @@ passes and repaired where a repair was narrow enough to carry its own regression
 ### Fixed: N01 tool-result media (2026-09-08)
 
 - Base64 screenshots survive the adapter, session registry and shared MCP response on xAI and Google. Unsupported blocks and compiled history retain deterministic type, media-type and size summaries. URL-source size is unknown.
-- Review follow-up: native MCP image blocks retain their payload too; embedded resource summaries use the known MIME type and decoded blob or UTF-8 text size. Separate red/green and full-suite mutation controls cover both formats.
+- Review follow-up: native MCP image blocks retain their payload too, including uppercase MIME types; embedded resource summaries use the known MIME type and decoded blob or UTF-8 text size. Separate red/green and full-suite mutation controls cover both formats and MIME casing.
 - Image metadata reaches the production log without payloads. Reproduction tests fail with the repair removed; live provider image interpretation is NOT_RUN because no vision task was submitted.
 
 ### Fixed: N05 capsule listener authentication (2026-09-08)
