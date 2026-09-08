@@ -83,8 +83,8 @@ model router that only forwards text turns that harness into a chat box. The goa
 opposite: **every model reachable through the router should be able to use the same Claude Code
 surface**, the `Agent` tool, skills, MCP servers such as Playwright, file editing under the same
 permission rules. Since 2026-09-08 the Google lane reaches that surface for real (G01 below, with a
-live receipt). The native permission paths in Google and xAI are now constrained (B01 below);
-permission inheritance through a separate `Agent` child session remains unmeasured.
+live receipt). The native permission paths in Google and xAI are constrained, and permission
+inheritance through a separate `Agent` child session was measured live the same day (B01 below).
 
 ## How it sits inside Claude Code
 
