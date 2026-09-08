@@ -129,9 +129,14 @@ describe("antigravity failure detail -- the diagnostic channel does not leak", (
     });
 
     it("a Bearer VALUE is redacted, not just the word Bearer", async () => {
+        // No field name in front of it on purpose. The first version of this arm wrote
+        // "Authorization: Bearer ...", which the named-field rule redacts on its own --
+        // so deleting the Bearer rule outright killed no test. An arm that passes
+        // because a different rule caught the value measures that other rule.
         const value = "Zq".repeat(12);
-        const message = await redactedMessage(`Authorization: Bearer ${value} rejected upstream`);
+        const message = await redactedMessage(`retrying with Bearer ${value} produced nothing`);
         ok(!message.includes(value), "the token stood while only the scheme word was redacted");
+        ok(message.includes("Bearer"), "the scheme word is diagnosis, not secret; it should survive");
     });
 
     it("a named field's value is redacted to the end of the line, spaces included", async () => {
@@ -279,6 +284,42 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
             stderr: "",
         });
         strictEqual(error.code, "provider_tool_permission_denied");
+    });
+
+    it("allowEdits decides the child's actual permission flags -- and nothing else did", async () => {
+        // Found by the mutation control, not by reading: replacing
+        // `options.allowEdits === true` in the processArguments call with `false`
+        // killed no test at all. The flag that decides whether the child may edit
+        // files and skip permission prompts was measured by nothing.
+        const seen: string[][] = [];
+        for (const allowEdits of [false, true]) {
+            const home = mkdtempSync(join(tmpdir(), "agy-detail-args-"));
+            try {
+                await runAntigravityHeadless({
+                    binary: "agy.exe",
+                    cwd: home,
+                    home,
+                    allowEdits,
+                    prompt: "Reply with exactly: OK",
+                    model: "gemini-3.8-flash-high",
+                    environment: { PATH: "C:\\Windows", USERPROFILE: home },
+                    processRunner: async (request) => {
+                        seen.push([...request.arguments]);
+                        return { exitCode: 0, stdout: success("OK"), stderr: "" };
+                    },
+                });
+            }
+            finally {
+                rmSync(home, { recursive: true, force: true });
+            }
+        }
+        const [planned, editing] = seen;
+        ok(planned?.includes("plan"), "the delegation lane must stay in plan mode");
+        ok(planned?.includes("--sandbox"), "the delegation lane must stay sandboxed");
+        ok(!planned?.includes("--dangerously-skip-permissions"), "plan mode must not skip permissions");
+        ok(editing?.includes("accept-edits"), "an edit-enabled lane must reach accept-edits mode");
+        ok(editing?.includes("--dangerously-skip-permissions"), "an edit-enabled lane must carry its own flag");
+        ok(!editing?.includes("--sandbox"), "accept-edits and --sandbox must not be sent together");
     });
 
     it("negative arm: a non-empty response still succeeds", async () => {
