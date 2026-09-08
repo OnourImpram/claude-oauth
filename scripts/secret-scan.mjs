@@ -45,7 +45,7 @@ const RULES = [
 const HASH_SHAPED = /^(?:[a-f0-9]{64}|sha(?:256|512)-[A-Za-z0-9+/=]{20,})$/;
 
 const ACCEPTED = [
-  [/^config\/install-lock\.json$/, HASH_SHAPED, "surum sabitleme: sha256 hex ve npm SRI -- ikisi de acik artefakt ozeti, sir degil"],
+  [/^config\/install-lock\.json$/, HASH_SHAPED, "version pinning: sha256 hex and npm SRI -- both are public artifact digests, not secrets"],
 ];
 
 function isAccepted(relativePath, matchedText) {
@@ -94,7 +94,7 @@ if (selfCheck) {
   const hits = scanText(canary);
   const rules = new Set(hits.map((hit) => hit.rule));
   const ok = rules.has("openai_api_key") && rules.has("xai_api_key");
-  console.log(`ozdenetim: sentetik kanarya ${ok ? "YAKALANDI" : "KACIRILDI"} (${[...rules].join(", ") || "hicbir kural atesle" + "medi"})`);
+  console.log(`self-check: synthetic canary ${ok ? "CAUGHT" : "MISSED"} (${[...rules].join(", ") || "no rule fire" + "d"})`);
 
   // The acceptance arm. Until 2026-09-07 the install-lock exemption was keyed on the
   // FILE, so it covered lines its stated reason did not describe; it is now keyed on
@@ -104,19 +104,19 @@ if (selfCheck) {
   const digest = "a".repeat(64);
   const credential = ["sk-", "C".repeat(32)].join("");
   const arms = [
-    ["hash-shaped deger install-lock'ta KABUL", isAccepted("config/install-lock.json", digest) === true],
-    ["sir-sekilli deger install-lock'ta RED", isAccepted("config/install-lock.json", credential) === false],
-    ["ayni digest baska dosyada RED", isAccepted("config/ordinary.json", digest) === false],
+    ["hash-shaped value in install-lock ACCEPTED", isAccepted("config/install-lock.json", digest) === true],
+    ["secret-shaped value in install-lock REJECTED", isAccepted("config/install-lock.json", credential) === false],
+    ["the same digest in another file REJECTED", isAccepted("config/ordinary.json", digest) === false],
   ];
   let armFailed = 0;
   for (const [name, pass] of arms) {
-    console.log(`  ${pass ? "GECTI" : "DUSTU"}  ${name}`);
+    console.log(`  ${pass ? "OK" : "FAILED"}  ${name}`);
     if (!pass) armFailed += 1;
   }
   // The JSON field shape the scan used to miss entirely.
   const jsonShaped = scanText(`{"refresh_token": "${"D".repeat(28)}"}`);
   const jsonCaught = jsonShaped.some((hit) => hit.rule === "inline_credential_assignment");
-  console.log(`  ${jsonCaught ? "GECTI" : "DUSTU"}  JSON tirnakli alan adi YAKALANIR`);
+  console.log(`  ${jsonCaught ? "OK" : "FAILED"}  JSON quoted field name IS CAUGHT`);
   if (!jsonCaught) armFailed += 1;
 
   process.exit(ok && armFailed === 0 ? 0 : 1);
@@ -135,12 +135,12 @@ for (const file of files) {
   }
 }
 
-console.log(`taranan dosya   : ${files.length}`);
-console.log(`kural sayisi    : ${RULES.length}`);
-console.log(`kabul edilen    : ${acceptedCount}`);
-console.log(`BULGU           : ${findings.length}`);
+console.log(`files scanned   : ${files.length}`);
+console.log(`rule count      : ${RULES.length}`);
+console.log(`accepted        : ${acceptedCount}`);
+console.log(`FINDINGS        : ${findings.length}`);
 if (findings.length > 0) {
-  console.log("\n-- bulgular (KONUM ve TUR; deger basilmaz) --");
+  console.log("\n-- findings (LOCATION and TYPE; value not printed) --");
   for (const finding of findings) console.log(`  ${finding.path}:${finding.line}  [${finding.rule}]`);
 }
 process.exit(findings.length > 0 ? 1 : 0);

@@ -12,36 +12,36 @@ const SCAN = ["src", "test", "scripts"];
 
 const RULES = [
   {
-    id: "ham-hata-dokumu",
+    id: "raw-error-dump",
     // cli.ts once did console.error("!!! FATAL ERROR !!!", caught). Error MESSAGES can
     // contain URLs carrying the session nonce; use structured logging instead.
     pattern: /console\.(?:error|log|warn)\s*\([^)]*\b(?:caught|error|err)\b\s*\)/g,
-    message: "ham hata nesnesi konsola basiliyor; writeSafeLog kullan (mesaj sizdirabilir)",
-    kanarya: 'console.error("bir sey oldu", caught)',
+    message: "raw error object printed to console; use writeSafeLog (the message may leak data)",
+    canary: 'console.error("something happened", caught)',
   },
   {
-    id: "yoruma-alinmis-kapi",
+    id: "commented-out-gate",
     // The verifyShadowModelSurface and patch-proof throws stayed commented out for
     // months and nothing reported it.
     pattern: /^\s*\/\/\s*throw new RouterError/gm,
-    message: "yorum satirina alinmis throw: kapi sessizce devre disi",
-    kanarya: "    // throw new RouterError(\"x\", \"y\", 503);",
+    message: "commented-out throw: gate silently disabled",
+    canary: "    // throw new RouterError(\"x\", \"y\", 503);",
   },
   {
-    id: "korumasiz-spawn",
+    id: "unguarded-spawn",
     // A spawn failure is an asynchronous 'error' event; with no listener it DROPS THE PROCESS.
     pattern: /\bspawn\s*\(/g,
-    message: "spawn: ayni modulde spawnFailureGuard ya da child.once(\"error\") olmali",
+    message: "spawn: the same module must contain spawnFailureGuard or child.once(\"error\")",
     check: (source) => !/spawnFailureGuard|\.once\("error"/.test(source),
-    kanarya: "const child = spawn(binary, args, options);",
+    canary: "const child = spawn(binary, args, options);",
   },
   {
-    id: "kosulsuz-ok-donduren-dogrulayici",
+    id: "unconditionally-ok-validator",
     // verifyClodexPackageLock was a stub returning status:"ok" unconditionally; the field
     // was never measured.
     pattern: /function\s+verify[A-Z]\w*\([^)]*\)\s*:\s*Promise<InstallCheck>\s*\{\s*return\s*\{[^}]*status:\s*"ok"/g,
-    message: "dogrulayici kosulsuz ok donuyor: stub kapi",
-    kanarya: 'function verifyThing(lock: InstallLock): Promise<InstallCheck> { return { component: "x", status: "ok" };',
+    message: "validator unconditionally returns ok: stub gate",
+    canary: 'function verifyThing(lock: InstallLock): Promise<InstallCheck> { return { component: "x", status: "ok" };',
   },
 ];
 
@@ -78,31 +78,31 @@ function exemptionAccepted(lineText) {
 if (process.argv.includes("--ozdenetim")) {
   let failed = 0;
   const arm = (name, ok) => {
-    console.log(`  ${ok ? "GECTI" : "DUSTU"}  ${name}`);
+    console.log(`  ${ok ? "OK" : "FAILED"}  ${name}`);
     if (!ok) failed += 1;
   };
   for (const rule of RULES) {
     rule.pattern.lastIndex = 0;
-    const fires = (rule.check === undefined || rule.check(rule.kanarya)) && rule.pattern.test(rule.kanarya);
+    const fires = (rule.check === undefined || rule.check(rule.canary)) && rule.pattern.test(rule.canary);
     arm(rule.id, fires);
   }
   // Negative controls for the exemption format itself. Each arm is a shape that
   // used to silence a finding and must no longer.
-  arm("muafiyet: gerekceli yorum KABUL", exemptionAccepted('  foo(); // lint-izin: burada hata nesnesi degil yol basiliyor'));
-  arm("muafiyet: bos gerekce RED", !exemptionAccepted("  foo(); // lint-izin:"));
-  arm("muafiyet: tek kelimelik gerekce RED", !exemptionAccepted("  foo(); // lint-izin: ok"));
-  arm("muafiyet: dize icindeki etiket RED", !exemptionAccepted('  console.error("lint-izin: bu bir dize, yorum degil", caught)'));
+  arm("exemption: comment with a reason ACCEPTED", exemptionAccepted('  foo(); // lint-izin: this prints a path rather than an error object'));
+  arm("exemption: empty reason REJECTED", !exemptionAccepted("  foo(); // lint-izin:"));
+  arm("exemption: single-word reason REJECTED", !exemptionAccepted("  foo(); // lint-izin: ok"));
+  arm("exemption: marker inside a string REJECTED", !exemptionAccepted('  console.error("lint-izin: this is a string, not a comment", caught)'));
   // And for the comment blanking: a rule condition must not be satisfiable by a
   // comment that installs nothing.
-  arm("koruma: yorum icindeki spawnFailureGuard SAYILMAZ",
+  arm("guard: spawnFailureGuard inside a comment DOES NOT COUNT",
     !/spawnFailureGuard/.test(codeOnly("const c = spawn(x);\n// spawnFailureGuard\n")));
-  arm("koruma: gercek cagri SAYILIR",
+  arm("guard: an actual call COUNTS",
     /spawnFailureGuard/.test(codeOnly("const c = spawn(x);\nspawnFailureGuard(c);\n")));
-  arm("koruma: dize icindeki .once(\"error\") KORUNUR (dedektor kor edilmedi)",
+  arm("guard: .once(\"error\") inside the string IS PRESERVED (the detector is not blinded)",
     /\.once\("error"/.test(codeOnly('child.once("error", handler);')));
-  arm("bosaltma satir hizasini bozmaz",
-    codeOnly("a();\n/* iki\nsatir */\nb();").split("\n").length === "a();\n/* iki\nsatir */\nb();".split("\n").length);
-  console.log(`ozdenetim: ${failed === 0 ? "hepsi gecti" : failed + " kol dustu"}`);
+  arm("blanking preserves line alignment",
+    codeOnly("a();\n/* two\nlines */\nb();").split("\n").length === "a();\n/* two\nlines */\nb();".split("\n").length);
+  console.log(`self-check: ${failed === 0 ? "all succeeded" : failed + " arms failed"}`);
   process.exit(failed === 0 ? 0 : 1);
 }
 
@@ -152,8 +152,8 @@ for (const file of files) {
   }
 }
 
-console.log(`taranan dosya : ${files.length}`);
-console.log(`kural         : ${RULES.length}`);
-console.log(`BULGU         : ${findings.length}`);
+console.log(`files scanned : ${files.length}`);
+console.log(`rules         : ${RULES.length}`);
+console.log(`FINDINGS      : ${findings.length}`);
 for (const finding of findings) console.log(`  ${finding.path}:${finding.line}  [${finding.rule}] ${finding.message}`);
 process.exit(findings.length > 0 ? 1 : 0);

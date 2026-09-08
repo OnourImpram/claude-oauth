@@ -67,7 +67,7 @@ if (mode === "--ozdenetim") {
   await rm(root, { recursive: true, force: true });
   const stable = first === again;
   const sensitive = first !== after;
-  console.log(`ozdenetim: kararlilik ${stable ? "GECTI" : "DUSTU"} · tek-bayt duyarliligi ${sensitive ? "GECTI" : "DUSTU"}`);
+  console.log(`self-check: stability ${stable ? "OK" : "FAILED"} · single-byte sensitivity ${sensitive ? "OK" : "FAILED"}`);
   process.exit(stable && sensitive ? 0 : 1);
 }
 
@@ -81,12 +81,12 @@ if (mode === "--verify" && target) {
   const declared = basename(root);
   const computed = await computeReleaseId(root);
   const shaped = RELEASE_ID_PATTERN.test(declared);
-  console.log(`dizin adi (declared) : ${declared}`);
-  console.log(`icerik   (computed)  : ${computed}`);
-  console.log(`bicim gecerli        : ${shaped ? "evet" : "HAYIR"}`);
-  console.log(`SONUC                : ${shaped && declared === computed ? "ESLESTI" : "AYRISTI"}`);
+  console.log(`directory name (declared) : ${declared}`);
+  console.log(`content        (computed) : ${computed}`);
+  console.log(`valid format              : ${shaped ? "yes" : "NO"}`);
+  console.log(`RESULT                    : ${shaped && declared === computed ? "MATCHED" : "DRIFTED"}`);
   process.exit(shaped && declared === computed ? 0 : 1);
 }
 
-console.log("kullanim: --compute <dizin> | --verify <release-dizini> | --ozdenetim");
+console.log("usage: --compute <directory> | --verify <release-directory> | --ozdenetim");
 process.exit(2);
