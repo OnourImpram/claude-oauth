@@ -381,7 +381,7 @@ export class AgentSessionRegistry {
                 );
             }
             oldest[1].cancel("reclaimed: oldest idle session");
-            this.#retire(oldest[0]);
+            this.#retire(oldest[0], "capacity_evicted_idle");
         }
         const sessionKey = randomUUID().replace(/-/gu, "");
         const session = new AgentSession(
@@ -427,7 +427,7 @@ export class AgentSessionRegistry {
             session.attach(handle);
         } catch (error) {
             session.cancel("agent startup failed");
-            this.#retire(sessionKey);
+            this.#retire(sessionKey, "agent_startup_failed");
             throw error;
         }
         const outcome = await this.#settle(sessionKey, session, signal);
@@ -497,7 +497,7 @@ export class AgentSessionRegistry {
             // Nothing was released, so nothing will ever resolve this turn.
             // Failing loudly beats hanging until the request times out.
             session.cancel("no tool result matched a parked call");
-            this.#retire(sessionKey);
+            this.#retire(sessionKey, "resume_failed");
             await turn.catch(() => undefined);
             throw new RouterError(
                 "invalid_request",
@@ -530,18 +530,18 @@ export class AgentSessionRegistry {
         }
         try {
             const outcome = await turn;
-            if (outcome.kind === "end_turn") this.#retire(sessionKey);
+            if (outcome.kind === "end_turn") this.#retire(sessionKey, "end_turn");
             else session.touchedAt = this.#now();
             return outcome;
         } catch (error) {
-            this.#retire(sessionKey);
+            this.#retire(sessionKey, "settle_failed");
             throw error;
         } finally {
             signal?.removeEventListener("abort", onAbort);
         }
     }
 
-    #retire(sessionKey: string): void {
+    #retire(sessionKey: string, reason: string): void {
         const session = this.#sessions.get(sessionKey);
         if (session === undefined) return;
         // The orphan counter must survive the session it belonged to, otherwise
@@ -552,6 +552,10 @@ export class AgentSessionRegistry {
         for (const [callId, key] of this.#calls) {
             if (key === sessionKey) this.#calls.delete(callId);
         }
+        // A session that vanishes between two tool rounds must say why (2026-09-08: a second
+        // continuation met "no live agent session" and the log named nothing). Fixed codes only.
+        writeSafeLog({ event: "agent_session_retired", level: "info", route: "mcp", code: reason,
+            remedy: "A retired session accepts no further tool results; a later continuation for it is refused with 409." });
     }
 
     /** Removes sessions no turn has touched inside the idle window. */
@@ -561,7 +565,7 @@ export class AgentSessionRegistry {
         for (const [key, session] of [...this.#sessions]) {
             if (session.running || session.touchedAt > cutoff) continue;
             session.cancel("idle session swept");
-            this.#retire(key);
+            this.#retire(key, "idle_swept");
             swept += 1;
         }
         return swept;
@@ -572,7 +576,7 @@ export class AgentSessionRegistry {
         const count = this.#sessions.size;
         for (const [key, session] of [...this.#sessions]) {
             session.cancel(reason);
-            this.#retire(key);
+            this.#retire(key, "registry_closed");
         }
         return count;
     }
