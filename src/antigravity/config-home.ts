@@ -253,7 +253,7 @@ export async function sweepStaleConfigHomes(options: SweepOptions): Promise<Swee
             removed.push(path);
         }
         catch {
-            removed.push(path);
+            kept.push(path);
             writeSafeLog({ event: "antigravity_config_home_cleanup_failed", level: "warn" });
         }
     }

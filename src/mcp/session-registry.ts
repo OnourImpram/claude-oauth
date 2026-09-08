@@ -413,13 +413,13 @@ export class AgentSessionRegistry {
         this.#sessions.set(sessionKey, session);
         try {
             const handle = this.#startAgent({
-                    prompt,
-                    bridge: session.bridge,
-                    mcpUrl: this.mcpUrlFor(sessionKey),
-                    mcpHeaders: this.#mcpHeaders(),
-                    model,
-                    sessionKey,
-                });
+                prompt,
+                bridge: session.bridge,
+                mcpUrl: this.mcpUrlFor(sessionKey),
+                mcpHeaders: this.#mcpHeaders(),
+                model,
+                sessionKey,
+            });
             this.#runs.add(handle.done);
             const forgetRun = (): void => { this.#runs.delete(handle.done); };
             void handle.done.then(forgetRun, forgetRun);

@@ -39,9 +39,10 @@ it("router shutdown closes four Google sessions and waits for children and homes
                     void run.catch(() => undefined);
                     const ready = join(request.environment["USERPROFILE"] as string, "fixture-child.json");
                     for (let attempt = 0; ; attempt += 1) {
-                        const metadata = await readFile(ready, "utf8").catch(() => undefined);
+                        const metadata = await readFile(ready, "utf8")
+                            .then((raw) => JSON.parse(raw) as { pid: number }).catch(() => undefined);
                         if (metadata !== undefined) {
-                            children.push((JSON.parse(metadata) as { pid: number }).pid);
+                            children.push(metadata.pid);
                             break;
                         }
                         if (attempt === 500) {
