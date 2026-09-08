@@ -457,7 +457,7 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         throw new RouterError(
             permissionDenied ? "provider_tool_permission_denied" : "upstream_protocol_error",
             permissionDenied
-                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. ONARIM: add an allow-rule under permissions.allow for the tool the child names below, or re-run the lane with edits enabled. ${childDetail(output)}`
+                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. ONARIM: this lane runs agy with "--mode plan --sandbox" (see processArguments), so any tool needing a permission is auto-denied and the run stops. Add an allow-rule for the tool the child names below under permissions.allow in the agy settings, or run the task on a lane that grants tools. ${childDetail(output)}`
                 : `Antigravity reported success with an empty response. ${childDetail(output)}`,
             502,
         );
