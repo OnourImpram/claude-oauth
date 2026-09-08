@@ -165,9 +165,33 @@ async function errorDiagnostic(response: Response): Promise<ErrorDiagnostic> {
             upstreamErrorHints: [],
         };
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const bounded = bytes.byteLength <= maximumBytes ? bytes : bytes.slice(0, maximumBytes);
-    const text = Buffer.from(bounded).toString("utf8");
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (response.body !== null) {
+        const reader = response.body.getReader();
+        try {
+            for (;;) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                size += chunk.value.byteLength;
+                if (size > maximumBytes) {
+                    await reader.cancel();
+                    return {
+                        // Bytes observed before cancellation; the unread total is unknown.
+                        upstreamErrorBytes: size,
+                        upstreamErrorFingerprint: "oversized",
+                        upstreamErrorKeys: [],
+                        upstreamErrorHints: [],
+                    };
+                }
+                chunks.push(chunk.value);
+            }
+        } finally {
+            reader.releaseLock();
+        }
+    }
+    const bytes = Buffer.concat(chunks, size);
+    const text = bytes.toString("utf8");
     const keys = new Set<string>();
     try {
         const parsed: unknown = JSON.parse(text);
