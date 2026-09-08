@@ -442,7 +442,7 @@ footer p { max-width: var(--measure); }
       <h2 id="claim-h">The claim, and its measurement</h2>
       <p>
         "Installing this does not degrade native Claude Code" is a claim, so it gets a measurement instead of a paragraph.
-        Measured on the maintainer's machine, 2026-09-07:
+        Measured on the maintainer's machine, 2026-09-07, and reproduced by the shipped probe on 2026-09-08:
       </p>
       <div class="tablewrap">
         <table class="data">
@@ -461,9 +461,10 @@ footer p { max-width: var(--measure); }
       </p>
       <p>
         <b>Scope, stated plainly.</b> One machine. The negative control used a synthetic base URL, not a live router
-        window. And <b>this repository does not yet contain the launcher shim or a test that reproduces either
-        control</b>, so you cannot verify the claim from the source tree today. Until it does, this is the maintainer's
-        measurement, not a repository-verified guarantee. That gap is B05, and it blocks a release.
+        window. Since 2026-09-08 the repository ships the launcher shims and a two-arm probe
+        (<code>node scripts/native-separation-probe.mjs</code>) that reproduces both controls from a clone; on this
+        machine both arms pass, and the README records the exact output. B05 is closed. What the probe does not
+        establish is process ancestry or a live router session's behaviour; those stay maintainer measurements.
       </p>
     </section>
 
@@ -478,86 +479,64 @@ footer p { max-width: var(--measure); }
       <p>
         As of 2026-09-08 the Google lane reaches that surface for real: the router logged the provider agent parking a
         tool call, Claude Code executed it 213&nbsp;ms later, and the model returned a string it had no other way to know
-        (G01, repaired). The native permission paths in Google and xAI are now constrained (B01 below).
-        Permission inheritance through a separate <code>Agent</code> child session remains unmeasured.
+        (G01, repaired). The native permission paths in Google and xAI are constrained (B01), and permission
+        inheritance through a separate <code>Agent</code> child session was measured live the same day: the child
+        takes the parent's permission set, and the routed parent reached Claude Code's <code>Agent</code> tool
+        through the bridge (B01 row below).
       </p>
     </section>
 
     <section id="defects" aria-labelledby="defects-h">
       <h2 id="defects-h">Defects and repair status</h2>
       <p>
-        Found by review and by independent adversarial passes on 2026-09-07. Ids are the repository's own and are
-        stable across the README, <code>SECURITY.md</code> and <code>CHANGELOG.md</code>. The rows below include
-        measured repairs and the remaining gaps.
+        Found by review and by independent passes on 2026-09-07 and 2026-09-08, mostly by models that had not written
+        the code, then measured one by one. Ids are the repository's own and are stable across the README,
+        <code>SECURITY.md</code> and <code>CHANGELOG.md</code>. As of 2026-09-08 every row carries a measured repair;
+        where a repair has a residual scope, the row says exactly what it does not establish. This table is generated
+        from the README's <i>Known gaps</i> table so the two cannot drift apart.
       </p>
       <div class="tablewrap">
         <table class="data">
-          <thead><tr><th>id</th><th>severity</th><th>what is wrong</th></tr></thead>
+          <thead><tr><th>id</th><th>status</th><th>what was wrong, what changed, how it is measured</th></tr></thead>
           <tbody>
-            <tr><td class="cell-id"><span class="id">B01</span></td><td class="sev">native paths fixed<br>Agent NOT_RUN</td>
-              <td><b>Google direct route: PASS, 2026-09-08.</b> Call-scoped settings allow only the bridge MCP server and deny native <code>write_file</code>, <code>command</code>, <code>browser</code>, <code>execute_url</code>, and <code>unsandboxed</code> actions. Live Claude Code Write denial leaves no file; a native <code>write_to_file</code> fallback is also denied, while MCP still parks and returns the denial. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. The Google live check covers <code>gemini-3.8-flash-high</code> on Windows, not every denied action category. <b>Agent permission inheritance: NOT_RUN (requires a separate Agent child-session harness).</b></td></tr>
-            <tr><td class="cell-id"><span class="id">B05</span></td><td class="sev">high</td>
-              <td>The launcher shim is not in this repository, so the native-separation claim above cannot be reproduced from this tree.</td></tr>
+            <tr><td class="cell-id"><span class="id">B01</span></td><td class="sev">fixed</td>
+              <td><b>Repaired and measured 2026-09-08, Agent arm included.</b> Google direct route: call-scoped settings allow only the bridge MCP server and deny native <code>write_file</code>, <code>command</code>, <code>browser</code>, <code>execute_url</code> and <code>unsandboxed</code> actions; a live Claude Code Write denial leaves no file and a native <code>write_to_file</code> attempt is denied too. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. <b><code>Agent</code> child sessions, measured live on the Google lane:</b> the routed parent reached Claude Code's <code>Agent</code> tool through the bridge (router park events <code>Agent</code>, <code>ListAgents</code>); with <code>Write</code> disallowed on the parent the child could not create the file (positive arm, no file), with <code>Write</code> allowed the child wrote it (negative arm, file present with the exact content). Inheritance is Claude Code's own mechanism: the child takes the parent's permission set, and every router call to the Google lane gets its own call-scoped denial settings regardless of which session made it. Claude Code chooses the child model itself (haiku in one arm, the routed Gemini in the other); the router does not set it. Receipt: the streams and router.log lines are in the maintainer's measurement notes.</td></tr>
+            <tr><td class="cell-id"><span class="id">B02</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-07 (<code>b5caf0e</code>).</b> A <code>role:"system"</code> message arriving after the last user message was dropped silently while compiling the request, measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own <code>SESSION CAPABILITY CONTEXT</code> section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface.</td></tr>
+            <tr><td class="cell-id"><span class="id">B03</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Compilation and result extraction share the last logical conversation record, so trailing system records retain the live session. Every continuation is validated and its system context plus all accompanying user text travels in labelled MCP result text before the agent resumes. Tests measure one start, the instruction received, mixed images, trailing blank text, and a usage bound covering the full request body. This preserves transport, not a guarantee of model compliance.</td></tr>
+            <tr><td class="cell-id"><span class="id">B04</span></td><td class="sev">fixed<br>residual scope</td>
+              <td><b>Repaired 2026-09-08 for the checked-file replacement race.</b> Writes use a non-truncating open, validate the handle identity, and write through that handle; new files use exclusive creation, with deterministic Windows symlink/junction tests proving outside target contents stay unchanged. Arbitrary ancestor replacement remains a limitation requiring platform-specific filesystem support; see <code>SECURITY.md</code>.</td></tr>
+            <tr><td class="cell-id"><span class="id">B05</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Portable PowerShell/POSIX shims and a reproducible two-arm probe ship in this tree; stub tests measure native environment cleanup and router entry selection. Live probe: both arms PASS on Windows, 2026-09-08, output recorded above.</td></tr>
+            <tr><td class="cell-id"><span class="id">B06</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> <code>max_input_tokens</code> uses the lower of the advertised window and snapshot transport capacity, tested for every routed model against its pin; Astra's <code>context_window</code> remains a presentation value of 1,000,000 while input is capped at the unchanged 872,000 pin: accepted capacity unproven, advertisement capped at the pin.</td></tr>
+            <tr><td class="cell-id"><span class="id">B07</span></td><td class="sev">fixed</td>
+              <td><b>Found and repaired 2026-09-08 (Agent arm).</b> When the Google model chose one of its own native tools (<code>read_file</code>) instead of the bridged Claude Code tools, the call-scoped settings denied it, agy ended without an answer, and the bridge returned the denial as HTTP 502; Claude Code treated 502 as transient and retried ten times with exponential backoff, every retry meeting the same policy. The denial now travels as 403 (terminal for the turn, not retried) and the bridged prompt carries one policy sentence telling the model that its native file, shell and browser tools are disabled here and naming the MCP server to use. Tests: <code>test/headless-bridge-denial-status.test.ts</code>, <code>test/headless-bridge-policy-note.test.ts</code>; mutation control over the whole suite fails one test per reverted change. Whether the model now picks the bridged tools more often is a model behaviour, not something this repair proves.</td></tr>
             <tr><td class="cell-id"><span class="id">G01</span></td><td class="sev">fixed</td>
-              <td><b>Repaired 2026-09-08.</b> The Google lane now carries the same tool loop the xAI lane has, inside a call-scoped configuration home: the session nonce never enters the operator's own MCP config, which is never opened for writing. Live receipt below.</td></tr>
-            <tr><td class="cell-id"><span class="id">N01</span></td><td class="sev">high</td>
-              <td>Image blocks inside a tool result are reduced to an empty string, so a Playwright screenshot returns as a successful, empty tool result.</td></tr>
+              <td><b>Repaired 2026-09-08.</b> The Google lane now carries the same tool loop the xAI lane has. The objection that kept it away was that <code>agy mcp add</code> writes the session nonce into the operator's persistent config; the lane instead runs inside a <b>call-scoped configuration home</b> (<code>USERPROFILE</code> redirected, identity files hard-linked, never copied), so the operator's own <code>mcp_config.json</code> is never opened for writing. Live receipt: the router logged <code>agent_tool_call_parked</code>, Claude Code executed the MCP tool 213 ms later, one <code>tool_use</code> block crossed the stream, and the model returned a string it could not otherwise know. NOT claimed: a multi-step loop, or the <code>Agent</code> sub-loop.</td></tr>
+            <tr><td class="cell-id"><span class="id">G02</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08, diagnostic branch.</b> Installed Grok 1.0.13 documentation (<code>docs/user-guide/07-mcp-servers.md</code>, Compatibility) says project <code>.mcp.json</code> is loaded unless the Claude import marker suppresses it. Refusal is retained and now names <code>.mcp.json</code> plus a workspace/user-configuration remedy; root and nested-workspace tests measure it, with hooks/plugins still fail-closed. Live xAI in repositories with non-empty <code>.mcp.json</code>: <b>NOT_RUN, intentionally refused because Grok can discover this file</b>.</td></tr>
+            <tr><td class="cell-id"><span class="id">G03</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> A session parked on a tool call set <code>running = false</code> and so looked idle; at the cap the oldest such session was cancelled mid-loop and the returning <code>tool_result</code> found no session. A first repair used a 60 s age window; an independent wall-clock measurement then showed a legitimate 61 s permission wait being sacrificed, so age was dropped as the discriminator. Now a parked session is never evicted for capacity: at the cap the request receives an explicit 503. The cost is stated in the source: an abandoned parked session holds capacity until the idle timeout or the provider's own timeout. Both registries also close and wait on shutdown (previously only the xAI one did; four Google processes and homes were measured surviving <code>close()</code>).</td></tr>
+            <tr><td class="cell-id"><span class="id">G04</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Agent history drops <code>thinking</code> and <code>redacted_thinking</code>, summarizes <code>image</code> and <code>document</code> with media type and size, and renders <code>server_tool_use</code> and <code>mcp_tool_use</code> like tool calls. Per-type Google/xAI tests and a session-lane fixture cover messages and token counting without 422. Media history remains a placeholder; initial multi-text request framing and delegate tooling are outside this repair.</td></tr>
+            <tr><td class="cell-id"><span class="id">G08</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> The SDK-typed HTTP definition and a fake ACP peer verify exact name, URL and <code>{name,value}[]</code> headers. Live Grok 1.0.13 reached the router bridge: <code>agent_tool_call_parked</code> at <code>2026-09-08T10:23:44.844Z</code>, caller PID <code>49944</code>, tool <code>cluster_a_handshake_receipt</code>; the reply completed with <code>end_turn</code> and zero unmatched results. Header removal is exercised as a full-suite mutation control.</td></tr>
+            <tr><td class="cell-id"><span class="id">N01</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Anthropic and native MCP base64 image tool results cross the shared bridge on both xAI/ACP and Google/Antigravity lanes; text compilation and unsupported/URL media use type, media-type and byte-size placeholders (URL size is unknown). Embedded resources retain known MIME type and payload size. Adapter-to-MCP tests preserve image bytes, MIME casing and error status; the production-log fixture measures payload-free image metadata. Live provider image interpretation is NOT_RUN, no vision task was submitted.</td></tr>
+            <tr><td class="cell-id"><span class="id">N03</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Google/xAI inherit tools without a launcher turn cap; OpenAI defaults include <code>Skill</code> and user definitions may add MCP names. Generated JSON and wider/narrower overrides are tested in both client modes; changed or removed model identities still receive 400. Live Agent tool loops remain NOT_RUN, requiring an authenticated child-session harness.</td></tr>
+            <tr><td class="cell-id"><span class="id">N04</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Every request derives its catalogue and replaces changed bridge descriptors before releasing parked results; the xAI permission lookup reads the live names. Tests cover ToolSearch adding <code>mcp__playwright__browser_snapshot</code>, schema changes, removal, and unchanged descriptors. Already parked removed-tool calls can finish; subsequent calls are refused. Provider-side catalogue cache refresh is NOT_RUN, the offline measurement covers <code>tools/list</code>.</td></tr>
             <tr><td class="cell-id"><span class="id">N05</span></td><td class="sev">fixed</td>
-              <td><b>Repaired 2026-09-08.</b> The capsule runs a hash-pinned patched Clodex copy, with its session nonce supplied only through the child environment. Anonymous scratch-home measurement, missing/wrong/correct <code>x-api-key</code>: catalog and health <b>401/401/200</b>, malformed JSON messages <b>401/401/400</b>. Empty nonce, missing patch anchors and patched hash drift prevent startup.</td></tr>
+              <td><b>Repaired 2026-09-08.</b> The capsule runs a hash-pinned patched copy of Clodex and receives its session nonce only through the child environment. Measured with an anonymous scratch home, missing/wrong/correct <code>x-api-key</code>: catalog and health <b>401/401/200</b>, malformed JSON messages <b>401/401/400</b>. Empty nonce, missing patch anchors and patched hash drift prevent startup.</td></tr>
+            <tr><td class="cell-id"><span class="id">N06</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Captured helpers receive SIGTERM, then SIGKILL after configurable <code>terminationGraceMs</code> (default 100 ms), and reject with a timeout even without <code>exit</code>; Windows tests cover the deadline and missing-exit case, while the meaningful SIGTERM-resistant Linux arm is NOT_RUN locally (Windows host).</td></tr>
+            <tr><td class="cell-id"><span class="id">P01</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> Found while measuring N05 on Linux: the install lock is written with Windows variables (<code>%USERPROFILE%</code>, <code>%LOCALAPPDATA%</code>, <code>%APPDATA%</code>), and on POSIX <code>doctor</code> died in path expansion before reporting a single component. On POSIX those variables now resolve to <code>HOME</code>, <code>XDG_DATA_HOME</code> (else <code>~/.local/share</code>) and <code>XDG_CONFIG_HOME</code> (else <code>~/.config</code>), backslashes become separators, and a binary that is not there is reported as missing instead of aborting the diagnosis. Measured: WSL2 <code>doctor</code> lists components; unit arms in <code>test/install-lock-posix-paths.test.ts</code>, mutation control fails 3 tests. Linux binaries are still not pinned by the lock, so on Linux <code>doctor</code> reports them missing until a POSIX lock exists.</td></tr>
           </tbody>
         </table>
-      </div>
-
-      <h3>Also open</h3>
-      <div class="tablewrap">
-        <table class="data">
-          <tbody>
-            <tr><td class="cell-id"><span class="id">B03</span></td><td>An xAI continuation request can lose both the session id and the new user instruction.</td></tr>
-            <tr><td class="cell-id"><span class="id">B04</span></td><td>The workspace write check does not write the file it checked; a path race is open.</td></tr>
-            <tr><td class="cell-id"><span class="id">B06</span></td><td>The long-context advertisement is written into <code>max_input_tokens</code> above the pinned snapshot value; unproven either way.</td></tr>
-            <tr><td class="cell-id"><span class="id">G02</span></td><td>A non-empty <code>.mcp.json</code> in the project root makes the xAI lane refuse to start. Fail-closed, but a denial in any repository that has one.</td></tr>
-            <tr><td class="cell-id"><span class="id">G03</span></td><td><b>Repaired 2026-09-08.</b> A session parked on a tool call looked idle and could be cancelled at the session cap. A 60&nbsp;s age window was tried first and measured sacrificing a legitimate 61&nbsp;s wait; now a parked session is never evicted for capacity and the cap answers with an explicit 503. Both registries close and wait on shutdown.</td></tr>
-            <tr><td class="cell-id"><span class="id">G04 to G08</span></td><td><code>thinking</code>, <code>image</code> and <code>document</code> blocks in history are rejected with 422 on the agent lanes; a multi-block user message takes its last block as "the request"; the live xAI MCP handshake is not shown from this tree.</td></tr>
-            <tr><td class="cell-id"><span class="id">N03</span></td><td>Generated <code>*-delege</code> agents carry <code>tools: []</code> and one turn (Google, xAI) or six built-in tools without MCP (OpenAI); a wider user definition is rejected.</td></tr>
-            <tr><td class="cell-id"><span class="id">N04</span></td><td>A changed tool catalogue on a continuation request does not reach the live MCP session.</td></tr>
-            <tr><td class="cell-id"><span class="id">N06</span></td><td>On POSIX a helper that ignores SIGTERM keeps the timeout waiting; no escalation to SIGKILL. Unmeasured on Linux.</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="repaired">
-        <span class="id">B02</span>, <b>repaired 2026-09-07.</b> A <code>role:"system"</code> message arriving after the last
-        user message was dropped silently while compiling the request; measured loss ~77,500 characters, which is the
-        skill catalogue, the agent catalogue, MCP instructions and the output style. It is now carried in its own
-        section of the compiled prompt (<code>SESSION CAPABILITY CONTEXT</code>). Merged to <code>main</code> as <code>b5caf0e</code>, with six arms and a
-        mutation control: removing the line that collects the message fails two of them. The claim this page will not
-        make on the strength of tests alone is the end-to-end one: a green test is not a live run. That claim is made
-        separately, and only where a live receipt backs it (G01).
-      </div>
-
-      <div class="repaired">
-        <span class="id">G01</span>, <b>repaired 2026-09-08, with a live receipt.</b> The Google lane now carries the
-        same tool loop the xAI lane has. It runs inside a <em>call-scoped configuration home</em>: <code>USERPROFILE</code> is
-        redirected for the duration of one call, identity files are hard-linked (never copied, because a copy would put a second
-        physical copy of an OAuth credential on disk), and the session nonce lives only in a directory the router creates and
-        deletes. The operator&rsquo;s own <code>mcp_config.json</code> is never opened for writing.
-        <p>
-          Two earlier runs returned the right answer and proved nothing: <code>agy</code> has its own tools, so a correct
-          answer is equally consistent with this bridge being dead. What settles it is a chain recorded in three separate
-          places, none of them the model&rsquo;s own account of itself:
-        </p>
-        <table class="receipt">
-          <tbody>
-            <tr><td class="cell-id">04:18:59</td><td>MCP server log</td><td><code>initialize</code> from <code>claude-code/2.1.257</code></td></tr>
-            <tr><td class="cell-id">04:19:18.591</td><td>router.log</td><td><code>agent_tool_call_parked</code>: the provider agent asked <em>this</em> bridge for a tool</td></tr>
-            <tr><td class="cell-id">04:19:18.804</td><td>MCP server log</td><td><code>tools/call</code> from <code>claude-code/2.1.257</code>: Claude Code executed it</td></tr>
-            <tr><td class="cell-id">stream</td><td>Anthropic stream</td><td>one <code>tool_use</code> block; the model returned a string it had no other way to know</td></tr>
-          </tbody>
-        </table>
-        <p>
-          What this does <b>not</b> claim: a multi-step loop (one tool call was measured), the <code>Agent</code> sub-loop, or
-          image-bearing tool results, which N01 still reduces to an empty string.
-        </p>
       </div>
     </section>
 
