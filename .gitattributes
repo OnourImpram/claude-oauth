@@ -1,0 +1,12 @@
+# Line endings are normalised to LF in the repository; the working tree follows the
+# platform default unless a rule below says otherwise.
+* text=auto
+
+# The integrity pin `localPatchSha256` in config/install-lock.json is the SHA-256 of this
+# file's BYTES, and it was computed over a CRLF checkout (core.autocrlf=true on Windows).
+# Measured 2026-09-07: an LF checkout of the same blob hashes differently, so on Linux the
+# install-lock test failed with "the lock and the patch file have diverged" and the runtime
+# integrity gate would refuse the patch. Until the pin is recomputed over the LF blob (an
+# operator decision, because it changes the lock and therefore the release identity), the
+# pinned bytes must be reproduced identically on every platform. That is what this rule does.
+config/claude-oauth-local-patches.mjs text eol=crlf
