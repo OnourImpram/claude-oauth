@@ -60,6 +60,13 @@ async function checkReadHandler(lane: "grok" | "gemini"): Promise<void> {
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     Object.defineProperty(child, "exitCode", { value: 0 });
+    // This ChildProcess was never spawned, so its libuv handle carries no pid. On POSIX a
+    // kill() on that handle still reaches the kernel, with an indeterminate pid -- measured
+    // 2026-09-07 on Linux: the Gemini bridge's cleanup kill() SIGTERMed the whole process
+    // group, the outer test process and the shell included, and the suite could not run at
+    // all. On Windows the same call fails with EBADF, which is why it never showed there. A
+    // fake child must not be able to signal the operating system.
+    child.kill = () => false;
     const childModule = mock.module("node:child_process", { namedExports: { spawn: () => child } });
     const protocolModule = mock.module("@agentclientprotocol/sdk", { namedExports: { ...acp, client: () => client } });
     const configurationModule = mock.module(new URL("../src/runtime/provider-config.js", import.meta.url), {
