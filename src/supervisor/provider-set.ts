@@ -28,6 +28,14 @@ export interface ExternalAgentRuntime {
      * Security hard rule does not permit it (evidence ledger §7).
      */
     readonly grokSessions?: AgentSessionRegistry;
+    /**
+     * G01. Supplied, the Google lane carries the same real tool loop the xai lane has.
+     * The objection that kept it away was that `agy mcp add` writes the session nonce into
+     * the operator's persistent config; Path D removes the premise -- the nonce goes into a
+     * call-scoped configuration home and the operator's file is never opened for writing
+     * (tasks/router-karar-20260907/g01-ana-oturum-tasarimi.md, measured 2026-09-08).
+     */
+    readonly googleSessions?: AgentSessionRegistry;
     /** A4: side providers with a lock violation -- no adapter is built, drop their models. */
     readonly disabledProviders?: ReadonlySet<ProviderId>;
 }
@@ -119,11 +127,16 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
             const adapter = new AgentModelAdapter({
                 provider: "google",
                 // 2026-09-03: agy has its OWN tool loop (the filesystem/git/memory servers in
-                // the operator's persistent mcp_config.json). Our MCP bridge is NOT injected --
-                // no session secret is written anywhere. That is why the preamble stops saying
-                // "read-only" but still produces no Anthropic tool_use blocks: the work is done
-                // with agy's own tools.
-                selfDrivenTools: true,
+                // the operator's persistent mcp_config.json). Our MCP bridge was NOT injected --
+                // no session secret was written anywhere. That was why the preamble stopped
+                // saying "read-only" while still producing no Anthropic tool_use blocks.
+                //
+                // 2026-09-08 (G01): WHEN a registry is supplied the lane carries the real tool
+                // loop and the self-driven fallback is gone. Both are kept because the delegation
+                // lane runs without a registry and must keep working as before.
+                ...(externalRuntime.googleSessions === undefined
+                    ? { selfDrivenTools: true }
+                    : { sessions: externalRuntime.googleSessions }),
                 readiness: async () => ready("google", "antigravity_oauth_snapshot_verified"),
                 run: async ({ model, prompt, signal }) => {
                     const result = await runAntigravityHeadless({

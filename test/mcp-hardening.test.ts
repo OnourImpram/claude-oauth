@@ -118,6 +118,10 @@ describe("FINDINGS 3 + 6 -- unaddressable sessions are reclaimed, with a cap", (
     // the old session UNADDRESSABLE: nobody can reach it, yet its process lives on.
     it("at the cap the oldest IDLE session is reclaimed; the request does not receive 503", async () => {
         const agents: FakeAgent[] = [];
+        // The clock is injected so "oldest" means GENUINELY OLD. Without it this arm passed
+        // on sessions milliseconds apart -- and would have kept passing while the registry
+        // cancelled a tool loop that was still in flight (2026-09-08).
+        let clock = 0;
         const registry = createRegistry(
             () => {
                 const a = new FakeAgent();
@@ -125,14 +129,44 @@ describe("FINDINGS 3 + 6 -- unaddressable sessions are reclaimed, with a cap", (
                 return a;
             },
             (a) => a.callTool(),
-            { maxLiveSessions: 2 },
+            { maxLiveSessions: 2, now: () => clock },
         );
         await registry.begin("one", TOOLS);
         await registry.begin("two", TOOLS);
         strictEqual(registry.liveSessionCount, 2);
+        clock = 10 * 60 * 1000;
         await registry.begin("three", TOOLS);
         strictEqual(registry.liveSessionCount, 2);
         strictEqual(agents[0]?.cancellationReason, "reclaimed: oldest idle session");
+        registry.closeAll("test teardown");
+    });
+
+    // The other half of the same rule. parkedToolCall() sets running=false, so without a
+    // grace window a session waiting for Claude Code to answer looked exactly like an
+    // abandoned one -- and an unrelated new session could cancel it mid-loop.
+    it("a session parked on a tool INSIDE the grace window is not reclaimed", async () => {
+        const agents: FakeAgent[] = [];
+        let clock = 0;
+        const registry = createRegistry(
+            () => {
+                const a = new FakeAgent();
+                agents.push(a);
+                return a;
+            },
+            (a) => a.callTool(),
+            { maxLiveSessions: 1, now: () => clock },
+        );
+        await registry.begin("one", TOOLS);
+        clock = 5_000;
+        let status = 0;
+        try {
+            await registry.begin("two", TOOLS);
+        } catch (error) {
+            status = (error as RouterError).status;
+        }
+        strictEqual(status, 503, "the ceiling is reported instead of sacrificing a live loop");
+        strictEqual(registry.liveSessionCount, 1);
+        strictEqual(agents[0]?.cancellationReason, undefined);
         registry.closeAll("test teardown");
     });
 
