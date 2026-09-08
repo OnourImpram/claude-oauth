@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>claude-oauth — other models inside Claude Code, native path untouched</title>
+<title>claude-oauth: other models inside Claude Code, native path untouched</title>
 <meta name="description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Pre-release; open defects listed by id.">
 <meta name="color-scheme" content="light dark">
 <style>
 /* ------------------------------------------------------------------
-   tokens — the native path is ink; the router path is the only colour
+   tokens: the native path is ink; the router path is the only colour
    ------------------------------------------------------------------ */
 :root {
   color-scheme: light dark;
@@ -293,7 +293,7 @@ footer p { max-width: var(--measure); }
       <p class="lede">
         <code>claude</code> is the Claude Code you already have, and this project never touches it.
         <code>claude-oauth</code> starts that same Claude Code with a loopback router behind it, so Google,
-        xAI and OpenAI models answer inside the harness — over your own accounts, on your own plans.
+        xAI and OpenAI models answer inside the harness, over your own accounts, on your own plans.
       </p>
       <p>The command you run decides the path. There is no mode to remember and nothing to switch back.</p>
 
@@ -326,7 +326,7 @@ footer p { max-width: var(--measure); }
 
         <figcaption id="panel-cap">
           The top wire is drawn in ink because nothing was added to it. The lower wires are the only colour on this page:
-          they are the part this repository builds. The dashed line between them is the claim measured further down —
+          they are the part this repository builds. The dashed line between them is the claim measured further down:
           and the reason B05 is a release blocker.
         </figcaption>
       </figure>
@@ -335,8 +335,8 @@ footer p { max-width: var(--measure); }
     <section id="inside" aria-labelledby="inside-h">
       <h2 id="inside-h">Where Claude Code sits</h2>
       <p>
-        <code>claude-oauth</code> is not a script that calls three CLIs. It launches a real Claude Code process — the
-        binary you installed, at the version pinned in <code>config/install-lock.json</code> — and sets that process's
+        <code>claude-oauth</code> is not a script that calls three CLIs. It launches a real Claude Code process, the
+        binary you installed, at the version pinned in <code>config/install-lock.json</code>, and sets that process's
         upstream endpoint to a router on the loopback interface. Claude Code keeps everything that makes it a harness:
         its tools, its permission prompts, its skills, your MCP configuration. Only the model behind the
         <code>/v1/messages</code> call changes.
@@ -369,7 +369,7 @@ footer p { max-width: var(--measure); }
           <p>Inside a <code>claude-oauth</code> session the launcher registers one delegate per routed model
             (<code>grok-delege</code>, <code>gemini-delege</code>, <code>sol-delege</code>, …), so a Claude model can
             hand a task to another model through the <code>Agent</code> tool. Today those delegates answer; they do not
-            drive the harness — see N03 below.</p>
+            drive the harness; see N03 below.</p>
         </div>
       </div>
     </section>
@@ -378,7 +378,7 @@ footer p { max-width: var(--measure); }
       <h2 id="lanes-h">What each lane actually runs</h2>
       <p>
         Each lane authenticates as you, on your own plan. Two of the three run the vendor's own CLI. The third does not,
-        and an earlier draft of this page said otherwise — that was wrong and is corrected here.
+        and an earlier draft of this page said otherwise. That was wrong and is corrected here.
       </p>
       <div class="tablewrap">
         <table class="data">
@@ -431,7 +431,7 @@ footer p { max-width: var(--measure); }
       <p>
         Claude Code is an agent harness, not a chat window: tools, subagents, skills, MCP servers, permission prompts,
         file edits you approve. The target for this router is that <b>every model reachable through it can use that same
-        surface</b> — the <code>Agent</code> tool, skills, MCP servers such as Playwright, file editing under the same
+        surface</b>: the <code>Agent</code> tool, skills, MCP servers such as Playwright, file editing under the same
         permission rules a native session has.
       </p>
       <p>
@@ -476,7 +476,7 @@ footer p { max-width: var(--measure); }
             <tr><td class="cell-id"><span class="id">B06</span></td><td>The long-context advertisement is written into <code>max_input_tokens</code> above the pinned snapshot value; unproven either way.</td></tr>
             <tr><td class="cell-id"><span class="id">G02</span></td><td>A non-empty <code>.mcp.json</code> in the project root makes the xAI lane refuse to start. Fail-closed, but a denial in any repository that has one.</td></tr>
             <tr><td class="cell-id"><span class="id">G03</span></td><td><b>Repaired 2026-09-08.</b> A session parked on a tool call looked idle and could be cancelled at the session cap. A 60&nbsp;s age window was tried first and measured sacrificing a legitimate 61&nbsp;s wait; now a parked session is never evicted for capacity and the cap answers with an explicit 503. Both registries close and wait on shutdown.</td></tr>
-            <tr><td class="cell-id"><span class="id">G04–G08</span></td><td><code>thinking</code>, <code>image</code> and <code>document</code> blocks in history are rejected with 422 on the agent lanes; a multi-block user message takes its last block as "the request"; the live xAI MCP handshake is not shown from this tree.</td></tr>
+            <tr><td class="cell-id"><span class="id">G04 to G08</span></td><td><code>thinking</code>, <code>image</code> and <code>document</code> blocks in history are rejected with 422 on the agent lanes; a multi-block user message takes its last block as "the request"; the live xAI MCP handshake is not shown from this tree.</td></tr>
             <tr><td class="cell-id"><span class="id">N03</span></td><td>Generated <code>*-delege</code> agents carry <code>tools: []</code> and one turn (Google, xAI) or six built-in tools without MCP (OpenAI); a wider user definition is rejected.</td></tr>
             <tr><td class="cell-id"><span class="id">N04</span></td><td>A changed tool catalogue on a continuation request does not reach the live MCP session.</td></tr>
             <tr><td class="cell-id"><span class="id">N06</span></td><td>On POSIX a helper that ignores SIGTERM keeps the timeout waiting; no escalation to SIGKILL. Unmeasured on Linux.</td></tr>
@@ -485,19 +485,19 @@ footer p { max-width: var(--measure); }
       </div>
 
       <div class="repaired">
-        <span class="id">B02</span> — <b>repaired 2026-09-07.</b> A <code>role:"system"</code> message arriving after the last
+        <span class="id">B02</span>, <b>repaired 2026-09-07.</b> A <code>role:"system"</code> message arriving after the last
         user message was dropped silently while compiling the request; measured loss ~77,500 characters, which is the
         skill catalogue, the agent catalogue, MCP instructions and the output style. It is now carried in its own
         section of the compiled prompt (<code>SESSION CAPABILITY CONTEXT</code>). Merged to <code>main</code> as <code>b5caf0e</code>, with six arms and a
         mutation control: removing the line that collects the message fails two of them. The claim this page will not
-        make on the strength of tests alone is the end-to-end one — a green test is not a live run. That claim is made
+        make on the strength of tests alone is the end-to-end one: a green test is not a live run. That claim is made
         separately, and only where a live receipt backs it (G01).
       </div>
 
       <div class="repaired">
-        <span class="id">G01</span> &mdash; <b>repaired 2026-09-08, with a live receipt.</b> The Google lane now carries the
+        <span class="id">G01</span>, <b>repaired 2026-09-08, with a live receipt.</b> The Google lane now carries the
         same tool loop the xAI lane has. It runs inside a <em>call-scoped configuration home</em>: <code>USERPROFILE</code> is
-        redirected for the duration of one call, identity files are hard-linked (never copied &mdash; a copy would put a second
+        redirected for the duration of one call, identity files are hard-linked (never copied, because a copy would put a second
         physical copy of an OAuth credential on disk), and the session nonce lives only in a directory the router creates and
         deletes. The operator&rsquo;s own <code>mcp_config.json</code> is never opened for writing.
         <p>
@@ -508,14 +508,14 @@ footer p { max-width: var(--measure); }
         <table class="receipt">
           <tbody>
             <tr><td class="cell-id">04:18:59</td><td>MCP server log</td><td><code>initialize</code> from <code>claude-code/2.1.257</code></td></tr>
-            <tr><td class="cell-id">04:19:18.591</td><td>router.log</td><td><code>agent_tool_call_parked</code> &mdash; the provider agent asked <em>this</em> bridge for a tool</td></tr>
-            <tr><td class="cell-id">04:19:18.804</td><td>MCP server log</td><td><code>tools/call</code> from <code>claude-code/2.1.257</code> &mdash; Claude Code executed it</td></tr>
-            <tr><td class="cell-id">&mdash;</td><td>Anthropic stream</td><td>one <code>tool_use</code> block; the model returned a string it had no other way to know</td></tr>
+            <tr><td class="cell-id">04:19:18.591</td><td>router.log</td><td><code>agent_tool_call_parked</code>: the provider agent asked <em>this</em> bridge for a tool</td></tr>
+            <tr><td class="cell-id">04:19:18.804</td><td>MCP server log</td><td><code>tools/call</code> from <code>claude-code/2.1.257</code>: Claude Code executed it</td></tr>
+            <tr><td class="cell-id">stream</td><td>Anthropic stream</td><td>one <code>tool_use</code> block; the model returned a string it had no other way to know</td></tr>
           </tbody>
         </table>
         <p>
           What this does <b>not</b> claim: a multi-step loop (one tool call was measured), the <code>Agent</code> sub-loop, or
-          image-bearing tool results &mdash; N01 still reduces those to an empty string.
+          image-bearing tool results, which N01 still reduces to an empty string.
         </p>
       </div>
     </section>
@@ -523,8 +523,8 @@ footer p { max-width: var(--measure); }
     <section id="built" aria-labelledby="built-h">
       <h2 id="built-h">How it is built</h2>
       <p>
-        TypeScript on Node 24. Two pinned runtime dependencies — <code>@agentclientprotocol/sdk</code> for the ACP lanes
-        and <code>@bman654/clodex</code> for the OpenAI capsule — and nothing else at run time. A check that has to stay
+        TypeScript on Node 24. Two pinned runtime dependencies, <code>@agentclientprotocol/sdk</code> for the ACP lanes
+        and <code>@bman654/clodex</code> for the OpenAI capsule, and nothing else at run time. A check that has to stay
         green on Linux and Windows: lint, type-check, build, tests, secret scan.
       </p>
       <ul>
@@ -532,7 +532,7 @@ footer p { max-width: var(--measure); }
           <code>release-id</code> each have an <code>--ozdenetim</code> arm that injects a synthetic defect and proves the
           gate catches it. A green run whose instrument has never fired is a green name, not a green measurement.</li>
         <li><b>Diagnostics that survive.</b> When a lane fails, the child process's own explanation is carried into the
-          error — bounded in bytes, redacted before it travels, cut on a code-point boundary.</li>
+          error: bounded in bytes, redacted before it travels, cut on a code-point boundary.</li>
         <li><b>Named causes only.</b> An error code states a cause that was observed. Where the evidence is missing,
           the generic code stays; a confident guess sends the reader to the wrong fix.</li>
         <li><b>Test counts live in CI, not on this page.</b> A number on a page rots the day after it is written.</li>
@@ -548,7 +548,7 @@ npm run self-check</pre>
         the lane bridges to read, and offline probes behind several findings. What it does not give you yet: an
         installation. There is no shim (B05), no documented release builder, and the install lock pins binaries at
         Windows locations. <code>node dist/src/cli.js doctor</code> will list, component by component, what it cannot
-        find — that is the intended behaviour.
+        find. That is the intended behaviour.
       </p>
     </section>
 
