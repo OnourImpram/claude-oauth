@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { RouterError } from "../domain/errors.js";
 import { AGENT_MODEL_CONTRACTS } from "../domain/model-contracts.js";
 import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security/environment.js";
-import { createEphemeralConfigHome, type AgentToolEndpoint, type EphemeralConfigHome } from "./config-home.js";
+import { createEphemeralConfigHome, DEFAULT_TOOL_SERVER_NAME, type AgentToolEndpoint, type EphemeralConfigHome } from "./config-home.js";
 // The allowlist is a SECURITY control: only reviewed models may be spawned. But writing
 // the list by hand silently left a model out whenever one was added to the contracts --
 // and because the error code presented that as Google's own refusal
@@ -302,8 +302,13 @@ function processArguments(model: string, timeoutMs: number, allowEdits = false):
         `${timeoutMs / 1_000}s`,
     ];
 }
-function processInput(prompt: string): string {
-    return `${JSON.stringify({ event: "user", message: { content: prompt } })}\n`;
+// B07 (2026-09-08): on the bridged lane the model's native file, shell and browser tools are
+// denied by the call-scoped settings; a model that reaches for one ends its turn. The prompt
+// says so once, so the model has a reason to pick the bridged tools instead of guessing.
+export const BRIDGED_TOOL_POLICY_NOTE = `Tool policy for this session: your native file, shell and browser tools are disabled here and a call to any of them ends the turn without an answer. Use the tools served by the MCP server "${DEFAULT_TOOL_SERVER_NAME}" for every file read, edit, search and command.`;
+export function processInput(prompt: string, bridged = false): string {
+    const content = bridged ? `${BRIDGED_TOOL_POLICY_NOTE}\n\n${prompt}` : prompt;
+    return `${JSON.stringify({ event: "user", message: { content } })}\n`;
 }
 export async function runAntigravityProcess(request: HeadlessProcessRequest): Promise<HeadlessProcessOutput> {
     if (request.signal?.aborted)
@@ -608,7 +613,7 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         output = await (options.processRunner ?? runAntigravityProcess)({
             command: options.binary,
             arguments: processArguments(options.model, timeoutMs, allowEdits),
-            input: processInput(options.prompt),
+            input: processInput(options.prompt, options.toolEndpoint !== undefined),
             cwd: options.cwd,
             environment: processEnvironment(source, configHome?.path),
             timeoutMs,
@@ -681,7 +686,11 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
             permissionDenied
                 ? `Antigravity produced no response: a tool permission could not be granted in headless mode. FIX: this call ran agy with ${lane} (see processArguments), and a tool needing a permission is auto-denied there, which stops the run. ${remedy} ${childDetail(output, parsed.error)}`
                 : `Antigravity reported success with an empty response. ${childDetail(output, parsed.error)}`,
-            502,
+            // B07 (measured 2026-09-08, Agent inheritance arm): a denial returned as 502 was
+            // retried by Claude Code ten times with exponential backoff, each retry meeting the
+            // same policy. A denial is this turn's terminal answer, not a transient upstream
+            // fault: it travels as 403 and is not retried.
+            permissionDenied ? 403 : 502,
         );
     }
     return parsed.usage === undefined
