@@ -43,6 +43,16 @@ const DELIBERATE_DIFFERENCES = new Map([
 ]);
 
 async function walk(root) {
+  // N2 (red team, 2026-09-07): an unreadable root returned an empty list, so a
+  // missing dist and a missing reference both became "0 files, nothing differs,
+  // exit 0". Absence of output is not evidence of sameness; the root itself must
+  // be readable before anything below it is compared.
+  try {
+    await readdir(root);
+  } catch (error) {
+    console.error(`NOT_RUN: agac okunamadi: ${root}\n  ${error && error.message ? error.message : String(error)}`); // lint-izin: bu bir dosya sistemi hatasi (ENOENT/EACCES) ve mesaji yalnizca YOL tasir; kuralin korudugu sey oturum nonce'u tasiyan URL'lerdir, bu kanalda oyle bir deger olusmaz
+    process.exit(3);
+  }
   const found = [];
   async function visit(directory) {
     let entries;
@@ -103,4 +113,11 @@ if (extra.length > 0) console.log("\n-- fazladan --\n" + extra.map((f) => "  " +
 if (missing.length > 0 && process.env["SADAKAT_LIST_MISSING"] === "1") {
   console.log("\n-- henuz yok --\n" + missing.map((f) => "  " + f).join("\n"));
 }
-process.exit(differing.length > 0 || extra.length > 0 ? 1 : 0);
+// N2: a file the reference has and the build never produced is a fidelity failure,
+// not a footnote. It used to be counted, printed behind an env flag, and left out of
+// the exit code -- the gate rejected a DIFFERENT byte and accepted an ABSENT module.
+if (missing.length > 0 && process.env["SADAKAT_LIST_MISSING"] !== "1") {
+  console.log("\n-- henuz yok (ilk 10; tamami icin SADAKAT_LIST_MISSING=1) --\n"
+    + missing.slice(0, 10).map((f) => "  " + f).join("\n"));
+}
+process.exit(differing.length > 0 || extra.length > 0 || missing.length > 0 ? 1 : 0);

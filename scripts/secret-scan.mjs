@@ -27,17 +27,30 @@ const RULES = [
   ["private_key_block", /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g],
   ["jwt", /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\./g],
   ["bearer_literal", /\bBearer\s+[A-Za-z0-9._~+/-]{24,}={0,2}/g],
-  ["inline_credential_assignment", /\b(?:password|passwd|secret|client_secret|api_key|apikey|access_token|refresh_token)\s*[:=]\s*["'][^"'\s]{12,}["']/gi],
+  // N5 (red team, 2026-09-07): the field name in JSON carries a closing quote
+  // ("refresh_token": "..."), and the rule demanded whitespace or the separator
+  // straight after the name -- so the single most common on-disk shape of a
+  // credential was the one shape the scan could not see.
+  ["inline_credential_assignment", /\b(?:password|passwd|secret|client_secret|api_key|apikey|access_token|refresh_token)"?\s*[:=]\s*["'][^"'\s]{12,}["']/gi],
 ];
 
 // Deliberate acceptances. Every entry states WHY it is safe; adding an entry without a
 // reason is punching a silent hole in the gate.
+//
+// N6 (red team, 2026-09-07): the acceptance was keyed on the FILE, so the reason it
+// gave ("sha256 hex and npm SRI are public digests") covered every future line of
+// that file too -- a real credential added to install-lock.json in any other field
+// would have been accepted with a reason that did not apply to it. The acceptance is
+// now keyed on the VALUE: it must actually look like the digest the reason describes.
+const HASH_SHAPED = /^(?:[a-f0-9]{64}|sha(?:256|512)-[A-Za-z0-9+/=]{20,})$/;
+
 const ACCEPTED = [
-  [/^config\/install-lock\.json$/, "surum sabitleme: sha256 hex ve npm SRI -- ikisi de acik artefakt ozeti, sir degil"],
+  [/^config\/install-lock\.json$/, HASH_SHAPED, "surum sabitleme: sha256 hex ve npm SRI -- ikisi de acik artefakt ozeti, sir degil"],
 ];
 
-function isAccepted(relativePath) {
-  return ACCEPTED.some(([pattern]) => pattern.test(relativePath.split("\\").join("/")));
+function isAccepted(relativePath, matchedText) {
+  const path = relativePath.split("\\").join("/");
+  return ACCEPTED.some(([pattern, shape]) => pattern.test(path) && shape.test(matchedText));
 }
 
 async function collect(directory) {
@@ -65,7 +78,9 @@ function scanText(text) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(text)) !== null) {
-      hits.push({ rule: name, line: text.slice(0, match.index).split("\n").length });
+      // The matched text stays in memory for the acceptance decision only; it is
+      // never printed. A finding is reported as LOCATION and TYPE.
+      hits.push({ rule: name, line: text.slice(0, match.index).split("\n").length, matched: match[0] });
     }
   }
   return hits;
@@ -80,7 +95,31 @@ if (selfCheck) {
   const rules = new Set(hits.map((hit) => hit.rule));
   const ok = rules.has("openai_api_key") && rules.has("xai_api_key");
   console.log(`ozdenetim: sentetik kanarya ${ok ? "YAKALANDI" : "KACIRILDI"} (${[...rules].join(", ") || "hicbir kural atesle" + "medi"})`);
-  process.exit(ok ? 0 : 1);
+
+  // The acceptance arm. Until 2026-09-07 the install-lock exemption was keyed on the
+  // FILE, so it covered lines its stated reason did not describe; it is now keyed on
+  // the VALUE. On this tree the exemption never fires against real content, which
+  // means it would sit unmeasured -- so it is measured here, synthetically, on both
+  // arms: a digest is accepted, a credential in the same file is NOT.
+  const digest = "a".repeat(64);
+  const credential = ["sk-", "C".repeat(32)].join("");
+  const arms = [
+    ["hash-shaped deger install-lock'ta KABUL", isAccepted("config/install-lock.json", digest) === true],
+    ["sir-sekilli deger install-lock'ta RED", isAccepted("config/install-lock.json", credential) === false],
+    ["ayni digest baska dosyada RED", isAccepted("config/ordinary.json", digest) === false],
+  ];
+  let armFailed = 0;
+  for (const [name, pass] of arms) {
+    console.log(`  ${pass ? "GECTI" : "DUSTU"}  ${name}`);
+    if (!pass) armFailed += 1;
+  }
+  // The JSON field shape the scan used to miss entirely.
+  const jsonShaped = scanText(`{"refresh_token": "${"D".repeat(28)}"}`);
+  const jsonCaught = jsonShaped.some((hit) => hit.rule === "inline_credential_assignment");
+  console.log(`  ${jsonCaught ? "GECTI" : "DUSTU"}  JSON tirnakli alan adi YAKALANIR`);
+  if (!jsonCaught) armFailed += 1;
+
+  process.exit(ok && armFailed === 0 ? 0 : 1);
 }
 
 const files = (await Promise.all(SCAN_DIRECTORIES.map(collect))).flat();
@@ -90,8 +129,10 @@ for (const file of files) {
   const relativePath = relative(ROOT, file).split("\\").join("/");
   const hits = scanText(await readFile(file, "utf8"));
   if (hits.length === 0) continue;
-  if (isAccepted(relativePath)) { acceptedCount += hits.length; continue; }
-  for (const hit of hits) findings.push({ path: relativePath, ...hit });
+  for (const hit of hits) {
+    if (isAccepted(relativePath, hit.matched)) { acceptedCount += 1; continue; }
+    findings.push({ path: relativePath, rule: hit.rule, line: hit.line });
+  }
 }
 
 console.log(`taranan dosya   : ${files.length}`);

@@ -6,11 +6,17 @@ try {
   ({ verifyShadowModelSurface } = await import("../dist/src/runtime/claude-shadow.js"));
   ({ verifyClodexPackageLock } = await import("../dist/src/runtime/install-lock.js"));
 } catch (e) {
-  console.error(
-    "NOT_RUN: built output missing -- run `npm run build` first.\n" +
-    "  " + (e && e.message ? e.message.split("\n")[0] : String(e))
-  );
-  process.exit(3);
+  // N7 (red team, 2026-09-07): every import failure was reported as "build missing".
+  // A module that EXISTS and throws while loading is a broken build -- a failure, not
+  // an absence -- and calling it NOT_RUN turns a red result into "not measured".
+  const absent = e && (e.code === "ERR_MODULE_NOT_FOUND" || e.code === "MODULE_NOT_FOUND");
+  const first = e && e.message ? e.message.split("\n")[0] : String(e);
+  if (absent) {
+    console.error("NOT_RUN: built output missing -- run `npm run build` first.\n  " + first);
+    process.exit(3);
+  }
+  console.error("FAIL: built output exists but could not be loaded -- the build is broken.\n  " + first);
+  process.exit(1);
 }
 import { mkdtemp, mkdir, writeFile, copyFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
