@@ -19,8 +19,9 @@ into a chat box.
 
 The goal here is the opposite: **every model reachable through the router should be able to use the
 same Claude Code surface** — the `Agent` tool, skills, MCP servers such as Playwright, file
-editing under the same permission rules. That goal is **not met today**; B01 and G01 below
-say exactly where it falls short.
+editing under the same permission rules. Since 2026-09-08 the Google lane reaches that surface for real
+(G01 below, with a live receipt); what still stands between here and the full goal is B01 — the parent
+session's permission boundary is not applied to the routed subagents.
 
 Two audiences, both intentional:
 
@@ -122,9 +123,9 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | B04 | High | The workspace write check does not write the file it checks; a path race is open. |
 | B05 | High | This tree contains no launcher shim, so the native/router separation cannot be verified from the repository. |
 | B06 | High | The long-context advertisement is written into `max_input_tokens`, a protocol capacity contract, above the pinned snapshot value. A client obeying the advertised limit may build a request the transport does not accept. Unproven either way. |
-| G01 | High | The Google lane is not structurally connected to the Claude Code tool surface: MCP sessions are handed to the xAI adapter only. Even with B02 fixed, Google would not drive the harness's tool loop. |
+| ~~G01~~ | ~~High~~ | **Repaired 2026-09-08.** The Google lane now carries the same tool loop the xAI lane has. The objection that kept it away was that `agy mcp add` writes the session nonce into the operator's persistent config; the lane instead runs inside a **call-scoped configuration home** (`USERPROFILE` redirected, identity files hard-linked, never copied), so the operator's own `mcp_config.json` is never opened for writing. Live receipt: the router logged `agent_tool_call_parked`, Claude Code executed the MCP tool 213 ms later, one `tool_use` block crossed the stream, and the model returned a string it could not otherwise know. NOT claimed: a multi-step loop, or the `Agent` sub-loop. |
 | G02 | High | A non-empty `.mcp.json` in the project root — Claude Code's standard project MCP file — makes the xAI lane refuse to start (503). Fail-closed, but it is a denial of the lane in any repository that has one. |
-| G03 | High | An xAI session parked on a tool call waiting for the user's permission is counted as idle and can be reclaimed when the session cap is reached; the returning `tool_result` then finds no session. |
+| ~~G03~~ | ~~High~~ | **Repaired 2026-09-08.** A session parked on a tool call set `running = false` and so looked idle; at the cap the oldest such session was cancelled mid-loop. The naive guard reopens the process leak this reclaim exists to close, because an unaddressable session IS a parked one — so the discriminator is age: a 60 s grace window. Negative control on both edges: removing the guard fails the new arm, making it unconditional fails the old one. |
 | G04–G08 | High / suspected | `thinking`/`image`/`document` blocks in history are rejected with 422 on the agent lanes; the last text block of a multi-block user message is taken as "the request"; delegate agents get no tools; the live xAI MCP handshake has not been shown from this tree. |
 | N01 | High | Image blocks inside a tool result are reduced to an empty string, so a Playwright screenshot returns as a successful, empty tool result. |
 | N03 | High | Generated `*-delege` agents carry `tools: []` and `maxTurns: 1`; a user definition that widens them is rejected. |
@@ -132,9 +133,8 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | N05 | High | The OpenAI capsule's own loopback port does not enforce the transport nonce; a local process could reach it without going through the router. |
 | N06 | Medium | On POSIX, a helper that ignores SIGTERM keeps the timeout waiting; there is no escalation to SIGKILL. Unmeasured on Linux. |
 
-B01 and G01 are the reason the capability goal is not met today: routed models neither
-receive the catalogue that tells them what exists, nor operate under a permission boundary that
-makes handing them tools safe. **Both must land together.** Restoring capability without restoring
+B01 is now the reason the capability goal is not fully met: routed models reach the tools, but do not
+yet operate under a permission boundary that makes handing them tools safe. Restoring capability without restoring
 the boundary would ship a more powerful hole.
 
 ## Requirements

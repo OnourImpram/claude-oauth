@@ -230,6 +230,14 @@ table.data td.sev { white-space: nowrap; font: 500 0.78rem/1.6 var(--mono); }
 
 .repaired { margin-top: 1rem; padding: 0.75rem 0.9rem; border: 1px solid var(--rule); background: var(--plate); font-size: 0.9rem; max-width: var(--measure); }
 .repaired .id { color: var(--ink-2); }
+.repaired p { margin: 0.7rem 0 0; max-width: none; }
+
+/* The evidence chain reads as a log, not as prose: monospace timestamps, aligned, and it
+   scrolls inside itself rather than pushing the page sideways. */
+table.receipt { width: 100%; border-collapse: collapse; margin: 0.7rem 0 0; display: block; overflow-x: auto; }
+table.receipt td { padding: 0.25rem 0.8rem 0.25rem 0; border-top: 1px solid var(--rule); vertical-align: top; font-size: 0.86rem; }
+table.receipt tr:first-child td { border-top: 0; }
+table.receipt td.cell-id { font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* Narrow screens: a table row becomes a short stack; the column header travels with the cell. */
 @media (max-width: 34rem) {
@@ -427,10 +435,11 @@ footer p { max-width: var(--measure); }
         permission rules a native session has.
       </p>
       <p>
-        That target is not met. Two things stand between the current tree and it, and they must land together: the
-        parent session's permission boundary is not applied to the Google and xAI subagents (B01), and the Google lane is
-        not wired to the Claude Code tool surface at all (G01). Restoring capability without restoring the boundary would
-        ship a more powerful hole, so neither is being rushed.
+        As of 2026-09-08 the Google lane reaches that surface for real: the router logged the provider agent parking a
+        tool call, Claude Code executed it 213&nbsp;ms later, and the model returned a string it had no other way to know
+        (G01, repaired). One thing still stands between the current tree and the full target: the parent session's
+        permission boundary is not applied to the routed subagents (B01). Capability without that boundary would ship a
+        more powerful hole, so it is not being rushed.
       </p>
     </section>
 
@@ -449,8 +458,8 @@ footer p { max-width: var(--measure); }
               <td>The parent session's permission boundary is not applied to the Google and xAI subagents. The Google lane forces write and bypass flags on; the xAI lane accepts the first permission option and serves its own file-write handler. <code>executionMode: "agent-readonly"</code> misdescribes the effective authority.</td></tr>
             <tr><td class="cell-id"><span class="id">B05</span></td><td class="sev">high</td>
               <td>The launcher shim is not in this repository, so the native-separation claim above cannot be reproduced from this tree.</td></tr>
-            <tr><td class="cell-id"><span class="id">G01</span></td><td class="sev">high</td>
-              <td>The Google lane is not structurally connected to the Claude Code tool surface: MCP sessions are handed to the xAI adapter only. Google would not drive the harness's tool loop even with every other defect fixed.</td></tr>
+            <tr><td class="cell-id"><span class="id">G01</span></td><td class="sev">fixed</td>
+              <td><b>Repaired 2026-09-08.</b> The Google lane now carries the same tool loop the xAI lane has, inside a call-scoped configuration home: the session nonce never enters the operator's own MCP config, which is never opened for writing. Live receipt below.</td></tr>
             <tr><td class="cell-id"><span class="id">N01</span></td><td class="sev">high</td>
               <td>Image blocks inside a tool result are reduced to an empty string, so a Playwright screenshot returns as a successful, empty tool result.</td></tr>
             <tr><td class="cell-id"><span class="id">N05</span></td><td class="sev">high</td>
@@ -482,8 +491,33 @@ footer p { max-width: var(--measure); }
         skill catalogue, the agent catalogue, MCP instructions and the output style. It is now carried in its own
         section of the compiled prompt (<code>SESSION CAPABILITY CONTEXT</code>). Merged to <code>main</code> as <code>b5caf0e</code>, with six arms and a
         mutation control: removing the line that collects the message fails two of them. The claim this page will not
-        make is the end-to-end one — a green test is not a live run, and G01 below still keeps the Google lane away from
-        the tool surface entirely.
+        make on the strength of tests alone is the end-to-end one — a green test is not a live run. That claim is made
+        separately, and only where a live receipt backs it (G01).
+      </div>
+
+      <div class="repaired">
+        <span class="id">G01</span> &mdash; <b>repaired 2026-09-08, with a live receipt.</b> The Google lane now carries the
+        same tool loop the xAI lane has. It runs inside a <em>call-scoped configuration home</em>: <code>USERPROFILE</code> is
+        redirected for the duration of one call, identity files are hard-linked (never copied &mdash; a copy would put a second
+        physical copy of an OAuth credential on disk), and the session nonce lives only in a directory the router creates and
+        deletes. The operator&rsquo;s own <code>mcp_config.json</code> is never opened for writing.
+        <p>
+          Two earlier runs returned the right answer and proved nothing: <code>agy</code> has its own tools, so a correct
+          answer is equally consistent with this bridge being dead. What settles it is a chain recorded in three separate
+          places, none of them the model&rsquo;s own account of itself:
+        </p>
+        <table class="receipt">
+          <tbody>
+            <tr><td class="cell-id">04:18:59</td><td>MCP server log</td><td><code>initialize</code> from <code>claude-code/2.1.257</code></td></tr>
+            <tr><td class="cell-id">04:19:18.591</td><td>router.log</td><td><code>agent_tool_call_parked</code> &mdash; the provider agent asked <em>this</em> bridge for a tool</td></tr>
+            <tr><td class="cell-id">04:19:18.804</td><td>MCP server log</td><td><code>tools/call</code> from <code>claude-code/2.1.257</code> &mdash; Claude Code executed it</td></tr>
+            <tr><td class="cell-id">&mdash;</td><td>Anthropic stream</td><td>one <code>tool_use</code> block; the model returned a string it had no other way to know</td></tr>
+          </tbody>
+        </table>
+        <p>
+          What this does <b>not</b> claim: a multi-step loop (one tool call was measured), the <code>Agent</code> sub-loop, or
+          image-bearing tool results &mdash; N01 still reduces those to an empty string.
+        </p>
       </div>
     </section>
 
