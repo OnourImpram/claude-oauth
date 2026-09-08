@@ -49,19 +49,19 @@ function catalog(contextWindow: number): readonly ProviderModelRecord[] {
 }
 
 describe("withVerifiedOpenAiModels", () => {
-    it("canli baglam kilitle esitse HER OpenAI sozlesmesi snapshot'a girer", () => {
+    it("EVERY OpenAI contract enters the snapshot when the live context window matches the lock", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED);
         const ids = snapshot.models.map((model) => model.id);
         // Derived from the contract: had it been hand-written as "sol and terra", this test
         // would have stayed green when astra was added and never measured the new model.
         for (const contract of OPENAI_MODEL_CONTRACTS) {
-            strictEqual(ids.includes(contract.id), true, `snapshot'a girmedi: ${contract.id}`);
+            strictEqual(ids.includes(contract.id), true, `did not enter the snapshot: ${contract.id}`);
         }
-        strictEqual(ids.includes("anthropic-openai-gpt-6-astra"), true, "astra sozlesmesi kayip");
+        strictEqual(ids.includes("anthropic-openai-gpt-6-astra"), true, "Astra contract is missing");
         strictEqual(snapshot.source, "live-provider-refresh");
     });
 
-    it("kabul edilen modelin baglami CANLI degerdir, sabit degil", () => {
+    it("the accepted model's context window is the LIVE value, not a constant", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED);
         const sol = snapshot.models.find((model) => model.id === "anthropic-openai-gpt-5.6-sol");
         strictEqual(sol?.contextWindow, LOCKED);
@@ -72,18 +72,18 @@ describe("withVerifiedOpenAiModels", () => {
     // openai-oauth` it never ENTERS the providers.json cache (applyOAuthSeedContextMetadata
     // is a models.map, not a concat) -- astra must not enter the snapshot, and sol/terra
     // must be unaffected.
-    it("astra canli katalogda YOKKEN snapshot'a girmez, sol/terra dusmez", () => {
+    it("when Astra is ABSENT from the live catalog it does not enter the snapshot; Sol/Terra remain", () => {
         const withoutAstra = catalog(LOCKED).filter((entry) => !entry.id.includes("astra"));
         const snapshot = withVerifiedOpenAiModels(baseline, withoutAstra, LOCKED);
         const ids = snapshot.models.map((model) => model.id);
-        strictEqual(ids.includes("anthropic-openai-gpt-6-astra"), false, "katalogda olmayan model snapshot'a sizdi");
+        strictEqual(ids.includes("anthropic-openai-gpt-6-astra"), false, "a model absent from the catalog leaked into the snapshot");
         strictEqual(ids.includes("anthropic-openai-gpt-5.6-sol"), true);
         strictEqual(ids.includes("anthropic-openai-gpt-5.6-terra"), true);
     });
 
     // POSITIVE ARM: if astra is in the catalog and its context equals the lock, it DOES
     // enter. On its own, all the negative arm might have proved is "nothing ever enters".
-    it("astra canli katalogdaysa ve baglam esitse snapshot'a GIRER", () => {
+    it("Astra ENTERS the snapshot when it is in the live catalog and its context window matches", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED);
         const astra = snapshot.models.find((model) => model.id === "anthropic-openai-gpt-6-astra");
         strictEqual(astra?.upstreamModel, "anthropic-openai-oauth__gpt-6-astra");
@@ -93,24 +93,24 @@ describe("withVerifiedOpenAiModels", () => {
     });
 
     // NEGATIVE CONTROL: a stale pin -> the model drops. Proof that the gate actually filters.
-    it("canli baglam kilitten farkliysa modeller snapshot'a GIRMEZ", () => {
+    it("models DO NOT ENTER the snapshot when the live context window differs from the lock", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LIVE_DEGRADED), LOCKED);
         deepStrictEqual(snapshot.models.map((model) => model.id), ["claude-opus-5"]);
     });
 
-    it("anthropic modelleri her durumda korunur", () => {
+    it("Anthropic models are preserved in every case", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LIVE_DEGRADED), LOCKED);
         strictEqual(snapshot.models.some((model) => model.id === "claude-opus-5"), true);
     });
 
-    it("bos katalogda anthropic tabanina duser, cokmez", () => {
+    it("falls back to the Anthropic baseline for an empty catalog without crashing", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, [], LOCKED);
         deepStrictEqual(snapshot.models.map((model) => model.id), ["claude-opus-5"]);
     });
 });
 
 describe("openAiContextMismatches", () => {
-    it("elenen modeli ve IKI sayiyi birden adlandirir", () => {
+    it("names the rejected model and BOTH values", () => {
         const mismatches = openAiContextMismatches(catalog(LIVE_DEGRADED), LOCKED);
         strictEqual(mismatches.length, OPENAI_MODEL_CONTRACTS.length);
         const sol = mismatches.find((entry) => entry.id === "anthropic-openai-gpt-5.6-sol");
@@ -118,18 +118,18 @@ describe("openAiContextMismatches", () => {
         strictEqual(sol?.lockedContextWindow, LOCKED);
     });
 
-    it("baglam dogruyken hicbir sey bildirmez", () => {
+    it("reports nothing when the context window is correct", () => {
         deepStrictEqual(openAiContextMismatches(catalog(LOCKED), LOCKED), []);
     });
 
     // The distinction matters: NOT IN THE CATALOG and CONTEXT DOES NOT MATCH are not the
     // same thing. The previous message merged the two, so diagnosis was routed to the wrong
     // provider.
-    it("model katalogda hic yoksa uyumsuzluk olarak bildirmez", () => {
+    it("does not report a mismatch for a model absent from the catalog", () => {
         deepStrictEqual(openAiContextMismatches([], LOCKED), []);
     });
 
-    it("modellerden yalnizca biri sapmissa yalnizca onu bildirir", () => {
+    it("reports only the affected model when just one model has drifted", () => {
         const mixed: readonly ProviderModelRecord[] = [
             { id: "anthropic-openai-oauth__gpt-5.6-sol", contextWindow: LOCKED },
             { id: "anthropic-openai-oauth__gpt-5.6-terra", contextWindow: LIVE_DEGRADED },
@@ -153,17 +153,17 @@ describe("withPinnedNativeModels", () => {
     });
     const runtime: ModelSnapshot = { schemaVersion: 1, generatedAt: "2026-01-01T00:00:00.000Z", source: "live-provider-refresh", models: [native("claude-opus-5"), external("anthropic-xai-grok-4.6")] };
 
-    it("native satirlari pinli baseline'dan alir, harici satirlari calisan snapshot'tan korur", () => {
+    it("takes native rows from the pinned baseline and preserves external rows from the runtime snapshot", () => {
         const pinned: ModelSnapshot = { ...runtime, source: "pinned-install-baseline", models: [native("claude-fable-5-1"), native("claude-opus-5")] };
         const merged = withPinnedNativeModels(runtime, pinned);
         deepStrictEqual(merged.models.map((model) => model.id), ["claude-fable-5-1", "claude-opus-5", "anthropic-xai-grok-4.6"]);
-        strictEqual(merged.source, "live-provider-refresh", "snapshot kimligi calisan snapshot'in");
+        strictEqual(merged.source, "live-provider-refresh", "snapshot identity belongs to the runtime snapshot");
     });
 
     // NEGATIVE ARM: a STALE external row in the baseline is not served -- the only source of
     // external rows is a live refresh; otherwise the pin would silently bring an external
     // model back too.
-    it("baseline'daki harici satiri almaz; calisan snapshot'ta yoksa yok kalir", () => {
+    it("does not take an external row from the baseline; if absent from the runtime snapshot, it stays absent", () => {
         const pinned: ModelSnapshot = { ...runtime, models: [native("claude-opus-5"), external("anthropic-xai-grok-4.6")] };
         const runtimeWithoutGrok: ModelSnapshot = { ...runtime, models: [native("claude-opus-5")] };
         deepStrictEqual(withPinnedNativeModels(runtimeWithoutGrok, pinned).models.map((model) => model.id), ["claude-opus-5"]);
@@ -190,7 +190,7 @@ describe("openAiModelReadiness", () => {
         })),
     });
 
-    it("satir sayisi SOZLESME LISTESINDEN gelir, elle yazilmaz", () => {
+    it("row count comes from the CONTRACT LIST, not a hand-written value", () => {
         strictEqual(openAiModelReadiness(snapshotOf([])).length, OPENAI_MODEL_CONTRACTS.length);
         deepStrictEqual(
             openAiModelReadiness(snapshotOf([])).map((entry) => entry.id),
@@ -198,14 +198,14 @@ describe("openAiModelReadiness", () => {
         );
     });
 
-    it("astra sozlesmesi de bir satir uretir (alias astra)", () => {
+    it("the Astra contract also produces a row (alias astra)", () => {
         const astra = openAiModelReadiness(snapshotOf([])).find((entry) => entry.alias === "astra");
         strictEqual(astra?.id, "anthropic-openai-gpt-6-astra");
     });
 
     // NEGATIVE ARM: a model absent from the snapshot cannot be "enabled". Proof that the
     // gate actually filters -- a stub returning all true goes red here.
-    it("bos snapshot'ta HICBIR model etkin degildir", () => {
+    it("NO model is enabled in an empty snapshot", () => {
         strictEqual(openAiModelReadiness(snapshotOf([])).some((entry) => entry.enabled), false);
         strictEqual(openAiModelReadiness(undefined).some((entry) => entry.enabled), false);
     });
@@ -213,14 +213,14 @@ describe("openAiModelReadiness", () => {
     // The real accident scenario: sol+terra verified, astra not in the catalog. The two
     // hand-written literals would say "everything is ready" here; the derived list drops
     // astra BY NAME.
-    it("yalnizca astra eksikse onu ADIYLA dusurur, digerlerini etkin birakir", () => {
+    it("when only Astra is missing, marks it disabled BY NAME and leaves the others enabled", () => {
         const readiness = openAiModelReadiness(snapshotOf(["anthropic-openai-gpt-5.6-sol", "anthropic-openai-gpt-5.6-terra"]));
         const missing = readiness.filter((entry) => !entry.enabled).map((entry) => entry.id);
         deepStrictEqual(missing, ["anthropic-openai-gpt-6-astra"]);
-        strictEqual(readiness.every((entry) => entry.enabled), false, "--require-all bu durumda yesil VEREMEZ");
+        strictEqual(readiness.every((entry) => entry.enabled), false, "--require-all CANNOT succeed in this state");
     });
 
-    it("her sozlesme dogrulandiysa hepsi etkindir", () => {
+    it("all models are enabled when every contract is verified", () => {
         const readiness = openAiModelReadiness(snapshotOf(OPENAI_MODEL_CONTRACTS.map((contract) => contract.id)));
         strictEqual(readiness.every((entry) => entry.enabled), true);
     });
@@ -247,67 +247,67 @@ const googleReadyRows: readonly GoogleModelCatalogReadiness[] = googleContracts.
     status: "ready",
 }));
 
-describe("openAiGateReady -- doctor --require-all OpenAI kolu", () => {
-    it("her sozlesme etkinse yesil", () => {
+describe("openAiGateReady -- the doctor --require-all OpenAI arm", () => {
+    it("succeeds when every contract is enabled", () => {
         strictEqual(openAiGateReady(enabledRows), true);
     });
 
     // The arm that kills M1: when a single model drops, the gate MUST go red.
-    it("TEK BIR sozlesme etkisizse kirmizi (every -> some mutasyonunu oldurur)", () => {
+    it("fails when even ONE contract is disabled (kills the every -> some mutation)", () => {
         for (const contract of OPENAI_MODEL_CONTRACTS) {
             const readiness = enabledRows.map((entry) => (entry.id === contract.id ? { ...entry, enabled: false } : entry));
-            strictEqual(openAiGateReady(readiness), false, `dusen model yakalanmadi: ${contract.id}`);
+            strictEqual(openAiGateReady(readiness), false, `disabled model was not detected: ${contract.id}`);
         }
     });
 
     // The arm that replaces the counting tautology in the old expression: red when the row is absent entirely.
-    it("sozlesme satiri listede hic yoksa kirmizi", () => {
+    it("fails when a contract row is entirely absent from the list", () => {
         strictEqual(openAiGateReady(enabledRows.slice(1)), false);
         strictEqual(openAiGateReady([]), false);
     });
 
-    it("yabanci ama etkin bir satir eksik sozlesmenin yerini tutmaz", () => {
-        const kacak = [...enabledRows.slice(1), { alias: "yok", id: "anthropic-openai-boyle-bir-model-yok", enabled: true }];
-        strictEqual(openAiGateReady(kacak), false);
+    it("an unrelated enabled row cannot replace a missing contract", () => {
+        const foreignRows = [...enabledRows.slice(1), { alias: "missing", id: "anthropic-openai-no-such-model", enabled: true }];
+        strictEqual(openAiGateReady(foreignRows), false);
     });
 });
 
-describe("googleGateReady -- ayni sinif, google kolu", () => {
-    it("her google sozlesmesi ready ise yesil", () => {
+describe("googleGateReady -- the same failure class, Google arm", () => {
+    it("succeeds when every Google contract is ready", () => {
         strictEqual(googleGateReady(googleReadyRows), true);
     });
 
-    it("TEK BIR model ready degilse kirmizi", () => {
+    it("fails when even ONE model is not ready", () => {
         for (const contract of googleContracts) {
             const readiness = googleReadyRows.map((entry) => (entry.model === contract.upstreamModel
                 ? { ...entry, status: "blocked" as const }
                 : entry));
-            strictEqual(googleGateReady(readiness), false, `dusen model yakalanmadi: ${contract.upstreamModel}`);
+            strictEqual(googleGateReady(readiness), false, `disabled model was not detected: ${contract.upstreamModel}`);
         }
     });
 
-    it("satir eksikse kirmizi", () => {
+    it("fails when a row is missing", () => {
         strictEqual(googleGateReady(googleReadyRows.slice(1)), false);
         strictEqual(googleGateReady([]), false);
     });
 });
 
-describe("requireAllProvidersReady -- uc kolun birlesimi", () => {
-    const tam = { openAiModels: enabledRows, grokEnabled: true, googleModels: googleReadyRows };
+describe("requireAllProvidersReady -- combining the three arms", () => {
+    const complete = { openAiModels: enabledRows, grokEnabled: true, googleModels: googleReadyRows };
 
-    it("uc kol da tamsa yesil", () => {
-        strictEqual(requireAllProvidersReady(tam), true);
+    it("succeeds when all three arms are complete", () => {
+        strictEqual(requireAllProvidersReady(complete), true);
     });
 
     // If the catalog could not be built at all, --require-all CANNOT return green.
-    it("katalog yoksa kirmizi", () => {
+    it("fails when the catalog is absent", () => {
         strictEqual(requireAllProvidersReady(undefined), false);
     });
 
-    it("her kol tek basina kapiyi dusurur", () => {
-        strictEqual(requireAllProvidersReady({ ...tam, grokEnabled: false }), false, "grok kolu");
-        strictEqual(requireAllProvidersReady({ ...tam, openAiModels: enabledRows.map((entry, index) => (index === 0 ? { ...entry, enabled: false } : entry)) }), false, "openai kolu");
-        strictEqual(requireAllProvidersReady({ ...tam, googleModels: googleReadyRows.slice(1) }), false, "google kolu");
+    it("each arm independently makes the gate fail", () => {
+        strictEqual(requireAllProvidersReady({ ...complete, grokEnabled: false }), false, "Grok arm");
+        strictEqual(requireAllProvidersReady({ ...complete, openAiModels: enabledRows.map((entry, index) => (index === 0 ? { ...entry, enabled: false } : entry)) }), false, "OpenAI arm");
+        strictEqual(requireAllProvidersReady({ ...complete, googleModels: googleReadyRows.slice(1) }), false, "Google arm");
     });
 });
 
@@ -318,30 +318,30 @@ describe("requireAllProvidersReady -- uc kolun birlesimi", () => {
 // snapshot carries 828400 for sol/terra, the lock 872000. Below is the unit fixture of that
 // same conflict.
 // ============================================================================
-describe("openAiSnapshotRouteDrift -- 'neden dustu' sorusunun cevabi", () => {
-    const kurulu = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED).models.filter((model) => model.provider === "openai");
+describe("openAiSnapshotRouteDrift -- answers 'why did it fail'", () => {
+    const installed = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED).models.filter((model) => model.provider === "openai");
 
-    it("canli pencere snapshot'takinden farkliysa HER satir adiyla ve IKI sayiyla raporlanir", () => {
-        const drift = openAiSnapshotRouteDrift(kurulu, catalog(LIVE_DEGRADED));
+    it("when the live window differs from the snapshot, EVERY row is reported by name with BOTH values", () => {
+        const drift = openAiSnapshotRouteDrift(installed, catalog(LIVE_DEGRADED));
         strictEqual(drift.length, OPENAI_MODEL_CONTRACTS.length);
         const code = clodexCatalogDriftDetailCode(drift);
         for (const contract of OPENAI_MODEL_CONTRACTS) {
-            strictEqual(code.includes(contract.id), true, `kod modeli adiyla yazmiyor: ${contract.id}`);
+            strictEqual(code.includes(contract.id), true, `detail code does not name the model: ${contract.id}`);
         }
-        strictEqual(code.includes(`live${LIVE_DEGRADED}`), true, "canli sayi kodda yok");
-        strictEqual(code.includes(`snapshot${LOCKED}`), true, "snapshot sayisi kodda yok");
+        strictEqual(code.includes(`live${LIVE_DEGRADED}`), true, "live value is missing from the detail code");
+        strictEqual(code.includes(`snapshot${LOCKED}`), true, "snapshot value is missing from the detail code");
     });
 
     // NEGATIVE ARM: in a matching catalog there is NO drift. Without this, the arm above
     // cannot be told apart from "the function always produces rows".
-    it("katalog snapshot'la uyusuyorsa surukleme YOK ve kod sade bicimine doner", () => {
-        deepStrictEqual(openAiSnapshotRouteDrift(kurulu, catalog(LOCKED)), []);
+    it("when the catalog matches the snapshot there is NO drift and the detail code returns to its plain form", () => {
+        deepStrictEqual(openAiSnapshotRouteDrift(installed, catalog(LOCKED)), []);
         strictEqual(clodexCatalogDriftDetailCode([]), "clodex_session_catalog_drift");
     });
 
     // An empty catalog means "absent", it does NOT mean zero: a missing number is not invented.
-    it("katalogda hic olmayan model icin sayi uydurulmaz", () => {
-        const drift = openAiSnapshotRouteDrift(kurulu, []);
+    it("does not invent a value for a model absent from the catalog", () => {
+        const drift = openAiSnapshotRouteDrift(installed, []);
         strictEqual(drift.length, OPENAI_MODEL_CONTRACTS.length);
         strictEqual(drift.every((entry) => entry.liveContextWindow === undefined), true);
         strictEqual(clodexCatalogDriftDetailCode(drift).includes("=liveabsent"), true);
@@ -355,21 +355,21 @@ describe("openAiSnapshotRouteDrift -- 'neden dustu' sorusunun cevabi", () => {
     // 2026-09-01) the row is not verified and the drift line writes both numbers by name.
     // Had the advertisement been written into the snapshot this arm would stay GREEN: the
     // policy number would match itself and the detector would be blind.
-    it("Astra ilani 1M olsa da canli pencere dususu ADIYLA yakalanir", () => {
-        const astra = kurulu.find((model) => model.id === "anthropic-openai-gpt-6-astra");
-        ok(astra !== undefined, "astra snapshot satiri yok");
-        strictEqual(astra.contextWindow, LOCKED, "snapshot OLCULEN sayiyi tasimali");
-        strictEqual(isVerifiedOpenAiSnapshotRoute(astra, catalog(LIVE_DEGRADED)), false, "dusen canli pencere dogrulanmis sayildi");
-        const kod = clodexCatalogDriftDetailCode(openAiSnapshotRouteDrift([astra], catalog(LIVE_DEGRADED)));
-        strictEqual(kod.includes(`anthropic-openai-gpt-6-astra=live${LIVE_DEGRADED}_snapshot${LOCKED}`), true, kod);
+    it("a live window decrease is detected BY NAME even when Astra advertises 1M", () => {
+        const astra = installed.find((model) => model.id === "anthropic-openai-gpt-6-astra");
+        ok(astra !== undefined, "Astra snapshot row is missing");
+        strictEqual(astra.contextWindow, LOCKED, "snapshot must carry the MEASURED value");
+        strictEqual(isVerifiedOpenAiSnapshotRoute(astra, catalog(LIVE_DEGRADED)), false, "decreased live window was treated as verified");
+        const code = clodexCatalogDriftDetailCode(openAiSnapshotRouteDrift([astra], catalog(LIVE_DEGRADED)));
+        strictEqual(code.includes(`anthropic-openai-gpt-6-astra=live${LIVE_DEGRADED}_snapshot${LOCKED}`), true, code);
         // POSITIVE ARM: with the live number in place the same row verifies -- so the arm is
         // distinguishable from "always returns false".
         strictEqual(isVerifiedOpenAiSnapshotRoute(astra, catalog(LOCKED)), true);
     });
 
     // A detector ships with its remedy: a signal that cannot become an action is noise.
-    it("readiness caresini tasir ve durumu unavailable'dir", () => {
-        const readiness = openAiCatalogDriftReadiness(kurulu, catalog(LIVE_DEGRADED));
+    it("readiness carries the remedy and has status unavailable", () => {
+        const readiness = openAiCatalogDriftReadiness(installed, catalog(LIVE_DEGRADED));
         strictEqual(readiness.provider, "openai");
         strictEqual(readiness.status, "unavailable");
         strictEqual(readiness.detailCode?.startsWith("clodex_session_catalog_drift:"), true);

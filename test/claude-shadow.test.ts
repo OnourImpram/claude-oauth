@@ -36,26 +36,26 @@ async function syntheticBinary(name: string, body: string): Promise<string> {
 }
 
 describe("SHADOW_MODEL_SURFACE_NEEDLES", () => {
-    it("bos degil ve her girdi bos olmayan bir string", () => {
+    it("is non-empty and every entry is a non-empty string", () => {
         strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.length > 0, true);
         for (const needle of SHADOW_MODEL_SURFACE_NEEDLES) {
             strictEqual(typeof needle === "string" && needle.length > 0, true);
         }
     });
 
-    it("google model yuzeyi isaretcisini icerir", () => {
+    it("includes the Google model surface marker", () => {
         strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.some((needle) => needle.includes("hezarfen-google-oauth-model-surface")), true);
     });
 
     // DRIFT GATE: if a model is added to the contract and its picker line is forgotten, a
     // model appears that is invisible in /model but present in the snapshot -- or the
     // reverse. Both sides are tied together here.
-    it("her harici model sozlesmesinin bir picker ve bir resolver needle'i vardir", () => {
+    it("every external model contract has a picker needle and a resolver needle", () => {
         for (const contract of AGENT_MODEL_CONTRACTS) {
             const picker = `{value:${JSON.stringify(contract.alias)},`;
             const resolver = `case${JSON.stringify(contract.alias)}:return ${JSON.stringify(contract.alias)};`;
-            strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.some((needle) => needle.startsWith(picker)), true, `picker needle yok: ${contract.alias}`);
-            strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.includes(resolver), true, `resolver needle yok: ${contract.alias}`);
+            strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.some((needle) => needle.startsWith(picker)), true, `missing picker needle: ${contract.alias}`);
+            strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.includes(resolver), true, `missing resolver needle: ${contract.alias}`);
         }
     });
 });
@@ -63,22 +63,22 @@ describe("SHADOW_MODEL_SURFACE_NEEDLES", () => {
 // The local patch file and the needle list are two copies of the same truth; if they
 // diverge, the patched binary cannot pass the gate and the system never comes up at all.
 // This catches that divergence at build time.
-describe("yerel yama <-> needle tutarliligi", () => {
-    it("needle'daki her picker satiri yama dosyasinda da tanimlidir", async () => {
+describe("local patch <-> needle consistency", () => {
+    it("every picker row in the needles is also defined in the patch file", async () => {
         const patchPath = resolve(process.cwd(), "config", "claude-oauth-local-patches.mjs");
         const patchSource = await readFile(patchPath, "utf8");
         for (const contract of AGENT_MODEL_CONTRACTS) {
-            strictEqual(patchSource.includes(`alias: ${JSON.stringify(contract.alias)}`), true, `yamada alias yok: ${contract.alias}`);
-            strictEqual(patchSource.includes(`fullId: ${JSON.stringify(contract.id)}`), true, `yamada fullId yok: ${contract.id}`);
+            strictEqual(patchSource.includes(`alias: ${JSON.stringify(contract.alias)}`), true, `alias missing from patch: ${contract.alias}`);
+            strictEqual(patchSource.includes(`fullId: ${JSON.stringify(contract.id)}`), true, `fullId missing from patch: ${contract.id}`);
         }
     });
 
-    it("yamadaki baglam penceresi sozlesmeyle ayni", async () => {
+    it("the context window in the patch matches the contract", async () => {
         const patchPath = resolve(process.cwd(), "config", "claude-oauth-local-patches.mjs");
         const patchSource = await readFile(patchPath, "utf8");
         for (const contract of AGENT_MODEL_CONTRACTS) {
             const grouped = contract.contextWindow.toString().replace(/\B(?=(\d{3})+(?!\d))/gu, "_");
-            strictEqual(patchSource.includes(`contextWindow: ${grouped}`), true, `yamada baglam penceresi yok: ${contract.alias} = ${grouped}`);
+            strictEqual(patchSource.includes(`contextWindow: ${grouped}`), true, `context window missing from patch: ${contract.alias} = ${grouped}`);
         }
     });
 });
@@ -96,7 +96,7 @@ describe("yerel yama <-> needle tutarliligi", () => {
 // providerId comes from CLODEX_HOME/config.json and TODAY it is "openai-oauth"; the anchor
 // expected "openai", and the value measured in the installed shadow confirmed this
 // ("clodex:openai:gpt-5.6-sol" x1, "clodex:openai-oauth:..." x0).
-describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
+describe("the local patch anchor matches the shape clodex ACTUALLY produces", () => {
     function clodexPatched(providerId: string, aliases: readonly (readonly [string, string])[]): string {
         const cases = aliases.map(([alias]) => `case"${alias}":return "${alias}";`).join("");
         const rows = aliases
@@ -120,7 +120,7 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
         const patchPath = resolve(process.cwd(), "config", "claude-oauth-local-patches.mjs");
         const loaded = (await import(pathToFileURL(patchPath).href)) as { default: readonly { apply(source: string, context: { marker: string }): string }[] };
         const patch = loaded.default[0];
-        strictEqual(patch !== undefined, true, "yerel yama dosyasi bos");
+        strictEqual(patch !== undefined, true, "local patch file is empty");
         return patch?.apply(source, { marker: MARKER }) ?? "";
     }
 
@@ -131,25 +131,25 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
     }
 
     // Today's configuration: providerId "openai-oauth".
-    it("providerId openai-oauth ciktisinda her needle TAM BIR KEZ olusur", async () => {
+    it("every needle occurs EXACTLY ONCE in output with providerId openai-oauth", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [SOL, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
     // It must hold when Astra is added too: the anchor must not depend on the NUMBER of OpenAI aliases.
-    it("ucuncu OpenAI alias'i (astra) eklenince capa hala tutar", async () => {
+    it("the anchor still matches when a third OpenAI alias (astra) is added", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [SOL, TERRA, ASTRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
     // ...and it must not depend on ORDER either: the order in the favourites file is the operator's to set.
-    it("alias sirasi degisince (astra once) capa hala tutar", async () => {
+    it("the anchor still matches when alias order changes (astra first)", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [ASTRA, SOL, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
     // Backwards compatible: a binary produced with the old providerId is accepted too.
-    it("eski providerId (openai) ciktisinda da tutar", async () => {
+    it("also matches output with the old providerId (openai)", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai", [SOL, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
@@ -157,7 +157,7 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
     // NEGATIVE ARM: if clodex's own PATCH 5/6 never ran, the anchor is ABSENT and the patch
     // MUST NOT inject the picker/resolver lines. Without this arm the four above cannot be
     // told apart from "the patch writes everything into everything".
-    it("capasiz kaynakta picker/resolver satiri ENJEKTE EDILMEZ", async () => {
+    it("picker/resolver rows ARE NOT INJECTED into source without an anchor", async () => {
         const patched = await applyLocalPatch('function r4(t5){return w2.includes(t5)}switch(n){case"best":{return "opus"}default:return n}');
         const leaked = SHADOW_MODEL_SURFACE_NEEDLES.filter((needle) => needle !== MARKER && patched.includes(needle));
         deepStrictEqual(leaked, []);
@@ -167,12 +167,12 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
     // tied the GOOGLE and xAI lanes to which OpenAI models the operator happened to keep
     // enabled. Probe V5 measured it: without sol, all four resolver needles went to x0.
     // Two unrelated lanes must not share the same fate.
-    it("sol CLODEX_HOME'da YOKKEN (astra+terra) capa yine tutar", async () => {
+    it("the anchor still matches when sol is ABSENT from CLODEX_HOME (astra+terra)", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [ASTRA, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
-    it("tek bir OpenAI alias'i varken de tutar", async () => {
+    it("also matches when only one OpenAI alias is present", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
@@ -181,38 +181,38 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
     // matches. In a source carrying two clodex-shaped picker arrays all four needles land at
     // x2, and verifyShadowModelSurface only rejects that afterwards, unable to say why. Now
     // the patch fails ITSELF, and BY NAME.
-    it("IKI picker dizisi varsa yama cift enjeksiyon yapmak yerine REDDEDER", async () => {
-        const iki = `${clodexPatched("openai-oauth", [SOL, TERRA])}\n[{value:"x",label:"X",description:"Custom model (clodex:openai-oauth:x)"}].forEach(function(_o){if(!k8.some(function(_i){return _i.value===_o.value}))k8.push(_o)});`;
-        await rejects(async () => { await applyLocalPatch(iki); }, /anchor "model-picker" matched 2 times/u);
+    it("with TWO picker arrays the patch REJECTS instead of injecting twice", async () => {
+        const twoPickerArrays = `${clodexPatched("openai-oauth", [SOL, TERRA])}\n[{value:"x",label:"X",description:"Custom model (clodex:openai-oauth:x)"}].forEach(function(_o){if(!k8.some(function(_i){return _i.value===_o.value}))k8.push(_o)});`;
+        await rejects(async () => { await applyLocalPatch(twoPickerArrays); }, /anchor "model-picker" matched 2 times/u);
     });
 });
 
-describe("verifyShadowModelSurface (sentetik)", () => {
-    it("her needle TAM BIR KEZ varsa kabul eder", async () => {
-        const path = await syntheticBinary("tam.bin", SHADOW_MODEL_SURFACE_NEEDLES.join("\n"));
+describe("verifyShadowModelSurface (synthetic)", () => {
+    it("accepts when every needle occurs EXACTLY ONCE", async () => {
+        const path = await syntheticBinary("complete.bin", SHADOW_MODEL_SURFACE_NEEDLES.join("\n"));
         await verifyShadowModelSurface(path);
     });
 
     // NEGATIVE ARM: an unpatched binary. Proof that the gate can throw.
-    it("hicbir needle yoksa REDDEDER", async () => {
-        const path = await syntheticBinary("bos.bin", "yamasiz bir ikili gibi davranan icerik");
+    it("REJECTS when no needles are present", async () => {
+        const path = await syntheticBinary("empty.bin", "content that behaves like an unpatched binary");
         await rejects(async () => { await verifyShadowModelSurface(path); }, /model-picker proof/u);
     });
 
-    it("TEK BIR needle eksikse bile reddeder", async () => {
-        const path = await syntheticBinary("eksik.bin", SHADOW_MODEL_SURFACE_NEEDLES.slice(1).join("\n"));
+    it("rejects even when only ONE needle is missing", async () => {
+        const path = await syntheticBinary("missing.bin", SHADOW_MODEL_SURFACE_NEEDLES.slice(1).join("\n"));
         await rejects(async () => { await verifyShadowModelSurface(path); }, /model-picker proof/u);
     });
 
     // Occurring twice is a defect as well: applying the patch twice duplicates the picker.
-    it("bir needle IKI kez geciyorsa reddeder", async () => {
+    it("rejects when a needle occurs TWICE", async () => {
         const first = SHADOW_MODEL_SURFACE_NEEDLES[0] ?? "";
-        const path = await syntheticBinary("ikili.bin", [...SHADOW_MODEL_SURFACE_NEEDLES, first].join("\n"));
+        const path = await syntheticBinary("duplicate.bin", [...SHADOW_MODEL_SURFACE_NEEDLES, first].join("\n"));
         await rejects(async () => { await verifyShadowModelSurface(path); }, /model-picker proof/u);
     });
 
-    it("hata mesaji hangi needle'in kactigini ve ONARIM yolunu soyler", async () => {
-        const path = await syntheticBinary("teshis.bin", "hicbir sey");
+    it("the error message identifies the missing needle and the ONARIM remedy path", async () => {
+        const path = await syntheticBinary("diagnosis.bin", "nothing");
         await rejects(
             async () => { await verifyShadowModelSurface(path); },
             (error: unknown) => {
@@ -225,17 +225,17 @@ describe("verifyShadowModelSurface (sentetik)", () => {
     });
 });
 
-describe("verifyShadowModelSurface (gercek ikililer)", () => {
+describe("verifyShadowModelSurface (real binaries)", () => {
     // This arm measures the ENVIRONMENT, not the code's contract: the synthetic arms
     // already prove both directions of the gate. If the installed shadow was produced from
     // a VALID local patch it MUST carry the needles, and if it does not, that is a real
     // defect. But if the manifest says it is stale, it is waiting to be re-patched; turning
     // the test red in that case destroys the meaning of the alarm -- so it is skipped with
     // its reason.
-    it("kurulu yamali shadow kabul edilir", async (t) => {
+    it("accepts the installed patched shadow", async (t) => {
         const { access, readFile } = await import("node:fs/promises");
         try { await access(SHADOW); }
-        catch { t.skip("yamali shadow bu makinede kurulu degil"); return; }
+        catch { t.skip("patched shadow is not installed on this machine"); return; }
         const lock = JSON.parse(await readFile(resolve(process.cwd(), "config", "install-lock.json"), "utf8")) as { clodex: { localPatchSha256: string } };
         let installedPatchSha = "";
         try {
@@ -244,16 +244,16 @@ describe("verifyShadowModelSurface (gercek ikililer)", () => {
         }
         catch { installedPatchSha = ""; }
         if (installedPatchSha.toUpperCase() !== lock.clodex.localPatchSha256.toUpperCase()) {
-            t.skip(`kurulu shadow bayat yerel yamadan uretilmis (manifest=${installedPatchSha.slice(0, 12)} kilit=${lock.clodex.localPatchSha256.slice(0, 12)}); yeniden yamalama bekliyor`);
+            t.skip(`installed shadow was built from a stale local patch (manifest=${installedPatchSha.slice(0, 12)} lock=${lock.clodex.localPatchSha256.slice(0, 12)}); awaiting re-patching`);
             return;
         }
         await verifyShadowModelSurface(SHADOW);
     });
 
-    it("yamasiz native REDDEDILIR", async (t) => {
+    it("the unpatched native binary IS REJECTED", async (t) => {
         const { access } = await import("node:fs/promises");
         try { await access(NATIVE); }
-        catch { t.skip("native claude bu makinede kurulu degil"); return; }
+        catch { t.skip("native Claude is not installed on this machine"); return; }
         await rejects(async () => { await verifyShadowModelSurface(NATIVE); }, /model-picker proof/u);
     });
 });

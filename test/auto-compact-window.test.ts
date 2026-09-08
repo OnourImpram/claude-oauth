@@ -60,13 +60,13 @@ describe("auto-compaction window policy", () => {
     // ------------------------------------------------------------------
     const astra = OPENAI_MODEL_CONTRACTS.find((contract) => contract.alias === "astra");
 
-    it("Astra sozlesmesi vardir -- yoksa asagidaki bolme anlamsizdir", () => {
-        ok(astra !== undefined, "astra sozlesmesi kayip: partition olcmuyor");
+    it("the Astra contract exists -- otherwise the partition below is meaningless", () => {
+        ok(astra !== undefined, "Astra contract missing: the partition measures nothing");
     });
 
-    it("Astra DISINDAKI her OpenAI sozlesmesi fiyat sinirinin altinda kompaktlanir", () => {
+    it("every OpenAI contract EXCEPT Astra compacts below the pricing boundary", () => {
         for (const contract of OPENAI_MODEL_CONTRACTS.filter((entry) => entry.alias !== "astra")) {
-            strictEqual(contract.autoCompactWindow < OPENAI_LONG_CONTEXT_PRICING_BOUNDARY_TOKENS, true, `sinirin ustunde: ${contract.id}`);
+            strictEqual(contract.autoCompactWindow < OPENAI_LONG_CONTEXT_PRICING_BOUNDARY_TOKENS, true, `above the boundary: ${contract.id}`);
         }
     });
 
@@ -74,16 +74,16 @@ describe("auto-compaction window policy", () => {
     // exception (ChatGPT Enterprise rate card, "Codex long-context exception"; the quote
     // lives in the contract's contextWindowSource field). If this arm starts falling, the
     // exception has been lost.
-    it("Astra fiyat sinirinin USTUNDE kompaktlanir -- Codex uzun-baglam istisnasi", () => {
+    it("Astra compacts ABOVE the pricing boundary -- Codex long-context exception", () => {
         strictEqual(OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS > OPENAI_LONG_CONTEXT_PRICING_BOUNDARY_TOKENS, true);
         strictEqual(astra?.autoCompactWindow, OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS);
         strictEqual(OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS, 650_000);
     });
 
-    it("hicbir OpenAI penceresi kendi ILAN EDILEN penceresini asmaz", () => {
+    it("no OpenAI window exceeds its own ADVERTISED window", () => {
         for (const contract of OPENAI_MODEL_CONTRACTS) {
-            const ilan = contract.advertisedContextWindow ?? contract.contextWindow;
-            strictEqual(contract.autoCompactWindow <= ilan, true, `ilanini asiyor: ${contract.id}`);
+            const advertisedWindow = contract.advertisedContextWindow ?? contract.contextWindow;
+            strictEqual(contract.autoCompactWindow <= advertisedWindow, true, `exceeds its advertised window: ${contract.id}`);
         }
     });
 
@@ -93,7 +93,7 @@ describe("auto-compaction window policy", () => {
     // the advertisement but ABOVE the pin -- say 900_000 -- the session would exceed
     // clodex's real stop and nothing would say so. The number is not written by hand here,
     // it is READ from the lock.
-    it("her OpenAI kompaktlama penceresi GERCEK ust sinirin (install-lock pini) altindadir", async (t) => {
+    it("every OpenAI compaction window is below the ACTUAL upper bound (install-lock pin)", async (t) => {
         const repoRoot = resolve(import.meta.dirname, "..", "..");
         let pin: number;
         try {
@@ -102,19 +102,19 @@ describe("auto-compaction window policy", () => {
             };
             const value = lock.claudeShadow?.openAiContextWindow;
             if (typeof value !== "number")
-                throw new Error("claudeShadow.openAiContextWindow yok");
+                throw new Error("claudeShadow.openAiContextWindow is missing");
             pin = value;
         }
         catch (error) {
             // Evidence grammar: a check that could not run is NOT a silent pass, it is skipped with its reason.
-            t.skip(`config/install-lock.json okunamadi: ${(error as Error).message}`);
+            t.skip(`could not read config/install-lock.json: ${(error as Error).message}`);
             return;
         }
         for (const contract of OPENAI_MODEL_CONTRACTS) {
-            strictEqual(contract.autoCompactWindow < pin, true, `pin ${pin} asiliyor: ${contract.id} = ${contract.autoCompactWindow}`);
+            strictEqual(contract.autoCompactWindow < pin, true, `pin ${pin} exceeded: ${contract.id} = ${contract.autoCompactWindow}`);
         }
         // The advertisement must be ABOVE the pin, otherwise this change has no reason to exist.
-        strictEqual(OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS > pin, true, "ilan pinin ustunde degil: degisiklik etkisiz");
+        strictEqual(OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS > pin, true, "advertised window is not above the pin: the change has no effect");
     });
 });
 
@@ -131,7 +131,7 @@ describe("autoCompactWindowForModel", () => {
     // Astra no longer shares the FAMILY constant: both the alias and the full identity must
     // return its own number. A resolver falling back to the shared constant would silently
     // return 220_000.
-    it("Astra kendi penceresini cozer, aile sabitini degil", () => {
+    it("Astra resolves its own window, not the family constant", () => {
         strictEqual(autoCompactWindowForModel("astra"), OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS);
         strictEqual(autoCompactWindowForModel("anthropic-openai-gpt-6-astra"), OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS);
         strictEqual(autoCompactWindowForModel("astra") === OPENAI_AUTO_COMPACT_WINDOW_TOKENS, false);

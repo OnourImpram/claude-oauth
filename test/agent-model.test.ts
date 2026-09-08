@@ -39,7 +39,7 @@ function adapterCapturing(sink: { prompt?: string }): AgentModelAdapter {
         readiness: async () => ({ provider: "google", oauthReady: true, adapterReady: true, status: "ready", detailCode: "test" }),
         run: async (runRequest: AgentModelRunRequest) => {
             sink.prompt = runRequest.prompt;
-            return { text: "CEVAP" };
+            return { text: "ANSWER" };
         },
     });
 }
@@ -50,43 +50,43 @@ async function compiledPromptFor(envelope: MessageEnvelope): Promise<string> {
     return sink.prompt ?? "";
 }
 
-describe("derlenen agent prompt'u", () => {
-    it("sozlesme basligiyla baslar", async () => {
-        const prompt = await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "merhaba" }] });
+describe("compiled agent prompt", () => {
+    it("starts with the contract header", async () => {
+        const prompt = await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "hello" }] });
         strictEqual(prompt.startsWith("HEZARFEN_AGENT_READONLY_V1"), true);
     });
 
-    it("SIMDIKI istegi son bolume koyar", async () => {
-        const prompt = await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "son istek" }] });
-        strictEqual(prompt.trimEnd().endsWith("son istek"), true);
+    it("places the CURRENT request in the final section", async () => {
+        const prompt = await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "latest request" }] });
+        strictEqual(prompt.trimEnd().endsWith("latest request"), true);
     });
 
     // The boundary itself: history is "context", the last message is the "request". The two
     // must sit under separate headings.
-    it("gecmis turlari ISTEK olarak degil BAGLAM olarak isaretler", async () => {
+    it("marks earlier turns as CONTEXT, not as the REQUEST", async () => {
         const prompt = await compiledPromptFor({
             model: model.id,
             messages: [
-                { role: "user", content: "eski soru" },
-                { role: "assistant", content: "eski cevap" },
-                { role: "user", content: "yeni soru" },
+                { role: "user", content: "earlier question" },
+                { role: "assistant", content: "earlier answer" },
+                { role: "user", content: "new question" },
             ],
         });
         const historyIndex = prompt.indexOf("CONVERSATION HISTORY");
         const currentIndex = prompt.indexOf("CURRENT USER REQUEST:");
         strictEqual(historyIndex >= 0, true);
         strictEqual(currentIndex > historyIndex, true);
-        strictEqual(prompt.slice(historyIndex, currentIndex).includes("eski soru"), true);
-        strictEqual(prompt.slice(currentIndex).includes("yeni soru"), true);
-        strictEqual(prompt.slice(currentIndex).includes("eski soru"), false);
+        strictEqual(prompt.slice(historyIndex, currentIndex).includes("earlier question"), true);
+        strictEqual(prompt.slice(currentIndex).includes("new question"), true);
+        strictEqual(prompt.slice(currentIndex).includes("earlier question"), false);
     });
 
-    it("modele onceki turu yeniden cevaplamamasini acikca soyler", async () => {
+    it("explicitly tells the model not to answer an earlier turn again", async () => {
         const prompt = await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "x" }] });
         strictEqual(prompt.includes("Do not answer an earlier turn again"), true);
     });
 
-    it("ust katman arac semalarini BILGI olarak isaretler, cagrilabilir olarak degil", async () => {
+    it("marks parent tool schemas as INFORMATIONAL, not callable", async () => {
         const prompt = await compiledPromptFor({
             model: model.id,
             messages: [{ role: "user", content: "x" }],
@@ -96,12 +96,12 @@ describe("derlenen agent prompt'u", () => {
         strictEqual(prompt.includes("Read"), true);
     });
 
-    it("hic arac yoksa arac bolumunu hic yazmaz", async () => {
+    it("omits the tool section entirely when there are no tools", async () => {
         const prompt = await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "x" }] });
         strictEqual(prompt.includes("Parent tool names"), false);
     });
 
-    it("bos bir istegi REDDEDER (sessizce bos prompt gondermez)", async () => {
+    it("REJECTS an empty request (does not silently send an empty prompt)", async () => {
         await rejects(
             async () => { await compiledPromptFor({ model: model.id, messages: [{ role: "user", content: "   " }] }); },
             /non-empty current user request/u,
@@ -109,17 +109,17 @@ describe("derlenen agent prompt'u", () => {
     });
 });
 
-describe("count_tokens yolu", () => {
-    it("saglayiciyi hic cagirmadan yerel ust sinir doner", async () => {
+describe("count_tokens path", () => {
+    it("returns a local upper bound without calling the provider", async () => {
         const sink: { prompt?: string } = {};
-        const response = await adapterCapturing(sink).send(request({ model: model.id, messages: [{ role: "user", content: "merhaba" }] }, "/v1/messages/count_tokens"));
+        const response = await adapterCapturing(sink).send(request({ model: model.id, messages: [{ role: "user", content: "hello" }] }, "/v1/messages/count_tokens"));
         strictEqual(response.status, 200);
         strictEqual(sink.prompt, undefined);
     });
 });
 
-describe("saglayici/model eslesmesi", () => {
-    it("adaptorun saglayicisi model saglayicisiyla uyusmazsa reddeder", async () => {
+describe("provider/model matching", () => {
+    it("rejects when the adapter's provider does not match the model's provider", async () => {
         const adapter = new AgentModelAdapter({
             provider: "xai",
             readiness: async () => ({ provider: "xai", oauthReady: true, adapterReady: true, status: "ready", detailCode: "test" }),
@@ -131,7 +131,7 @@ describe("saglayici/model eslesmesi", () => {
         );
     });
 
-    it("pingIntervalMs pozitif tamsayi degilse kurulusu reddeder", () => {
+    it("rejects initialization when pingIntervalMs is not a positive integer", () => {
         for (const bad of [0, -1, 1.5, Number.NaN]) {
             let threw = false;
             try {

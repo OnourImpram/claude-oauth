@@ -41,80 +41,80 @@ function injectedAgentNames(availableModelIds: readonly string[]): readonly stri
     return Object.keys(JSON.parse(rewritten[index + 1] ?? "{}") as Record<string, unknown>);
 }
 
-describe("Antigravity izin listesi sozlesmelerden turetilir", () => {
-    it("her Google sozlesmesinin upstream modeli izin listesindedir", () => {
+describe("the Antigravity allow list is derived from contracts", () => {
+    it("every Google contract's upstream model is in the allow list", () => {
         for (const contract of AGENT_MODEL_CONTRACTS.filter((entry) => entry.provider === "google")) {
-            strictEqual(antigravityAllowedModels.includes(contract.upstreamModel), true, `izin listesinde yok: ${contract.upstreamModel}`);
+            strictEqual(antigravityAllowedModels.includes(contract.upstreamModel), true, `missing from the allow list: ${contract.upstreamModel}`);
         }
     });
 
     // NEGATIVE ARM: the list must not reach BEYOND the contracts -- that is the security check.
-    it("izin listesi sozlesme kumesinin disina tasmaz", () => {
+    it("the allow list does not extend beyond the set of contracts", () => {
         const reviewed = new Set(AGENT_MODEL_CONTRACTS.filter((entry) => entry.provider === "google").map((entry) => entry.upstreamModel));
         for (const model of antigravityAllowedModels) {
-            strictEqual(reviewed.has(model), true, `sozlesmesiz model izinli: ${model}`);
+            strictEqual(reviewed.has(model), true, `model allowed without a contract: ${model}`);
         }
     });
 });
 
-describe("delege ajan adlari", () => {
-    it("her harici model sozlesmesi TAM BIR delege uretir", () => {
+describe("delegate agent names", () => {
+    it("every external model contract produces EXACTLY ONE delegate", () => {
         const names = injectedAgentNames(ALL_EXTERNAL_IDS);
         for (const contract of [...AGENT_MODEL_CONTRACTS, ...OPENAI_MODEL_CONTRACTS]) {
             const expected = `${contract.alias}-delege`;
-            strictEqual(names.includes(expected), true, `delege uretilmedi: ${expected}`);
+            strictEqual(names.includes(expected), true, `delegate was not generated: ${expected}`);
         }
     });
 
     // This was the actual defect: when two contracts produce the same name,
     // Object.fromEntries silently overwrites one and that model becomes undelegatable.
-    it("hicbir delege adi CAKISMAZ", () => {
+    it("delegate names NEVER COLLIDE", () => {
         const names = injectedAgentNames(ALL_EXTERNAL_IDS);
-        strictEqual(new Set(names).size, names.length, `cakisan ad var: ${names.join(", ")}`);
+        strictEqual(new Set(names).size, names.length, `duplicate name present: ${names.join(", ")}`);
     });
 
-    it("Grok da delege uretir (filtre bir zamanlar yalnizca google idi)", () => {
+    it("Grok also produces a delegate (the filter used to include only Google)", () => {
         const names = injectedAgentNames(ALL_EXTERNAL_IDS);
         strictEqual(names.includes("grok-delege"), true);
     });
 
-    it("snapshot'ta dogrulanmamis modelin delegesi enjekte EDILMEZ", () => {
+    it("a delegate IS NOT injected for a model unverified in the snapshot", () => {
         const names = injectedAgentNames([]);
         for (const contract of [...AGENT_MODEL_CONTRACTS, ...OPENAI_MODEL_CONTRACTS]) {
-            strictEqual(names.includes(`${contract.alias}-delege`), false, `bos snapshot'ta sizdi: ${contract.alias}`);
+            strictEqual(names.includes(`${contract.alias}-delege`), false, `leaked into an empty snapshot: ${contract.alias}`);
         }
     });
 });
 
-describe("native-gateway modu tam model kimligi kullanir", () => {
+describe("native-gateway mode uses the full model identity", () => {
     // The native binary does not recognise aliases: values like "sol", produced for the
     // patched picker, return unrecognized_model on the native path. A delegate definition
     // must carry the FULL identity.
-    it("delege tanimlari native modda tam snapshot kimligi tasir", () => {
+    it("delegate definitions carry the full snapshot identity in native mode", () => {
         const rewritten = claudeOAuthAgentArguments([], ALL_EXTERNAL_IDS, "native-gateway");
         const index = rewritten.indexOf("--agents");
         strictEqual(index !== -1, true);
         const parsed = JSON.parse(rewritten[index + 1] ?? "{}") as Record<string, { model?: string }>;
         for (const contract of [...AGENT_MODEL_CONTRACTS, ...OPENAI_MODEL_CONTRACTS]) {
-            strictEqual(parsed[`${contract.alias}-delege`]?.model, contract.id, `native modda alias kaldi: ${contract.alias}`);
+            strictEqual(parsed[`${contract.alias}-delege`]?.model, contract.id, `alias remained in native mode: ${contract.alias}`);
         }
     });
 
-    it("yamali modda alias korunur", () => {
+    it("preserves aliases in patched mode", () => {
         const rewritten = claudeOAuthAgentArguments([], ALL_EXTERNAL_IDS, "patched-shadow");
         const index = rewritten.indexOf("--agents");
         const parsed = JSON.parse(rewritten[index + 1] ?? "{}") as Record<string, { model?: string }>;
         for (const contract of [...AGENT_MODEL_CONTRACTS, ...OPENAI_MODEL_CONTRACTS]) {
-            strictEqual(parsed[`${contract.alias}-delege`]?.model, contract.alias, `yamali modda kimlik sizdi: ${contract.alias}`);
+            strictEqual(parsed[`${contract.alias}-delege`]?.model, contract.alias, `full identity leaked into patched mode: ${contract.alias}`);
         }
     });
 
-    it("native modda --model yeniden YAZILMAZ", () => {
+    it("--model IS NOT rewritten in native mode", () => {
         const rewritten = claudeOAuthAgentArguments(["--model", "anthropic-openai-gpt-5.6-sol"], ALL_EXTERNAL_IDS, "native-gateway");
         strictEqual(rewritten[1], "anthropic-openai-gpt-5.6-sol");
     });
 
-    it("yamali modda --model alias'a cevrilir", () => {
+    it("--model is converted to an alias in patched mode", () => {
         const rewritten = claudeOAuthAgentArguments(["--model", "anthropic-openai-gpt-5.6-sol"], ALL_EXTERNAL_IDS, "patched-shadow");
         strictEqual(rewritten[1], "sol");
     });
@@ -134,33 +134,33 @@ describe("native-gateway modu tam model kimligi kullanir", () => {
 // MECHANICAL proof that this number equals the pin in config/install-lock.json is not here
 // but in the lock-reading arm of test/auto-compact-window.test.ts; all that is needed here
 // is that it DIFFERS from the advertised number -- otherwise the override would be invisible.
-const CANLI_PENCERE = 872_000;
+const LIVE_WINDOW = 872_000;
 
-const bosBaseline: ModelSnapshot = {
+const emptyBaseline: ModelSnapshot = {
     schemaVersion: 1,
     generatedAt: "2026-01-01T00:00:00.000Z",
     source: "pinned-install-baseline",
     models: [],
 };
 
-function canliKatalog(pencere: number): readonly ProviderModelRecord[] {
+function liveCatalog(window: number): readonly ProviderModelRecord[] {
     return OPENAI_MODEL_CONTRACTS.map((contract) => ({
         id: contract.upstreamModel,
-        contextWindow: pencere,
+        contextWindow: window,
         maximumOutputTokens: contract.maximumOutputTokens,
     }));
 }
 
-function kesifSatirlari(snapshot: ModelSnapshot): readonly Record<string, unknown>[] {
+function discoveryRows(snapshot: ModelSnapshot): readonly Record<string, unknown>[] {
     const payload = new ModelRegistry(snapshot, new Map()).discoveryPayload();
     return payload["data"] as readonly Record<string, unknown>[];
 }
 
-const dogrulanmisSnapshot = withVerifiedOpenAiModels(bosBaseline, canliKatalog(CANLI_PENCERE), CANLI_PENCERE);
+const verifiedSnapshot = withVerifiedOpenAiModels(emptyBaseline, liveCatalog(LIVE_WINDOW), LIVE_WINDOW);
 
 // A single Astra row factory: both describes use it. `contextWindow` has to be overridable
 // -- that is the REAL trigger of the `[1m]` suffix (see below).
-function astraSatiri(over: {
+function astraRow(over: {
     readonly id?: string;
     readonly provider?: ModelRecord["provider"];
     readonly upstreamModel?: string;
@@ -174,27 +174,27 @@ function astraSatiri(over: {
         oauthType: "chatgpt",
         executionMode: "native-message-loop",
         discoverable: true,
-        contextWindow: over.contextWindow ?? CANLI_PENCERE,
+        contextWindow: over.contextWindow ?? LIVE_WINDOW,
         capabilities: ["messages"],
     };
 }
 
 
-describe("Claude Code'a ilan edilen pencere sozlesmeden turer", () => {
-    it("Astra 1_000_000 ilan eder -- context_window ve max_input_tokens birlikte", () => {
-        const satir = kesifSatirlari(dogrulanmisSnapshot).find((entry) => String(entry["id"]).startsWith("anthropic-openai-gpt-6-astra"));
-        ok(satir !== undefined, "astra kesif satiri yok");
-        strictEqual(satir["context_window"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
-        strictEqual(satir["max_input_tokens"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
+describe("the window advertised to Claude Code is derived from the contract", () => {
+    it("Astra advertises 1_000_000 -- context_window and max_input_tokens together", () => {
+        const line = discoveryRows(verifiedSnapshot).find((entry) => String(entry["id"]).startsWith("anthropic-openai-gpt-6-astra"));
+        ok(line !== undefined, "Astra discovery row is missing");
+        strictEqual(line["context_window"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
+        strictEqual(line["max_input_tokens"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
         strictEqual(OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS, 1_000_000);
     });
 
     // EVIDENCE GRAMMAR: the advertisement is a POLICY number, not a measurement. The
     // snapshot is the record of the measurement and is not overwritten -- were it
     // overwritten, the drift detector would be matching against itself.
-    it("snapshot'taki Astra satiri OLCULEN canli sayiyi korur, ilan edileni degil", () => {
-        const astra = dogrulanmisSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-6-astra");
-        strictEqual(astra?.contextWindow, CANLI_PENCERE);
+    it("the Astra snapshot row preserves the MEASURED live value, not the advertised one", () => {
+        const astra = verifiedSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-6-astra");
+        strictEqual(astra?.contextWindow, LIVE_WINDOW);
     });
 
     // NEGATIVE ARM: the override is SPECIFIC to Astra. Sol/Terra show the measured number,
@@ -211,15 +211,15 @@ describe("Claude Code'a ilan edilen pencere sozlesmeden turer", () => {
     // Two changes: the filter now derives from the ALIAS (the loop walks the same rows even
     // if the advertisement leaks) and the scope claim is stated up front -- an empty set is
     // now red, not a silent pass.
-    it("Sol/Terra ilani degismez: canli sayi ne ise o", () => {
-        const satirlar = kesifSatirlari(dogrulanmisSnapshot);
-        const ilansizlar = OPENAI_MODEL_CONTRACTS.filter((entry) => entry.alias !== "astra");
-        strictEqual(ilansizlar.length, OPENAI_MODEL_CONTRACTS.length - 1, "kapsam: astra disindaki her satir olculmeli");
-        ok(ilansizlar.length >= 2, `kapsam bos ya da eksik: ${ilansizlar.length} sozlesme`);
-        for (const contract of ilansizlar) {
-            const satir = satirlar.find((entry) => String(entry["id"]).startsWith(contract.id));
-            ok(satir !== undefined, `kesif satiri yok: ${contract.id}`);
-            strictEqual(satir["context_window"], CANLI_PENCERE, `ilan sizdi: ${contract.id}`);
+    it("the Sol/Terra advertisement stays unchanged: it remains the live value", () => {
+        const rows = discoveryRows(verifiedSnapshot);
+        const nonAstraContracts = OPENAI_MODEL_CONTRACTS.filter((entry) => entry.alias !== "astra");
+        strictEqual(nonAstraContracts.length, OPENAI_MODEL_CONTRACTS.length - 1, "coverage: every row other than Astra must be measured");
+        ok(nonAstraContracts.length >= 2, `coverage is empty or incomplete: ${nonAstraContracts.length} contracts`);
+        for (const contract of nonAstraContracts) {
+            const line = rows.find((entry) => String(entry["id"]).startsWith(contract.id));
+            ok(line !== undefined, `discovery row is missing: ${contract.id}`);
+            strictEqual(line["context_window"], LIVE_WINDOW, `advertised override leaked: ${contract.id}`);
         }
     });
 
@@ -236,38 +236,38 @@ describe("Claude Code'a ilan edilen pencere sozlesmeden turer", () => {
     // not attached" and "the instrument is broken" would look identical. Keeping the
     // advertisement at 1_000_000 is another arm's job ("Astra advertises 1_000_000"),
     // because its rationale is not the picker: a round number and headroom under the ceiling.
-    it("picker kimligi SNAPSHOT penceresinden turer, ilan edilenden DEGIL", () => {
-        const kimlikler = kesifSatirlari(dogrulanmisSnapshot).map((entry) => String(entry["id"]));
-        strictEqual(kimlikler.includes("anthropic-openai-gpt-6-astra"), true);
-        strictEqual(kimlikler.includes("anthropic-openai-gpt-6-astra[1m]"), false);
-        strictEqual(claudeClientDiscoveryId(astraSatiri()), "anthropic-openai-gpt-6-astra");
+    it("picker identity derives from the SNAPSHOT window, NOT the advertised one", () => {
+        const identities = discoveryRows(verifiedSnapshot).map((entry) => String(entry["id"]));
+        strictEqual(identities.includes("anthropic-openai-gpt-6-astra"), true);
+        strictEqual(identities.includes("anthropic-openai-gpt-6-astra[1m]"), false);
+        strictEqual(claudeClientDiscoveryId(astraRow()), "anthropic-openai-gpt-6-astra");
 
         // POSITIVE ARM -- the suffix CAN in fact be attached, and its trigger is the
         // snapshot window becoming equal to the contract ceiling. If this arm does not fall,
         // the three negative arms above are measuring nothing.
-        strictEqual(claudeClientDiscoveryId(astraSatiri({ contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS })), "anthropic-openai-gpt-6-astra[1m]");
+        strictEqual(claudeClientDiscoveryId(astraRow({ contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS })), "anthropic-openai-gpt-6-astra[1m]");
     });
 
     // NEGATIVE ARM: a model that never entered the snapshot CANNOT BE ADVERTISED either. The
     // constant in the contract cannot produce a picker row on its own -- verification is
     // still the gate itself.
-    it("canli katalog Astra'yi tasimazsa hicbir sey ilan edilmez", () => {
-        const astrasiz = canliKatalog(CANLI_PENCERE).filter((entry) => !entry.id.includes("astra"));
-        const kimlikler = kesifSatirlari(withVerifiedOpenAiModels(bosBaseline, astrasiz, CANLI_PENCERE))
+    it("nothing is advertised for Astra when the live catalog does not contain it", () => {
+        const withoutAstra = liveCatalog(LIVE_WINDOW).filter((entry) => !entry.id.includes("astra"));
+        const identities = discoveryRows(withVerifiedOpenAiModels(emptyBaseline, withoutAstra, LIVE_WINDOW))
             .map((entry) => String(entry["id"]));
-        strictEqual(kimlikler.some((id) => id.startsWith("anthropic-openai-gpt-6-astra")), false);
-        strictEqual(kimlikler.includes("anthropic-openai-gpt-5.6-sol"), true, "diger serit dusmemeli");
+        strictEqual(identities.some((id) => id.startsWith("anthropic-openai-gpt-6-astra")), false);
+        strictEqual(identities.includes("anthropic-openai-gpt-5.6-sol"), true, "the other lane must remain available");
     });
 });
 
-describe("advertisedContextWindow -- ustune yazmanin sinirlari", () => {
-    it("sozlesmeli satirda ilan edilen sayiyi verir", () => {
-        strictEqual(advertisedContextWindow(astraSatiri()), OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
+describe("advertisedContextWindow -- override boundaries", () => {
+    it("returns the advertised value for a row with a contract", () => {
+        strictEqual(advertisedContextWindow(astraRow()), OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
     });
 
     // A window is NOT invented for a row that has none: a missing measurement is not zero.
-    it("penceresi olmayan satir icin undefined doner", () => {
-        const penceresiz: ModelRecord = {
+    it("returns undefined for a row without a window", () => {
+        const withoutWindow: ModelRecord = {
             id: "anthropic-openai-gpt-6-astra",
             provider: "openai",
             upstreamModel: "anthropic-openai-oauth__gpt-6-astra",
@@ -277,45 +277,45 @@ describe("advertisedContextWindow -- ustune yazmanin sinirlari", () => {
             discoverable: true,
             capabilities: ["messages"],
         };
-        strictEqual(advertisedContextWindow(penceresiz), undefined);
+        strictEqual(advertisedContextWindow(withoutWindow), undefined);
     });
 
     // NEGATIVE ARM: identity is not enough. A row that does not route to the contract's
     // upstream model cannot inherit Astra's advertisement -- if it could, a request going
     // somewhere else would be set up with Astra's budget.
-    it("upstream modeli ya da saglayicisi uyusmayan satir ilani DEVRALMAZ", () => {
-        strictEqual(advertisedContextWindow(astraSatiri({ upstreamModel: "baska-bir-model" })), CANLI_PENCERE);
-        strictEqual(advertisedContextWindow(astraSatiri({ provider: "anthropic" })), CANLI_PENCERE);
+    it("a row with a mismatched upstream model or provider DOES NOT INHERIT the advertisement", () => {
+        strictEqual(advertisedContextWindow(astraRow({ upstreamModel: "another-model" })), LIVE_WINDOW);
+        strictEqual(advertisedContextWindow(astraRow({ provider: "anthropic" })), LIVE_WINDOW);
     });
 
-    it("sozlesmesiz model kendi olculen penceresiyle ilan edilir", () => {
-        strictEqual(advertisedContextWindow(astraSatiri({ id: "claude-opus-5", provider: "anthropic", upstreamModel: "claude-opus-5" })), CANLI_PENCERE);
+    it("a model without a contract is advertised with its own measured window", () => {
+        strictEqual(advertisedContextWindow(astraRow({ id: "claude-opus-5", provider: "anthropic", upstreamModel: "claude-opus-5" })), LIVE_WINDOW);
     });
 });
 
-describe("ilan edilen pencere sozlesme tablosunda TEK yerde yasar", () => {
-    it("advertisedContextWindow yalniz Astra'da tanimlidir", () => {
+describe("the advertised window lives in ONE place in the contract table", () => {
+    it("advertisedContextWindow is defined only for Astra", () => {
         for (const contract of OPENAI_MODEL_CONTRACTS) {
-            const beklenen = contract.alias === "astra" ? OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS : undefined;
-            strictEqual(contract.advertisedContextWindow, beklenen, `beklenmeyen ilan: ${contract.id}`);
+            const expected = contract.alias === "astra" ? OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS : undefined;
+            strictEqual(contract.advertisedContextWindow, expected, `unexpected advertisement: ${contract.id}`);
         }
     });
 
     // An override with no source is folklore: nobody can verify the number, nobody can delete it.
-    it("ilan eden her sozlesme KAYNAGINI tasir, etmeyen tasimaz", () => {
+    it("every contract with an advertisement carries its SOURCE; contracts without one do not", () => {
         for (const contract of OPENAI_MODEL_CONTRACTS) {
-            const ilanVar = contract.advertisedContextWindow !== undefined;
-            strictEqual((contract.contextWindowSource ?? "").length > 0, ilanVar, `kaynak/ilan eslesmiyor: ${contract.id}`);
+            const hasAdvertisement = contract.advertisedContextWindow !== undefined;
+            strictEqual((contract.contextWindowSource ?? "").length > 0, hasAdvertisement, `source/advertisement mismatch: ${contract.id}`);
         }
     });
 
     // The source note is not a string but a QUOTE: it names the primary page and the atom taken from it.
-    it("Astra'nin kaynak notu birincil sayfayi ve alintiyi tasir", () => {
+    it("Astra's source note includes the primary page and the quote", () => {
         const astra = OPENAI_MODEL_CONTRACTS.find((contract) => contract.alias === "astra");
-        const kaynak = astra?.contextWindowSource ?? "";
-        strictEqual(kaynak.includes("developers.openai.com/api/docs/models/gpt-6-astra"), true, "model karti yok");
-        strictEqual(kaynak.includes("1,050,000 context window"), true, "model kartindan alinti yok");
-        strictEqual(kaynak.includes("272K input tokens"), true, "fiyat siniri istisnasi yok");
+        const source = astra?.contextWindowSource ?? "";
+        strictEqual(source.includes("developers.openai.com/api/docs/models/gpt-6-astra"), true, "model card is missing");
+        strictEqual(source.includes("1,050,000 context window"), true, "quote from the model card is missing");
+        strictEqual(source.includes("272K input tokens"), true, "pricing boundary exception is missing");
     });
 
     // FIX 2026-09-05 (audit FINDING 4). The em dash in the rate card sentence had been
@@ -324,27 +324,27 @@ describe("ilan edilen pencere sozlesme tablosunda TEK yerde yasar", () => {
     // carry U+A7/U+B7/U+FC), so the correct fix is the character itself, not a footnote. The
     // arm runs both ways: the correct character IS present and the downgraded form is NOT --
     // one-way, the "neither is present" state would pass silently.
-    it("rate card alintisi em dash'i BIREBIR tasir, ASCII'ye indirilmemis", () => {
+    it("the rate card quote preserves the em dash EXACTLY, without downgrading it to ASCII", () => {
         const astra = OPENAI_MODEL_CONTRACTS.find((contract) => contract.alias === "astra");
-        const kaynak = astra?.contextWindowSource ?? "";
-        strictEqual(kaynak.includes("GPT-6 Astra \u2014 Codex long-context exception"), true, "em dash ASCII'ye indirilmis");
-        strictEqual(kaynak.includes("GPT-6 Astra -- Codex long-context exception"), false, "ASCII indirgemesi geri gelmis");
+        const source = astra?.contextWindowSource ?? "";
+        strictEqual(source.includes("GPT-6 Astra \u2014 Codex long-context exception"), true, "em dash was downgraded to ASCII");
+        strictEqual(source.includes("GPT-6 Astra -- Codex long-context exception"), false, "ASCII downgrade has returned");
     });
 
     // An advertisement cannot exceed the contract's CEILING: openAiCatalogEntry filters the
     // live number against that ceiling, and an advertisement above it would hand Claude Code
     // a budget the model would reject.
-    it("hicbir ilan sozlesme tavanini asmaz", () => {
+    it("no advertised window exceeds the contract ceiling", () => {
         // CLASS SWEEP (same pattern as FINDING 2): a loop containing `continue` also passes
         // silently on an empty set. The counter asserts what the arm measures.
-        let olculen = 0;
+        let measuredCount = 0;
         for (const contract of OPENAI_MODEL_CONTRACTS) {
             if (contract.advertisedContextWindow === undefined)
                 continue;
-            olculen += 1;
-            strictEqual(contract.advertisedContextWindow <= contract.contextWindow, true, `tavan asildi: ${contract.id}`);
+            measuredCount += 1;
+            strictEqual(contract.advertisedContextWindow <= contract.contextWindow, true, `ceiling exceeded: ${contract.id}`);
         }
-        ok(olculen >= 1, "kapsam: ilan eden sozlesme yok, kol vakumda gecti");
+        ok(measuredCount >= 1, "coverage: no contract advertises a window; the arm succeeded vacuously");
     });
 });
 
@@ -359,43 +359,43 @@ describe("ilan edilen pencere sozlesme tablosunda TEK yerde yasar", () => {
 // advertised number was visible was the running router's GET /v1/models endpoint.
 // ============================================================================
 
-describe("operator yuzeyi olculen ve ilan edilen sayiyi AYRI adlarla gosterir", () => {
-    it("Astra satiri iki sayiyi da tasir", () => {
-        const astra = dogrulanmisSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-6-astra");
-        ok(astra !== undefined, "astra snapshot satiri yok");
-        const satir = modelDetail(astra);
-        strictEqual(satir["contextWindow"], CANLI_PENCERE, "olculen sayi kayboldu");
-        strictEqual(satir["advertisedContextWindow"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS, "ilan edilen sayi basilmiyor");
+describe("the operator surface shows measured and advertised values under SEPARATE names", () => {
+    it("the Astra row carries both values", () => {
+        const astra = verifiedSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-6-astra");
+        ok(astra !== undefined, "Astra snapshot row is missing");
+        const line = modelDetail(astra);
+        strictEqual(line["contextWindow"], LIVE_WINDOW, "measured value was lost");
+        strictEqual(line["advertisedContextWindow"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS, "advertised value is not printed");
     });
 
     // The field is written ONLY when the two numbers differ. Repeating "872000 = 872000"
     // tells the operator nothing, and what comes with noise is blindness.
-    it("ilani olmayan satirda alan HIC yazilmaz", () => {
-        const sol = dogrulanmisSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-5.6-sol");
-        ok(sol !== undefined, "sol snapshot satiri yok");
-        const satir = modelDetail(sol);
-        strictEqual(satir["contextWindow"], CANLI_PENCERE);
-        strictEqual("advertisedContextWindow" in satir, false, "gereksiz alan yazildi");
+    it("the field is NEVER written for a row without an advertisement", () => {
+        const sol = verifiedSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-5.6-sol");
+        ok(sol !== undefined, "Sol snapshot row is missing");
+        const line = modelDetail(sol);
+        strictEqual(line["contextWindow"], LIVE_WINDOW);
+        strictEqual("advertisedContextWindow" in line, false, "unnecessary field was written");
     });
 
     // MECHANICAL ARM. The two arms above measure the helper; this arm measures that cli.ts
     // ACTUALLY uses it. The lines were hand-written once and broke in both places at once --
     // if they are hand-written again this goes red, rather than silently returning to the
     // old behaviour.
-    it("cli.ts her modelDetails satirini bu yardimcidan uretir", async (t) => {
+    it("cli.ts derives every modelDetails row from this helper", async (t) => {
         const cliPath = resolve(import.meta.dirname, "..", "..", "src", "cli.ts");
-        let kaynak: string;
+        let source: string;
         try {
-            kaynak = await readFile(cliPath, "utf8");
+            source = await readFile(cliPath, "utf8");
         }
         catch (error) {
             // Evidence grammar: a check that could not run is NOT a silent pass, it is skipped with its reason.
-            t.skip(`src/cli.ts okunamadi: ${(error as Error).message}`);
+            t.skip(`could not read src/cli.ts: ${(error as Error).message}`);
             return;
         }
-        const satirlar = [...kaynak.matchAll(/modelDetails:\s*([^\r\n]*)/g)].map((eslesme) => eslesme[1] ?? "");
-        ok(satirlar.length >= 2, `kapsam: modelDetails satiri beklenenden az (${satirlar.length})`);
-        for (const satir of satirlar)
-            strictEqual(satir.includes("map(modelDetail)"), true, `elle yazilmis modelDetails satiri: ${satir}`);
+        const rows = [...source.matchAll(/modelDetails:\s*([^\r\n]*)/g)].map((match) => match[1] ?? "");
+        ok(rows.length >= 2, `coverage: fewer modelDetails rows than expected (${rows.length})`);
+        for (const line of rows)
+            strictEqual(line.includes("map(modelDetail)"), true, `hand-written modelDetails row: ${line}`);
     });
 });

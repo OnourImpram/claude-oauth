@@ -17,7 +17,7 @@ import {
 // Fixture: the real cache MEASURED on disk on 2026-09-02 -- exactly what discovery wrote.
 // baseUrl is a dead ephemeral port; this is the file as it stood at the moment the
 // operator's picker was empty.
-const OLCULEN_BAYAT_ONBELLEK = {
+const MEASURED_STALE_CACHE = {
     baseUrl: "http://127.0.0.1:51654",
     fetchedAt: 1788293828770,
     models: [
@@ -28,7 +28,7 @@ const OLCULEN_BAYAT_ONBELLEK = {
 };
 
 // discoveryPayload() shape: the same fields as registry.ts:66-83.
-const KESIF_YUKU = {
+const DISCOVERY_PAYLOAD = {
     data: [
         { type: "model", id: "anthropic-openai-gpt-5.6-sol", display_name: "GPT-5.6 Sol via ChatGPT OAuth", context_window: 872_000, max_input_tokens: 872_000, max_output_tokens: 128_000 },
         // Since 2026-09-05 Astra carries the ADVERTISED number (1_000_000), Sol the
@@ -38,9 +38,9 @@ const KESIF_YUKU = {
         { type: "model", id: "anthropic-openai-gpt-6-astra", display_name: "GPT-6 Astra via ChatGPT OAuth", context_window: 1_000_000, max_input_tokens: 1_000_000, max_output_tokens: 128_000 },
         { type: "model", id: "anthropic-xai-grok-4.6", display_name: "Grok 4.6 via xAI OAuth, read-only agent", context_window: 500_000, max_input_tokens: 500_000 },
         // Malformed rows are DROPPED and do not corrupt the file: discovery would not have written them either.
-        { type: "model", id: 42, display_name: "bozuk id" },
-        { type: "model", id: "eksik-ad" },
-        "dizge",
+        { type: "model", id: 42, display_name: "malformed id" },
+        { type: "model", id: "missing-name" },
+        "string",
         null,
     ],
     has_more: false,
@@ -49,12 +49,12 @@ const KESIF_YUKU = {
 };
 
 describe("gateway-models-cache", () => {
-    let dizin: string;
-    let yol: string;
+    let directory: string;
+    let path: string;
 
     beforeEach(async () => {
-        dizin = await mkdtemp(join(tmpdir(), "gateway-models-cache-"));
-        yol = join(dizin, "cache", "gateway-models.json");
+        directory = await mkdtemp(join(tmpdir(), "gateway-models-cache-"));
+        path = join(directory, "cache", "gateway-models.json");
     });
 
     afterEach(async () => {
@@ -66,51 +66,51 @@ describe("gateway-models-cache", () => {
         // at the moment of deletion -- and nobody takes a gate like that seriously, so a
         // bypass becomes an incentive defect. maxRetries/retryDelay is Node's documented
         // arm for ENOTEMPTY/EBUSY.
-        await rm(dizin, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+        await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
     it("projects discoveryPayload to exactly {id, display_name} and drops malformed rows", () => {
-        const satirlar = projectDiscoveryPayload(KESIF_YUKU);
-        assert.deepEqual(satirlar, [
+        const rows = projectDiscoveryPayload(DISCOVERY_PAYLOAD);
+        assert.deepEqual(rows, [
             { id: "anthropic-openai-gpt-5.6-sol", display_name: "GPT-5.6 Sol via ChatGPT OAuth" },
             { id: "anthropic-openai-gpt-6-astra", display_name: "GPT-6 Astra via ChatGPT OAuth" },
             { id: "anthropic-xai-grok-4.6", display_name: "Grok 4.6 via xAI OAuth, read-only agent" },
         ]);
         assert.deepEqual(projectDiscoveryPayload({}), []);
-        assert.deepEqual(projectDiscoveryPayload({ data: "yanlis" }), []);
+        assert.deepEqual(projectDiscoveryPayload({ data: "invalid" }), []);
     });
 
     it("round-trips through disk with the measured on-disk schema", async () => {
-        const yazilan = await writeGatewayModelsCache(yol, "http://127.0.0.1:8791/", projectDiscoveryPayload(KESIF_YUKU), () => 1_700_000_000_000);
-        assert.equal(yazilan.baseUrl, "http://127.0.0.1:8791", "trailing slash is stripped -- Claude Code keys the cache by exact base URL");
-        const ham = JSON.parse(await readFile(yol, "utf8")) as Record<string, unknown>;
-        assert.deepEqual(Object.keys(ham).sort(), ["baseUrl", "fetchedAt", "models"], "no extra keys: the file must look like discovery wrote it");
-        const okunan = await readGatewayModelsCache(yol);
-        assert.deepEqual(okunan, yazilan);
+        const written = await writeGatewayModelsCache(path, "http://127.0.0.1:8791/", projectDiscoveryPayload(DISCOVERY_PAYLOAD), () => 1_700_000_000_000);
+        assert.equal(written.baseUrl, "http://127.0.0.1:8791", "trailing slash is stripped -- Claude Code keys the cache by exact base URL");
+        const raw = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        assert.deepEqual(Object.keys(raw).sort(), ["baseUrl", "fetchedAt", "models"], "no extra keys: the file must look like discovery wrote it");
+        const read = await readGatewayModelsCache(path);
+        assert.deepEqual(read, written);
     });
 
     it("repairs the measured stale cache: dead port -> live port, models preserved", async () => {
-        await writeFile(yol, JSON.stringify(OLCULEN_BAYAT_ONBELLEK), "utf8").catch(async () => {
-            await writeGatewayModelsCache(yol, "http://127.0.0.1:1", []);
-            await writeFile(yol, JSON.stringify(OLCULEN_BAYAT_ONBELLEK), "utf8");
+        await writeFile(path, JSON.stringify(MEASURED_STALE_CACHE), "utf8").catch(async () => {
+            await writeGatewayModelsCache(path, "http://127.0.0.1:1", []);
+            await writeFile(path, JSON.stringify(MEASURED_STALE_CACHE), "utf8");
         });
-        const once = await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791");
-        assert.equal(once.status, "stale");
-        assert.equal((once as { cachedBaseUrl: string }).cachedBaseUrl, "http://127.0.0.1:51654");
+        const before = await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791");
+        assert.equal(before.status, "stale");
+        assert.equal((before as { cachedBaseUrl: string }).cachedBaseUrl, "http://127.0.0.1:51654");
 
-        await writeGatewayModelsCache(yol, "http://127.0.0.1:8791", OLCULEN_BAYAT_ONBELLEK.models);
-        const sonra = await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791");
-        assert.equal(sonra.status, "matches");
-        assert.equal((sonra as { modelCount: number }).modelCount, 3);
+        await writeGatewayModelsCache(path, "http://127.0.0.1:8791", MEASURED_STALE_CACHE.models);
+        const after = await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791");
+        assert.equal(after.status, "matches");
+        assert.equal((after as { modelCount: number }).modelCount, 3);
     });
 
     it("reports missing and unreadable by name -- never a silent empty list", async () => {
-        assert.deepEqual(await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791"), { status: "missing", path: yol });
-        await writeGatewayModelsCache(yol, "http://127.0.0.1:8791", []);
-        await writeFile(yol, "{\"baseUrl\": 5}", "utf8");
-        const durum = await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791");
-        assert.equal(durum.status, "unreadable");
-        assert.match((durum as { reason: string }).reason, /baseUrl|fetchedAt|models/u);
+        assert.deepEqual(await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791"), { status: "missing", path: path });
+        await writeGatewayModelsCache(path, "http://127.0.0.1:8791", []);
+        await writeFile(path, "{\"baseUrl\": 5}", "utf8");
+        const status = await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791");
+        assert.equal(status.status, "unreadable");
+        assert.match((status as { reason: string }).reason, /baseUrl|fetchedAt|models/u);
     });
 
     it("A1/A3: writes only when the router holds the pinned port", () => {
@@ -121,15 +121,15 @@ describe("gateway-models-cache", () => {
     });
 
     it("every non-matching status carries a remedy naming what to do; matches carries none", async () => {
-        assert.match(gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791")) ?? "", /launch once/u, "missing");
-        await writeGatewayModelsCache(yol, "http://127.0.0.1:51654", OLCULEN_BAYAT_ONBELLEK.models);
-        const bayat = gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791")) ?? "";
-        assert.match(bayat, /51654/u, "stale remedy names the cached address");
-        assert.match(bayat, /8791/u, "stale remedy names the live address");
-        await writeFile(yol, "{\"baseUrl\": 5}", "utf8");
-        assert.match(gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791")) ?? "", /delete .*gateway-models\.json/u, "unreadable");
-        await writeGatewayModelsCache(yol, "http://127.0.0.1:8791", OLCULEN_BAYAT_ONBELLEK.models);
-        assert.equal(gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(yol, "http://127.0.0.1:8791")), undefined, "matches has no remedy");
+        assert.match(gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791")) ?? "", /launch once/u, "missing");
+        await writeGatewayModelsCache(path, "http://127.0.0.1:51654", MEASURED_STALE_CACHE.models);
+        const stale = gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791")) ?? "";
+        assert.match(stale, /51654/u, "stale remedy names the cached address");
+        assert.match(stale, /8791/u, "stale remedy names the live address");
+        await writeFile(path, "{\"baseUrl\": 5}", "utf8");
+        assert.match(gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791")) ?? "", /delete .*gateway-models\.json/u, "unreadable");
+        await writeGatewayModelsCache(path, "http://127.0.0.1:8791", MEASURED_STALE_CACHE.models);
+        assert.equal(gatewayModelsCacheRemedy(await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791")), undefined, "matches has no remedy");
     });
 
     it("resolves the cache path under CLAUDE_CONFIG_DIR when set, else ~/.claude", () => {
