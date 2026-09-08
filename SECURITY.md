@@ -13,10 +13,14 @@ about. Security-relevant defects and their repair status are listed here first:
 
 Related open items with a security dimension: **B04** (the workspace write check does not write
 the file it checked, path race), **G02** (a non-empty `.mcp.json` in the project makes the xAI
-lane refuse to start; fail-closed, but it is a denial of the lane), and the fact that **B05**, the
-launcher shim that separates `claude` from `claude-oauth` is not in this tree, means the
-native-separation claim cannot be verified from this repository yet. The full list is in the
+lane refuse to start; fail-closed, but it is a denial of the lane). The full list is in the
 README under *Known gaps*.
+
+**~~B05~~, repaired 2026-09-08.** Portable launchers now separate native invocation from router
+startup and sanitize provider variables on the native entry, with executed shim tests and a
+two-arm probe in this tree. The live negative arm returned exit 1 and named api.anthropic.com.
+The clean Remote Control help arm is NOT_RUN because it timed out at both 30 and 60 seconds.
+See the README's native-separation section for exact output and reproduction commands.
 
 N05 is repaired. The remaining open defects still prevent a release; see the README for the
 measured B01 native-path repair and the Agent inheritance check that remains NOT_RUN.
@@ -52,7 +56,7 @@ result is believed.
 
 ## Scope
 
-In scope: everything under `src/`, `scripts/`, `config/` and `docs/` in this repository, and the
+In scope: everything under `src/`, `scripts/`, `shim/`, `config/` and `docs/` in this repository, and the
 behaviour of the built `claude-oauth` command.
 
 Out of scope: the software this project drives, Antigravity `agy` (Google), `grok` (xAI), the

@@ -5,12 +5,39 @@ All notable changes to this project are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Defect ids (B*, G*, N*, A*, S*) are the
 repository's own and are stable across the README, `SECURITY.md` and this file.
 
+## [Unreleased]
+
+### Fixed: N03 delegate tools and turn limits (2026-09-08)
+
+- Google and xAI delegates omit tools and maxTurns and no longer carry a read-only prompt.
+  OpenAI retains its built-in default tools plus Skill: its Clodex capsule does not connect to
+  the router MCP session bridge, but ordinary HTTP tool exchanges can carry explicit MCP names.
+- User definitions can widen, narrow or omit tool/turn limits. The launcher still rejects a
+  changed or removed model identity. Generated JSON and acceptance rules are measured for every
+  routed delegate in both client modes. Live Agent child-session execution remains NOT_RUN,
+  requiring an authenticated harness.
+
+### Fixed: B05 portable launchers and separation probe (2026-09-08)
+
+- PowerShell and POSIX shims resolve the release and Node from environment or installation
+  layout, read the release-id artifact, and route Remote Control directly to native Claude.
+  Native entries sanitize provider variables before launch. Release verification now checks an
+  artifact when present as well as the directory name and content.
+- Executed shim tests measure environment separation, arguments, working directory and exit
+  forwarding, including JSON, empty and long arguments, PowerShell pipelines and pipe EOF.
+  Stream JSON uses raw OS pipes and is measured returning output before input closes. Remote
+  Control words in prompt values remain on the router route. PowerShell batch targets are
+  refused; select native executables. Probe controls cover missing Claude and failures of
+  either expected arm.
+- Windows live probe: negative arm exit 1, api.anthropic.com named. Positive arm NOT_RUN,
+  ETIMEDOUT at 30 seconds and again at 60 seconds. README contains the output and clone commands.
+
 ## [0.1.0], pre-release, unreleased
 
 This is the first version made readable outside the maintainer's machine. It is **not a
 usable release**: the open defects listed in the README under *Known gaps*, B01 (permission
-boundary not applied to Google/xAI subagents), B02 (trailing system message dropped), B05
-(launcher shim not in this tree), G01 (Google lane not connected to the Claude Code tool
+boundary not applied to Google/xAI subagents), B02 (trailing system message dropped), G01
+(Google lane not connected to the Claude Code tool
 surface), N01 (image tool results reduced to empty strings) among them, are why. Subsequent
 repair entries below record the defects that have since been closed.
 
