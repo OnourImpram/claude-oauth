@@ -6,6 +6,7 @@ import { RouterError } from "../domain/errors.js";
 import { sanitizedWorkerEnvironment } from "../security/environment.js";
 import { spawnFailureGuard } from "../runtime/child-process.js";
 import { ensureGeminiOAuthConfiguration } from "../runtime/provider-config.js";
+import { selectTextLines } from "../runtime/text-lines.js";
 import { readBoundedWorkspaceText } from "../security/workspace-read.js";
 export interface GeminiAcpOptions {
     readonly cwd: string;
@@ -46,12 +47,13 @@ class ReadOnlyGeminiClient {
         }
     }
     async readTextFile(params: ReadTextFileParams): Promise<ReadTextFileResponse> {
+        const text = await readBoundedWorkspaceText({
+            workspace: this.#workspace,
+            requestedPath: params.path,
+            maximumBytes: maximumReadableFileBytes,
+        });
         return {
-            content: await readBoundedWorkspaceText({
-                workspace: this.#workspace,
-                requestedPath: params.path,
-                maximumBytes: maximumReadableFileBytes,
-            }),
+            content: selectTextLines(text, params.line, params.limit),
         };
     }
     resultText(): string {

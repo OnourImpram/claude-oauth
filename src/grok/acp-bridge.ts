@@ -8,6 +8,7 @@ import { RouterError } from "../domain/errors.js";
 import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security/environment.js";
 import { spawnFailureGuard } from "../runtime/child-process.js";
 import { ensurePrivateDirectory } from "../runtime/paths.js";
+import { selectTextLines } from "../runtime/text-lines.js";
 import { readBoundedWorkspaceText, writeBoundedWorkspaceText } from "../security/workspace-read.js";
 import {
     GROK_46_MODEL_ID,
@@ -546,12 +547,13 @@ class ReadOnlyGrokClient {
         return null as unknown as WriteTextFileResponse;
     }
     async readTextFile(params: ReadTextFileParams): Promise<ReadTextFileResponse> {
+        const text = await readBoundedWorkspaceText({
+            workspace: this.#workspace,
+            requestedPath: params.path,
+            maximumBytes: maximumReadableFileBytes,
+        });
         return {
-            content: await readBoundedWorkspaceText({
-                workspace: this.#workspace,
-                requestedPath: params.path,
-                maximumBytes: maximumReadableFileBytes,
-            }),
+            content: selectTextLines(text, params.line, params.limit),
         };
     }
     text(): string {
