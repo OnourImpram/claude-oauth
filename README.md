@@ -70,9 +70,11 @@ habit, and making that habit cheap is the point of the project:
 
 Generated Google and xAI delegates now inherit the parent's available tools without a launcher
 turn cap (N03 repaired). OpenAI delegates use the built-in tools plus `Skill` by default and
-accept user definitions containing MCP names. The generated JSON and override rules are tested;
-a live `Agent` child-session tool loop and permission inheritance remain NOT_RUN because they
-require a separate authenticated child-session harness.
+accept user definitions containing MCP names. The generated JSON and override rules are tested.
+Permission inheritance through an `Agent` child session was measured live on the Google lane on
+2026-09-08 (B01 row below): the child takes the parent's permission set, and the routed parent
+reached Claude Code's `Agent` tool through the bridge. The child's tool loop on a routed model is
+what the same measurement exercised when Claude Code picked the routed Gemini as the child model.
 
 ### The harness surface, not a chat box
 
@@ -129,7 +131,7 @@ three lanes as "the provider's own official CLI"; that was wrong for OpenAI and 
 
 | Delegate lane | Tool reach |
 |---|---|
-| Google and xAI | Inherit available parent tools. Their provider sessions use the router MCP bridge to return tool calls to Claude Code. Permission inheritance through an Agent child session remains NOT_RUN, requiring an authenticated child-session harness. |
+| Google and xAI | Inherit available parent tools. Their provider sessions use the router MCP bridge to return tool calls to Claude Code. Permission inheritance through an Agent child session was measured live on 2026-09-08 (B01 row). |
 | OpenAI | Clodex carries ordinary HTTP `tool_use`/`tool_result` exchanges; its capsule receives no router MCP endpoint and cannot attach to that session bridge. The default list above reaches built-ins and `Skill`. Explicit MCP names in a user definition can travel as ordinary Claude Code tools, subject to the parent catalogue and permissions; they are not included in the default list. Live OpenAI delegate MCP execution: NOT_RUN, requires an authenticated Agent child-session harness. |
 
 Switching back to a Claude model in the same session is the same `/model` command. There is no
@@ -170,17 +172,21 @@ Measured on Windows, 2026-09-08:
 
 ```text
 command: claude.exe remote-control --help (resolved on PATH; native executable preferred)
-positive: NOT_RUN reason=ETIMEDOUT
-negative: PASS exit=1 api.anthropic.com=named
+positive: PASS exit=none exited=false usage=printed api.anthropic.com=absent
+positive: stdout_bytes=2860 stderr_bytes=0
+negative: PASS exit=1 exited=true usage=absent api.anthropic.com=named
 negative: stdout_bytes=0 stderr_bytes=258
 ```
 
-The clean arm exceeded the probe's 60-second timeout, following the same outcome with a
-30-second bound. Native Remote Control acceptance is therefore NOT_RUN on this run. The negative
-arm used a synthetic loopback URL. Neither arm establishes native process ancestry or a live
-router session's behavior. Stub tests execute the PowerShell and POSIX shims, check environment
-separation, argument forwarding and exit status, and exercise a native launch with no router
-release. Probe controls detect both an always-accepting and an always-rejecting CLI.
+Both arms measured in about five seconds. The positive arm prints the Remote Control usage text and
+is not refused; with Claude Code 2.1.257 the process stays alive after printing (measured from Node,
+PowerShell and a file-backed stdout alike), so the probe judges the arm on the printed text and the
+absence of a refusal, terminates the process after a bounded grace period, and records `exited=false`
+instead of a timeout. The negative arm used a synthetic loopback URL and was refused with exit 1 naming
+`api.anthropic.com`. Neither arm establishes native process ancestry or a live router session's
+behavior. Stub tests execute the PowerShell and POSIX shims, check environment separation, argument
+forwarding and exit status, and exercise a native launch with no router release. Probe controls detect
+both an always-accepting and an always-rejecting CLI.
 
 ### Using the shipped shims
 
@@ -231,12 +237,13 @@ pre-release README that hides them is worthless. Ids are stable across this file
 
 | Id | Severity | What is wrong |
 |---|---|---|
-| B01 | **Native paths repaired; Agent NOT_RUN** | **Google direct route: PASS, 2026-09-08.** Call-scoped settings allow only the bridge MCP server and deny native `write_file`, `command`, `browser`, `execute_url`, and `unsandboxed` actions. Live Claude Code Write denial leaves no file; a native `write_to_file` fallback is also denied, while MCP still parks and returns the denial. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. `Agent` permission inheritance: **NOT_RUN (requires a separate Agent child-session harness)**. |
+| ~~B01~~ | ~~High~~ | **Repaired and measured 2026-09-08, Agent arm included.** Google direct route: call-scoped settings allow only the bridge MCP server and deny native `write_file`, `command`, `browser`, `execute_url` and `unsandboxed` actions; a live Claude Code Write denial leaves no file and a native `write_to_file` attempt is denied too. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. **`Agent` child sessions, measured live on the Google lane:** the routed parent reached Claude Code's `Agent` tool through the bridge (router park events `Agent`, `ListAgents`); with `Write` disallowed on the parent the child could not create the file (positive arm, no file), with `Write` allowed the child wrote it (negative arm, file present with the exact content). Inheritance is Claude Code's own mechanism: the child takes the parent's permission set, and every router call to the Google lane gets its own call-scoped denial settings regardless of which session made it. Claude Code chooses the child model itself (haiku in one arm, the routed Gemini in the other); the router does not set it. Receipt: the streams and router.log lines are in the maintainer's measurement notes. |
 | ~~B02~~ | ~~High~~ | **Repaired 2026-09-07 (`b5caf0e`).** A `role:"system"` message arriving after the last user message was dropped silently while compiling the request, measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own `SESSION CAPABILITY CONTEXT` section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface. |
 | ~~B03~~ | ~~High~~ | **Repaired 2026-09-08.** Compilation and result extraction share the last logical conversation record, so trailing system records retain the live session. Every continuation is validated and its system context plus all accompanying user text travels in labelled MCP result text before the agent resumes. Tests measure one start, the instruction received, mixed images, trailing blank text, and a usage bound covering the full request body. This preserves transport, not a guarantee of model compliance. |
 | ~~B04~~ | High, residual scope | **Repaired 2026-09-08 for the checked-file replacement race.** Writes use a non-truncating open, validate the handle identity, and write through that handle; new files use exclusive creation, with deterministic Windows symlink/junction tests proving outside target contents stay unchanged. Arbitrary ancestor replacement remains a limitation requiring platform-specific filesystem support; see `SECURITY.md`. |
-| ~~B05~~ | ~~High~~ | **Repaired 2026-09-08.** Portable PowerShell/POSIX shims and a reproducible two-arm probe ship in this tree; stub tests measure native environment cleanup and router entry selection. Live negative arm passed; clean Remote Control help is NOT_RUN after timeout, as recorded above. |
+| ~~B05~~ | ~~High~~ | **Repaired 2026-09-08.** Portable PowerShell/POSIX shims and a reproducible two-arm probe ship in this tree; stub tests measure native environment cleanup and router entry selection. Live probe: both arms PASS on Windows, 2026-09-08, output recorded above. |
 | ~~B06~~ | ~~High~~ | **Repaired 2026-09-08.** `max_input_tokens` uses the lower of the advertised window and snapshot transport capacity, tested for every routed model against its pin; Astra's `context_window` remains a presentation value of 1,000,000 while input is capped at the unchanged 872,000 pin: accepted capacity unproven, advertisement capped at the pin. |
+| ~~B07~~ | ~~High~~ | **Found and repaired 2026-09-08 (Agent arm).** When the Google model chose one of its own native tools (`read_file`) instead of the bridged Claude Code tools, the call-scoped settings denied it, agy ended without an answer, and the bridge returned the denial as HTTP 502; Claude Code treated 502 as transient and retried ten times with exponential backoff, every retry meeting the same policy. The denial now travels as 403 (terminal for the turn, not retried) and the bridged prompt carries one policy sentence telling the model that its native file, shell and browser tools are disabled here and naming the MCP server to use. Tests: `test/headless-bridge-denial-status.test.ts`, `test/headless-bridge-policy-note.test.ts`; mutation control over the whole suite fails one test per reverted change. Whether the model now picks the bridged tools more often is a model behaviour, not something this repair proves. |
 | ~~G01~~ | ~~High~~ | **Repaired 2026-09-08.** The Google lane now carries the same tool loop the xAI lane has. The objection that kept it away was that `agy mcp add` writes the session nonce into the operator's persistent config; the lane instead runs inside a **call-scoped configuration home** (`USERPROFILE` redirected, identity files hard-linked, never copied), so the operator's own `mcp_config.json` is never opened for writing. Live receipt: the router logged `agent_tool_call_parked`, Claude Code executed the MCP tool 213 ms later, one `tool_use` block crossed the stream, and the model returned a string it could not otherwise know. NOT claimed: a multi-step loop, or the `Agent` sub-loop. |
 | ~~G02~~ | ~~High~~ | **Repaired 2026-09-08, diagnostic branch.** Installed Grok 1.0.13 documentation (`docs/user-guide/07-mcp-servers.md`, Compatibility) says project `.mcp.json` is loaded unless the Claude import marker suppresses it. Refusal is retained and now names `.mcp.json` plus a workspace/user-configuration remedy; root and nested-workspace tests measure it, with hooks/plugins still fail-closed. Live xAI in repositories with non-empty `.mcp.json`: **NOT_RUN, intentionally refused because Grok can discover this file**. |
 | ~~G03~~ | ~~High~~ | **Repaired 2026-09-08.** A session parked on a tool call set `running = false` and so looked idle; at the cap the oldest such session was cancelled mid-loop and the returning `tool_result` found no session. A first repair used a 60 s age window; an independent wall-clock measurement then showed a legitimate 61 s permission wait being sacrificed, so age was dropped as the discriminator. Now a parked session is never evicted for capacity: at the cap the request receives an explicit 503. The cost is stated in the source: an abandoned parked session holds capacity until the idle timeout or the provider's own timeout. Both registries also close and wait on shutdown (previously only the xAI one did; four Google processes and homes were measured surviving `close()`). |

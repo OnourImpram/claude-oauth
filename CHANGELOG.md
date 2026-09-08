@@ -41,6 +41,15 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 - Windows tests cover normal output, a SIGTERM-handler child, and a kill failure with no
   exit event. The handler test passes trivially on Windows because kill is terminal there.
   The meaningful Linux arm is NOT_RUN locally because this run uses a Windows host.
+### Fixed: B07 headless permission denial returned as a retryable 502 (2026-09-08)
+
+- Found on the Agent inheritance measurement: the Google model chose its native `read_file`, the
+  call-scoped settings denied it, agy ended without an answer and the bridge answered 502; Claude Code
+  retried ten times with backoff into the same policy. The denial is now 403 (terminal for the turn)
+  and the bridged prompt states the tool policy once, naming the MCP server to use.
+- B01 Agent arm measured live (positive arm: no file; negative arm: file written by the child), so the
+  B01 row is closed. The child model is chosen by Claude Code, not the router.
+
 ### Fixed: N03 delegate tools and turn limits (2026-09-08)
 - Google and xAI delegates omit tools and maxTurns and no longer carry a read-only prompt.
   OpenAI retains its built-in default tools plus Skill: its Clodex capsule does not connect to
@@ -60,8 +69,10 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   Control words in prompt values remain on the router route. PowerShell batch targets are
   refused; select native executables. Probe controls cover missing Claude and failures of
   either expected arm.
-- Windows live probe: negative arm exit 1, api.anthropic.com named. Positive arm NOT_RUN,
-  ETIMEDOUT at 30 seconds and again at 60 seconds. README contains the output and clone commands.
+- Windows live probe, both arms PASS: the positive arm prints the Remote Control usage text and
+  is not refused (Claude Code 2.1.257 keeps the process alive after printing; the probe judges the
+  text, terminates after a bounded grace period and records exited=false), the negative arm is
+  refused with exit 1 naming api.anthropic.com. README contains the output and clone commands.
 
 ## [0.1.0], pre-release, unreleased
 

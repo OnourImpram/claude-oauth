@@ -31,7 +31,7 @@ ancestor changes. A source search in this run found no production caller of the 
 **~~B05~~, repaired 2026-09-08.** Portable launchers now separate native invocation from router
 startup and sanitize provider variables on the native entry, with executed shim tests and a
 two-arm probe in this tree. The live negative arm returned exit 1 and named api.anthropic.com.
-The clean Remote Control help arm is NOT_RUN because it timed out at both 30 and 60 seconds.
+The clean Remote Control help arm passed as well: the usage text is printed and no refusal appears (the process stays alive after printing with Claude Code 2.1.257 and is terminated by the probe after a bounded grace period).
 See the README's native-separation section for exact output and reproduction commands.
 
 **~~G02~~, Repaired 2026-09-08 (diagnostic branch).** Grok 1.0.13 package documentation
@@ -41,7 +41,7 @@ workspace tests measure this error; `.grok/hooks` and `.grok/plugins` stay refus
 in repositories with non-empty `.mcp.json` is **NOT_RUN because discovery cannot be excluded**.
 
 N05 is repaired. The remaining open defects still prevent a release; see the README for the
-measured B01 native-path repair and the Agent inheritance check that remains NOT_RUN.
+measured B01 native-path repair, the Agent inheritance arm measured live on 2026-09-08 (positive and negative arms), and the B07 repair that turns a headless permission denial into a terminal 403 instead of a retried 502.
 
 ## Reporting a vulnerability
 
