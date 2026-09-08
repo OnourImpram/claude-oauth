@@ -267,13 +267,14 @@ footer p { max-width: var(--measure); }
     </div>
     <dl>
       <dt>repository</dt>
-      <dd>github.com/<wbr>OnourImpram/<wbr>claude-oauth<br><small>private during pre-release</small></dd>
+      <dd>github.com/<wbr>OnourImpram/<wbr>claude-oauth<br><small>public, Apache-2.0</small></dd>
       <dt>runs inside</dt>
       <dd>Claude Code, Node 24</dd>
       <dt>platforms</dt>
       <dd>tests on Windows and Linux; the router itself has run only on Windows</dd>
     </dl>
     <nav aria-label="Sections">
+      <a href="#why">Why this exists</a>
       <a href="#paths">Two commands, one boundary</a>
       <a href="#inside">Where Claude Code sits</a>
       <a href="#switch">Changing model</a>
@@ -287,6 +288,46 @@ footer p { max-width: var(--measure); }
   </aside>
 
   <main class="content">
+
+    <section id="why" aria-labelledby="why-h">
+      <h2 id="why-h">Why this exists</h2>
+      <p class="lede">
+        Two goals, one mechanism. Make Claude Code reachable for students and researchers on the model plans they
+        already hold. And raise the quality of work done inside Claude Code by letting a model that did not write
+        the work be the one that checks it.
+      </p>
+      <p>
+        Claude Code is an agent harness, not a chat window: tools, subagents, skills, MCP servers and permission
+        prompts in one loop. Learning it is worth a student's time; paying for it is often not possible. Many
+        students and researchers already hold a plan of some kind, Google's student Gemini offer, a ChatGPT plan, an
+        xAI plan. <code>claude-oauth</code> lets those plans answer inside Claude Code over the account's own OAuth
+        session, with no API key and no separate bill. The native <code>claude</code> path stays exactly as installed
+        for the day you move to it.
+      </p>
+      <p>
+        The second goal is the one that shaped the code. A model that wrote a change is the worst judge of that
+        change. The working pattern here is a maker and a checker that are never the same model: one produces the
+        diff, the manuscript, the analysis; another, in a fresh context, reads the output and reports what is wrong
+        with it. Claude Code already has the mechanism, the <code>Agent</code> tool and subagents. What it lacks is a
+        second model to hand the work to. This repository supplies it: one delegate agent per routed model, and a
+        <code>/model</code> switch that puts a Google, xAI or OpenAI model in the driver's seat for a review pass
+        while your tools, permissions and MCP servers stay where they are.
+      </p>
+      <ul>
+        <li><b>Built the way it asks to be used.</b> The router was written and reviewed by different models in turn;
+          the defect list further down is what that loop produced. The Google native-write bypass (B01) was found by
+          an OpenAI model after the author's own measurement had passed it. The N05 repair was written by an OpenAI
+          model in a separate worktree and accepted by a gate the reviewing side ran, not the model that wrote it.</li>
+        <li><b>The checker's answer is evidence, not truth.</b> Run the test it points at, open the file it names.
+          Where the two models disagree, the disagreement is the finding.</li>
+        <li><b>What limits this today is written down.</b> Generated delegate agents answer from what the prompt hands
+          them and cannot drive the harness themselves (N03). A direct <code>/model</code> switch to the Google or xAI
+          lane carries the tool loop (G01, G03), so a review run that way can open files and run tests itself.</li>
+        <li><b>Not a way around Anthropic.</b> The native path is untouched and remains the recommended one. Someone
+          who learns Claude Code on a free tier and later wants the native models has a reason to pay for them; the
+          intent is adoption of the harness, not a route around it.</li>
+      </ul>
+    </section>
 
     <section id="paths" aria-labelledby="paths-h">
       <h2 id="paths-h">Two commands, one boundary</h2>
@@ -561,9 +602,10 @@ npm run self-check</pre>
         checked; B05 is what still stands between the sentence and a reader's ability to check it themselves.
       </p>
       <p>
-        The intent is simple and stated once: a developer who wants a second model in the same harness, and a student
-        who can reach a free provider tier but not a paid plan, both spend their hours inside Claude Code rather than
-        outside it. Whether that serves anyone beyond them is not a claim this page makes.
+        The intent is the one stated at the top of this page: a student or researcher who can reach a provider plan
+        but not a paid Claude plan learns the harness inside Claude Code rather than outside it, and a developer
+        gets a second model to check the first one's work. Both spend their hours in Claude Code. Whether that
+        serves anyone beyond them is not a claim this page makes.
       </p>
     </section>
 
@@ -574,8 +616,8 @@ npm run self-check</pre>
         Google's and xAI's own CLIs and a third-party bridge for OpenAI, and grants no rights to any of them.
       </p>
       <p>
-        The repository is private during pre-release. This page is published so the claims and the open defects can be
-        read before the code is.
+        The repository is public and still pre-release. This page states the goals, the claims and the open defects
+        so they can be read before the code is.
       </p>
     </footer>
 
