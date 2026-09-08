@@ -27,6 +27,7 @@
 // silently -- spec §7.3 makes "unmatched tool_result count is zero" the gate.
 
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { RouterError } from "../domain/errors.js";
 
@@ -143,6 +144,7 @@ export class McpToolBridge {
 
     /** Replaces the advertised tool set. Claude Code may change it per turn. */
     setTools(tools: readonly McpToolDescriptor[]): void {
+        if (isDeepStrictEqual(this.#tools, tools)) return;
         this.#tools = tools;
     }
 

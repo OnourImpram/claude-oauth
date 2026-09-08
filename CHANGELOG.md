@@ -17,6 +17,11 @@ repair entries below record the defects that have since been closed.
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
 
+### Fixed: N04 continuation tool catalogue (2026-09-08)
+
+- Each adapter request derives MCP tools. Resume updates changed descriptors before releasing any parked call; equal catalogues retain their descriptors. xAI permission matching reads the live bridge names.
+- Tests measure additions, description/schema replacement, removal and unchanged catalogues. Removed tools cannot receive new calls, while parked results can finish. Provider-side cache refresh remains NOT_RUN; this change measures the bridge tools/list contract.
+
 ### Fixed: B03 continuation identity and instructions (2026-09-08)
 
 - Result extraction and compilation use the same normalized conversation record. Trailing system records no longer start a second agent.

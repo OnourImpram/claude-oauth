@@ -681,15 +681,16 @@ export class AgentModelAdapter implements ProviderAdapter {
         const results = extractToolResults(messages);
         // Validate continuations through the same compiler before releasing any call.
         const compiled = compilePrompt(request, true);
+        const tools = deriveMcpTools(anthropicTools(request.envelope.tools));
         const inputTokenUpperBound = compiled.inputTokenUpperBound;
         const runTurn = async (): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a
             // running ACP turn would be the agent finishing on its own.
-            if (results.length > 0) return (await sessions.resume(results, request.signal, compiled.continuationText)).outcome;
+            if (results.length > 0) return (await sessions.resume(results, request.signal, compiled.continuationText, tools)).outcome;
             return (await sessions.begin(
                 compiled.text,
-                deriveMcpTools(anthropicTools(request.envelope.tools)),
+                tools,
                 request.model.upstreamModel,
                 request.signal,
             )).outcome;

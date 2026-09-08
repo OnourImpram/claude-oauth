@@ -135,3 +135,39 @@ it("B03: old results are not resumed after a newer logical user turn", () => {
         { role: "system", content: "catalogue" },
     ]), []);
 });
+
+for (const tools of [
+    [{ name: "ToolSearch" }, { name: "mcp__playwright__browser_snapshot", description: "snapshot", input_schema: { type: "object" } }],
+    [{ name: "ToolSearch", description: "updated search", input_schema: { type: "object", properties: { query: { type: "string" } } } }],
+    [],
+]) {
+    it(`N04: resumed agent lists the current catalogue before continuing: ${JSON.stringify(tools)}`, async () => {
+        const h = harness(async (options) => {
+            const listing = await options.bridge.handle({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+            deepStrictEqual((listing?.["result"] as { tools: unknown[] }).tools, tools.map((tool) => ({
+                name: tool.name, description: tool.description ?? "",
+                inputSchema: tool.input_schema ?? { type: "object", properties: {} },
+            })));
+            if (tools.length === 0) {
+                const rejected = await options.bridge.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ToolSearch" } });
+                ok(rejected?.["error"], "removed tools cannot be called after the parked result completes");
+            }
+        });
+        try {
+            const id = await openCall(h.adapter);
+            await h.adapter.send(request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "found tools" }] }], tools));
+            strictEqual(h.starts(), 1);
+        } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+    });
+}
+
+it("N04: unchanged catalogue keeps the same advertised descriptors", async () => {
+    const h = harness();
+    try {
+        const id = await openCall(h.adapter);
+        const bridge = h.started()?.bridge;
+        const initial = bridge?.tools;
+        await h.adapter.send(request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "same tools" }] }]));
+        strictEqual(bridge?.tools, initial);
+    } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+});

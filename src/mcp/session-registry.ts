@@ -445,7 +445,7 @@ export class AgentSessionRegistry {
      * An id nobody minted, or one whose session is gone, is an unmatched result
      * -- counted and reported, never swallowed (spec §7.3).
      */
-    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = ""): Promise<BeginResult> {
+    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = "", tools?: readonly McpToolDescriptor[]): Promise<BeginResult> {
         if (signal?.aborted) {
             throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);
         }
@@ -464,6 +464,9 @@ export class AgentSessionRegistry {
             );
         }
         session.touchedAt = this.#now();
+        // Replace before delivering results: a released agent can immediately list or
+        // call tools. Already parked calls may finish even if their tool was removed.
+        if (tools !== undefined) session.bridge.setTools(tools);
         // The turn is armed BEFORE any result is delivered: delivering unblocks
         // the agent, which may park its next call immediately.
         const turn = session.awaitTurn();
