@@ -303,6 +303,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             route,
             method: safeMethod(request.method),
             pathFingerprint: createHash("sha256").update(routedTarget.target.pathname, "utf8").digest("hex").slice(0, 16),
+            // A request-shape rejection (invalid_request) carries an author-written, content-free
+            // sentence; without it the log said "invalid_request" twelve times and named nothing
+            // (2026-09-08, compaction after an Agent child). Bounded, and only for this code.
+            ...(error.code === "invalid_request" ? { remedy: error.message.slice(0, 200) } : {}),
         });
     }
 }
