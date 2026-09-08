@@ -345,6 +345,9 @@ export class AgentSessionRegistry {
         model = "",
         signal?: AbortSignal,
     ): Promise<BeginResult> {
+        if (signal?.aborted) {
+            throw new RouterError("upstream_timeout", "The agent request was cancelled before it started.", 504);
+        }
         this.sweep();
         // Each live session means one provider PROCESS. Without a ceiling, concurrent
         // requests fill the machine; the adapter's own #queue serialisation does not
@@ -418,6 +421,9 @@ export class AgentSessionRegistry {
      * -- counted and reported, never swallowed (spec §7.3).
      */
     async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal): Promise<BeginResult> {
+        if (signal?.aborted) {
+            throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);
+        }
         if (results.length === 0) {
             throw new RouterError("invalid_request", "A resumed turn must carry at least one tool result.", 400);
         }

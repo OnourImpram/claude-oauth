@@ -270,6 +270,49 @@ describe("the §7.3 gate -- unmatched results", () => {
 });
 
 describe("failure states are explicit, never hangs", () => {
+    it("an already aborted begin does not start an agent or reclaim an existing session", async () => {
+        const agent = new SahteAjan();
+        let starts = 0;
+        const registry = defter(agent, (a) => {
+            starts += 1;
+            void a.aracCagir("Read");
+        }, { maxLiveSessions: 1 });
+        try {
+            const first = await registry.begin("p", ARACLAR);
+            const cancelled = new AbortController();
+            cancelled.abort();
+            await rejects(registry.begin("cancelled", ARACLAR, "m", cancelled.signal), { status: 504 });
+            strictEqual(starts, 1);
+            strictEqual(registry.liveSessionCount, 1);
+            strictEqual(registry.bridgeFor(first.sessionKey), agent.bridge);
+            strictEqual(agent.iptalSebebi, undefined);
+        } finally {
+            registry.closeAll("test teardown");
+        }
+    });
+
+    it("an already aborted resume does not deliver a tool result and can be retried", async () => {
+        const agent = new SahteAjan();
+        const registry = defter(agent, (a) => void a.aracCagir("Read"));
+        try {
+            const first = await registry.begin("p", ARACLAR);
+            ok(first.outcome.kind === "tool_use");
+            const results = [{ toolUseId: first.outcome.call.id, content: "result", isError: false }];
+            const cancelled = new AbortController();
+            cancelled.abort();
+            await rejects(registry.resume(results, cancelled.signal), { status: 504 });
+            strictEqual(agent.bridge?.pendingCount, 1);
+            strictEqual(registry.liveSessionCount, 1);
+            strictEqual(agent.iptalSebebi, undefined);
+            const retry = registry.resume(results);
+            agent.bitti();
+            strictEqual((await retry).outcome.kind, "end_turn");
+            strictEqual(registry.unmatchedResultCount, 0);
+        } finally {
+            registry.closeAll("test teardown");
+        }
+    });
+
     it("a synchronous starter failure releases parked calls and removes its session", async () => {
         let bridge: McpToolBridge | undefined;
         let call: Promise<Record<string, unknown> | undefined> | undefined;
