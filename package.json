@@ -1,9 +1,11 @@
 {
-  "name": "@hezarfen/claude-oauth-router",
+  "name": "@onour-impram/claude-oauth",
   "version": "0.1.0",
+  "description": "Run other models inside Claude Code over their own OAuth sessions, without replacing the native Claude path",
+  "license": "Apache-2.0",
+  "author": "Onour Impram",
   "private": true,
   "type": "module",
-  "description": "OAuth-only local model router for Claude Code",
   "engines": {
     "node": ">=24.0.0"
   },
