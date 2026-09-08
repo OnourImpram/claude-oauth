@@ -28,7 +28,7 @@ body:
       options:
         - Google (Antigravity, `agy`)
         - xAI (`grok`)
-        - OpenAI (`codex` / Clodex capsule)
+        - OpenAI (Clodex capsule, ChatGPT/Codex-plan OAuth)
         - Router / supervisor / CLI
         - Gates and scripts (lint, secret-scan, fidelity-diff, release-id)
         - Documentation or site

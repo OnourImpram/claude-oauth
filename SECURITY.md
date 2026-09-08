@@ -57,10 +57,11 @@ result is believed.
 In scope: everything under `src/`, `scripts/`, `config/` and `docs/` in this repository, and the
 behaviour of the built `claude-oauth` command.
 
-Out of scope: the provider CLIs this project drives (Antigravity `agy`, `grok`, `codex`) and the
-Claude Code binary itself. Those are other vendors' software, run under your own account; report
-issues in them to their vendors. If this project *misuses* one of them — passes a flag it should
-not, trusts output it should not — that is in scope.
+Out of scope: the software this project drives — Antigravity `agy` (Google), `grok` (xAI), the
+third-party Clodex bridge (`@bman654/clodex`) that carries the OpenAI lane — and the Claude Code
+binary itself. Those are other people's software, run under your own account; report issues in
+them upstream. If this project *misuses* one of them — passes a flag it should not, trusts output
+it should not, pins a version with a known defect — that is in scope.
 
 ## Disclosure
 
