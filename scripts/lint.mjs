@@ -100,6 +100,10 @@ if (process.argv.includes("--ozdenetim")) {
     /spawnFailureGuard/.test(codeOnly("const c = spawn(x);\nspawnFailureGuard(c);\n")));
   arm("guard: .once(\"error\") inside the string IS PRESERVED (the detector is not blinded)",
     /\.once\("error"/.test(codeOnly('child.once("error", handler);')));
+  arm("guard: a URL on the same line does NOT erase a real call",
+    /spawnFailureGuard/.test(codeOnly('const u = "https://example.invalid"; spawnFailureGuard(c);')));
+  arm("a comment is still blanked (the literal arm did not rescue it)",
+    !/spawnFailureGuard/.test(codeOnly('const c = spawn(x); // spawnFailureGuard')));
   arm("blanking preserves line alignment",
     codeOnly("a();\n/* two\nlines */\nb();").split("\n").length === "a();\n/* two\nlines */\nb();".split("\n").length);
   console.log(`self-check: ${failed === 0 ? "all succeeded" : failed + " arms failed"}`);
@@ -123,6 +127,11 @@ function codeOnly(source) {
   const blank = (text) => text.replace(/[^\n]/g, " ");
   while (index < source.length) {
     const rest = source.slice(index);
+    // A string literal is copied through untouched: its bytes are not comments, and
+    // the "//" inside a URL used to start one -- blanking the rest of the line and,
+    // measured 2026-09-07, deleting a real spawnFailureGuard call that sat after it.
+    const literal = /^(["'`])(?:\\.|(?!\1)[\s\S])*\1/.exec(rest);
+    if (literal) { out += literal[0]; index += literal[0].length; continue; }
     const line = /^\/\/[^\n]*/.exec(rest);
     if (line) { out += blank(line[0]); index += line[0].length; continue; }
     const block = /^\/\*[\s\S]*?\*\//.exec(rest);

@@ -188,6 +188,35 @@ describe("antigravity failure detail -- the diagnostic channel does not leak", (
         ok(!message.includes(value), "a slash-bearing key fell between the opaque-run boundaries");
     });
 
+    it("a POSIX source path is NOT eaten by the base64 rule", async () => {
+        // Measured counter-example: "/home/runner/work/MyApp123/src/index" satisfied
+        // mixed case AND a digit, so the reader got "ENOENT open '[REDACTED].ts'".
+        // The path is the diagnosis; losing it defeats the channel.
+        const path = "/home/runner/work/MyApp123/src/index";
+        const message = await redactedMessage(`ENOENT open '${path}.ts'`);
+        ok(message.includes(path), `the path was redacted away: ${message}`);
+    });
+
+    it("an operating-system EACCES is not called a tool-permission denial", async () => {
+        // "command" was in the tool-context list for agy's own wording and matched
+        // every "command failed: permission denied" the OS produces, answering an
+        // EACCES with a permissions.allow remedy.
+        const error = await bridgeFailure({
+            exitCode: 0,
+            stdout: success(""),
+            stderr: "command failed: permission denied for /etc/passwd",
+        });
+        strictEqual(error.code, "upstream_protocol_error");
+    });
+
+    it("a short status code behind a weak field name survives, a long lowercase token does not", async () => {
+        const kept = await redactedMessage("key: Error1 while starting the child");
+        ok(kept.includes("Error1"), "a six-character status code was treated as a credential");
+        const token = "abcdefghijklmnopqrs";
+        const gone = await redactedMessage(`key: ${token} rejected`);
+        ok(!gone.includes(token), "a nineteen-character token slipped under the length floor");
+    });
+
     it("a quoted value after a scheme word is redacted", async () => {
         const value = "sec_token_9988776655";
         const message = await redactedMessage(`Rejected handshake for Bearer "${value}" from peer`);

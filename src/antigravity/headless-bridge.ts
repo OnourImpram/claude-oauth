@@ -389,9 +389,23 @@ const weakSecretFields = "key|token|auth|credential";
 // "spawn_failed" and a 12-character token are the same size. Shape does: a credential
 // is long, or mixes cases, or carries digits. Deleting "spawn_failed" costs the reader
 // the reason their run died, which is the one thing this channel exists to carry.
+// Measured 2026-09-07: the base64 rule redacted a POSIX source path and left the
+// reader with "ENOENT open '[REDACTED].ts'". A path is diagnosis, not secret.
+function looksLikePath(candidate: string): boolean {
+    return candidate.startsWith("/") || (candidate.split("/").length - 1) >= 3;
+}
+
 function looksLikeCredential(value: string): boolean {
-    return value.length >= 20
-        || (/[0-9]/u.test(value) && /[A-Za-z]/u.test(value))
+    // Two measured edges: "Error1" (a short status code behind a weak field name)
+    // was called a credential because it mixes a letter and a digit, and a
+    // nineteen-character lowercase token escaped because the plain-length threshold
+    // sat at twenty. Shape heuristics need a length floor under them, and the floor
+    // for length alone is lower than it was.
+    if (value.length >= 16)
+        return true;
+    if (value.length < 12)
+        return false;
+    return (/[0-9]/u.test(value) && /[A-Za-z]/u.test(value))
         || (/[a-z]/u.test(value) && /[A-Z]/u.test(value));
 }
 
@@ -421,9 +435,15 @@ function redactChildDetail(text: string): string {
                  (whole: string, name: string, quote: string, value: string) =>
                      (looksLikeCredential(value) ? `${name}${quote}[REDACTED]${quote}` : whole))
         // Base64-shaped runs, which the opaque-run rule below cannot see because "/"
-        // and "+" split them. Mixed case AND a digit are required so that file paths
-        // -- the most valuable thing in a diagnostic -- are not eaten.
-        .replace(/(?<![A-Za-z0-9+/=])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])/gu, "[REDACTED]")
+        // and "+" split them. The mixed-case-plus-digit condition was NOT enough: it
+        // was measured eating "/home/runner/work/MyApp123/src/index", and the comment
+        // that used to sit here claimed the opposite. A path is what a reader needs
+        // most from a diagnostic, so the separator count decides -- a credential
+        // carries at most a couple, a path carries many, and a leading separator says
+        // path outright. This is a heuristic and it is stated as one: a key with three
+        // slashes still escapes, and a two-segment path with mixed case is still eaten.
+        .replace(/(?<![A-Za-z0-9+/=])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])/gu,
+                 (candidate: string) => (looksLikePath(candidate) ? candidate : "[REDACTED]"))
         // Long opaque runs, letters of any script.
         .replace(/(?<![\p{L}\p{N}_-])[\p{L}\p{N}_-]{32,}(?![\p{L}\p{N}_-])/gu, "[REDACTED]");
 }
@@ -489,7 +509,12 @@ function withChildDetail(error: RouterError, output: HeadlessProcessOutput, repo
 // elsewhere in the output used to disqualify the whole channel.
 const permissionWords = "permissions?|approval|authori[sz]ation";
 const denialWords = "denied|rejected|refused|not permitted|cannot prompt|could not prompt|could not be obtained|auto-?denied";
-const toolContextWords = "tool|command|headless|noninteractive|non-interactive|interactive|prompt|approve|approval|skip-permissions|allow-rule|permissions\\.allow";
+// Bare "command" was measured matching "command failed: permission denied for
+// /etc/passwd" -- an operating-system EACCES, classified as a tool-approval denial
+// and answered with a permissions.allow remedy that has nothing to do with it. The
+// child's own wording ("a tool required the \"command\" permission that headless mode
+// cannot prompt for") still matches through "tool" and "headless".
+const toolContextWords = "tool|headless|noninteractive|non-interactive|interactively|prompt for|approve|approval|skip-permissions|allow-rule|permissions\\.allow|\"command\" permission";
 const permissionDenialSignature = new RegExp(
     `(?:${permissionWords})[\\s\\S]{0,80}?(?:${denialWords})`
     + `|(?:${denialWords})[\\s\\S]{0,80}?(?:${permissionWords})`
