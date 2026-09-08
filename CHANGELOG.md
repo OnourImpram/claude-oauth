@@ -17,6 +17,11 @@ repair entries below record the defects that have since been closed.
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
 
+### Fixed: G08 MCP handshake evidence and SDK boundary (2026-09-08)
+
+- `mcpHttpServer` and session MCP options now use SDK 1.4.0 types, replacing the unchecked `as never` boundary. A fake ACP peer asserts the exact transmitted name, URL and header array against the installed schema.
+- Live Grok 1.0.13 produced `agent_tool_call_parked` at `2026-09-08T10:23:44.844Z`, caller PID `49944`, tool `cluster_a_handshake_receipt`. The router continuation completed with `end_turn` and zero unmatched results. The probe used the existing CLI session without logging in or reading identity files.
+
 ### Fixed: G02 project MCP refusal diagnosis (2026-09-08)
 
 - The installed Grok 1.0.13 package documents project `.mcp.json` discovery independently of the Claude vendor compatibility switch. Retain refusal; the error names the file and a workspace/user-configuration remedy. Hooks and plugins stay fail-closed.
