@@ -628,7 +628,7 @@ export interface GrokAcpSessionOptions extends GrokAcpOptions {
 }
 
 export interface GrokAcpSession {
-    /** Resolves when the agent's prompt call finishes on its own. */
+    /** Settles after the prompt and the child process's stdio have closed. */
     readonly done: Promise<void>;
     text(): string;
     cancel(reason: string): void;
@@ -669,7 +669,13 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
         const environment = await prepareGrokProcessEnvironment(options);
         // Preparation awaits filesystem work; cancellation during it must not spawn a child.
         if (cancelled || options.signal?.aborted) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled during start.", 504);
-        child = spawnGrok(options, environment, options.model);
+        const spawned = spawnGrok(options, environment, options.model);
+        child = spawned;
+        // Capture close before ACP can finish: exit/error may leave stdio open.
+        // https://nodejs.org/download/release/v24.14.0/docs/api/child_process.html#event-close
+        const closed = new Promise<void>((resolveClose) => {
+            spawned.once("close", () => resolveClose());
+        });
         const spawnFailure = spawnFailureGuard(child);
         detach = attachAbort(child, options.signal);
         let initialized = false;
@@ -726,6 +732,7 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
         finally {
             detach?.();
             await stopChild(child);
+            await closed;
         }
     })();
 
