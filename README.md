@@ -13,26 +13,76 @@ Claude path.** `claude` stays native. `claude-oauth` opens the router.
 
 ## Why this exists
 
-Claude Code is an agent harness, not just a chat window. Its value is in the loop: tools, subagents,
-skills, MCP servers, permission prompts. A model router that only forwards text turns that harness
-into a chat box.
+Two goals. The mechanism is the same for both; the second is the one that shaped the code.
 
-The goal here is the opposite: **every model reachable through the router should be able to use the
-same Claude Code surface**, the `Agent` tool, skills, MCP servers such as Playwright, file
-editing under the same permission rules. Since 2026-09-08 the Google lane reaches that surface for real
-(G01 below, with a live receipt). The native permission paths in Google and xAI are now constrained
-(B01 below); permission inheritance through a separate `Agent` child session remains unmeasured.
+**1. Make Claude Code reachable for students and researchers.** Claude Code is an agent harness,
+not a chat window: tools, subagents, skills, MCP servers and permission prompts in one loop.
+Learning it is worth a student's time. Paying for it is often not possible. Many students and
+researchers already hold a model plan of some kind: Google's student Gemini offer, a ChatGPT plan,
+an xAI plan. `claude-oauth` lets those plans answer inside Claude Code, over the account's own
+OAuth session, with no API key and no separate bill. The harness becomes learnable on the plan you
+already have, and the native `claude` path stays exactly as installed for the day you move to it.
 
-Two audiences, both intentional:
+**2. Raise the quality of work done inside Claude Code by letting other models verify it.** A model
+that wrote a change is the worst judge of that change. The working pattern behind this project is a
+maker and a checker that are never the same model: one produces the diff, the manuscript, the
+analysis; another, in a fresh context, reads the output and reports what is wrong with it. Claude
+Code already has the mechanism, the `Agent` tool and subagents. What it lacks is a second model to
+hand the work to. This repository supplies it: one delegate agent per routed model
+(`gemini-delege`, `grok-delege`, `sol-delege`, `astra-delege`, `terra-delege`), and a `/model`
+switch that puts a Google, xAI or OpenAI model in the driver's seat for a review pass while your
+tools, permissions and MCP servers stay where they are.
 
-1. **Developers:** switch models mid-workflow, run several in parallel, cross-check one against
-   another, inside the tool they already use.
-2. **Students:** extend a free provider tier (for example Google's student Gemini offer, subject to
-   Google's own terms) into Claude Code, so the harness itself is learnable without a paid plan.
+This repository was built the way it asks to be used. The router was written and reviewed by
+different models in turn, and the defect table below is what that loop produced: review passes by
+models that had not written the code, followed by the author's measurement of each claim. The
+Google native-write bypass (B01) was found by an OpenAI model after the author's own measurement
+had passed it. The G01 repair was designed together with an OpenAI model, and the option the
+measurement supported won over the one first proposed. The N05 repair was written by an OpenAI
+model in a separate worktree, and the gate that accepted it was run by the reviewing side, not by
+the model that wrote it. None of that guarantees correctness. It is the reason the defect list
+exists at all.
 
-This is meant to grow the harness's adoption, not to route around anyone. The native path is
-untouched and remains the recommended one; nothing here proxies, wraps, or intercepts Anthropic's
-own endpoint.
+### Who this is for
+
+- **Students and researchers** with a provider plan and no API budget: learn the harness on the
+  plan you have. Subject to each provider's own terms; the student offers are the providers' to give
+  and to withdraw.
+- **Developers** who want a second model in the same harness: switch models mid-workflow, run
+  several in parallel, hand a review to a model that did not write the code.
+- **Not for** anyone looking to route around Anthropic. The native path is untouched and remains
+  the recommended one; nothing here proxies, wraps or intercepts Anthropic's own endpoint. The
+  intent is to grow the harness's adoption: someone who learns Claude Code on a free tier and later
+  wants the native models has a reason to pay for them.
+
+### How verification works here
+
+The pattern needs two things: a second model inside the harness, and the discipline that the
+producer never signs off on its own work. This repository provides the first. The second is a
+habit, and making that habit cheap is the point of the project:
+
+1. A Claude model, or you, produces the change.
+2. Hand the output (the diff, the test log, the draft) to a delegate agent of a different vendor,
+   or switch `/model` to that vendor and ask for a review with the same tools the producer had.
+3. Treat the checker's answer as a worker's evidence, not as truth: run the test it points at, open
+   the file it names.
+4. Where the two disagree, the disagreement is the finding.
+
+What limits this today is in the defect table, not hidden. The generated delegate agents answer
+from what the prompt hands them and cannot drive the harness themselves (N03), so a delegated
+review gets the diff pasted into its prompt. A direct `/model` switch to the Google or xAI lane
+carries the tool loop (G01 and G03 repaired), so a review run that way can open files and run tests
+itself. Which lane reaches what is in the lane table and the defect ids, and nowhere else.
+
+### The harness surface, not a chat box
+
+Claude Code's value is in the loop: tools, subagents, skills, MCP servers, permission prompts. A
+model router that only forwards text turns that harness into a chat box. The goal here is the
+opposite: **every model reachable through the router should be able to use the same Claude Code
+surface**, the `Agent` tool, skills, MCP servers such as Playwright, file editing under the same
+permission rules. Since 2026-09-08 the Google lane reaches that surface for real (G01 below, with a
+live receipt). The native permission paths in Google and xAI are now constrained (B01 below);
+permission inheritance through a separate `Agent` child session remains unmeasured.
 
 ## How it sits inside Claude Code
 
