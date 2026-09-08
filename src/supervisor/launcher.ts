@@ -1,4 +1,4 @@
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import type { ProviderReadiness } from "../domain/contracts.js";
@@ -17,6 +17,8 @@ import { assertNoApiKeySelectors, sanitizedClaudeEnvironment } from "../security
 import { createSessionNonce, SESSION_HEADER } from "../security/nonce.js";
 import { AgentSessionRegistry } from "../mcp/session-registry.js";
 import { mcpHttpServer, startGrokAcpSession } from "../grok/acp-bridge.js";
+import { startAntigravitySession } from "../antigravity/session.js";
+import { sweepStaleConfigHomes } from "../antigravity/config-home.js";
 import { startSupervisorIpc, type SupervisorStatus } from "./ipc.js";
 import { startProviderSet } from "./provider-set.js";
 import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, autoCompactWindowForModel } from "../domain/model-contracts.js";
@@ -381,12 +383,41 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
                 bridgedToolNames: bridge.tools.map((tool) => tool.name),
             }),
     });
+    const antigravityBinary = expandLockedPath(installLock.antigravity.executable, environment);
+    // G01. Before any call builds one, homes orphaned by an earlier crash are removed. The
+    // sweep runs at STARTUP and not on a timer: a timer would race a live call, and the
+    // sweep's own measure asserts that a home whose owner is alive SURVIVES.
+    const configHomeRoot = join(paths.root, "providers", "antigravity", "call-homes");
+    const sweep = await sweepStaleConfigHomes({ root: configHomeRoot });
+    if (sweep.removed.length > 0) {
+        writeSafeLog({
+            event: "antigravity_config_home_sweep",
+            level: "info",
+            code: `removed:${sweep.removed.length}:kept:${sweep.kept.length}`,
+            remedy: "No action needed: these are call-scoped Antigravity homes left by an interrupted run; the operator's own configuration is never written by this lane.",
+        });
+    }
+    const googleSessions = new AgentSessionRegistry({
+        mcpBaseUrl: () => routerBaseUrl,
+        mcpHeaders: () => (routerNonce === "" ? {} : { [SESSION_HEADER]: routerNonce }),
+        startAgent: ({ prompt, mcpUrl, mcpHeaders, model }) =>
+            startAntigravitySession({
+                binary: antigravityBinary,
+                cwd: options.cwd,
+                prompt,
+                model,
+                environment,
+                configHomeRoot,
+                toolEndpoint: { url: mcpUrl, headers: mcpHeaders },
+            }),
+    });
     const providerSet = await startProviderSet(snapshot, paths, createSessionNonce(), {
         cwd: options.cwd,
         environment,
-        antigravityBinary: expandLockedPath(installLock.antigravity.executable, environment),
+        antigravityBinary,
         grokBinary,
         grokSessions,
+        googleSessions,
         disabledProviders,
     });
     try {

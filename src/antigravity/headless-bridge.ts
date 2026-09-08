@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RouterError } from "../domain/errors.js";
 import { AGENT_MODEL_CONTRACTS } from "../domain/model-contracts.js";
 import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security/environment.js";
+import { createEphemeralConfigHome, type AgentToolEndpoint, type EphemeralConfigHome } from "./config-home.js";
 // The allowlist is a SECURITY control: only reviewed models may be spawned. But writing
 // the list by hand silently left a model out whenever one was added to the contracts --
 // and because the error code presented that as Google's own refusal
@@ -43,6 +44,13 @@ export interface AntigravityHeadlessOptions {
     readonly prompt: string;
     readonly model: string;
     readonly home?: string;
+    /**
+     * G01. When both are supplied the call runs inside a CALL-SCOPED configuration home
+     * that carries our MCP entry and nothing else; the operator's own mcp_config.json is
+     * never opened for writing. Omitted, the lane behaves exactly as before.
+     */
+    readonly toolEndpoint?: AgentToolEndpoint;
+    readonly configHomeRoot?: string;
     readonly environment?: NodeJS.ProcessEnv;
     readonly timeoutMs?: number;
     readonly signal?: AbortSignal;
@@ -251,8 +259,15 @@ function classifiedProviderResultFailure(result: TerminalResult): RouterError | 
     }
     return matches.length === 1 ? matches[0] : undefined;
 }
-function processEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function processEnvironment(source: NodeJS.ProcessEnv, configHome?: string): NodeJS.ProcessEnv {
     const environment = sanitizedWorkerEnvironment("gemini", source);
+    if (configHome !== undefined) {
+        // MEASURED 2026-09-08: agy resolves its configuration home from these. Both are set
+        // because the two platforms disagree on which one wins, and a home that is redirected
+        // on one variable only would silently read the operator's real config.
+        environment["USERPROFILE"] = configHome;
+        environment["HOME"] = configHome;
+    }
     for (const name of Object.keys(environment).filter((key) => isGenericEndpointSelector(key) || antigravitySelectorPattern.test(key))) {
         delete environment[name];
     }
@@ -566,13 +581,21 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
     assertNoCustomSelectors(source);
     await assertSettingsDoNotSelectGemini(options.home ?? homedir());
     let output: HeadlessProcessOutput;
+    let configHome: EphemeralConfigHome | undefined;
     try {
+        if (options.toolEndpoint !== undefined && options.configHomeRoot !== undefined) {
+            configHome = await createEphemeralConfigHome({
+                root: options.configHomeRoot,
+                ...(options.home === undefined ? {} : { sourceHome: options.home }),
+                endpoint: options.toolEndpoint,
+            });
+        }
         output = await (options.processRunner ?? runAntigravityProcess)({
             command: options.binary,
             arguments: processArguments(options.model, timeoutMs, options.allowEdits === true),
             input: processInput(options.prompt),
             cwd: options.cwd,
-            environment: processEnvironment(source),
+            environment: processEnvironment(source, configHome?.path),
             timeoutMs,
             maximumOutputBytes,
             ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -587,6 +610,12 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         if (error instanceof RouterError)
             throw error;
         throw new RouterError("adapter_unavailable", "Antigravity could not complete the process request.", 503);
+    }
+    finally {
+        // The nonce lives ONLY inside this directory. Every exit path -- success, timeout,
+        // cancellation, a thrown RouterError -- passes through here; a crash that skips it
+        // is what the startup sweep exists for.
+        await configHome?.dispose();
     }
     if (output.exitCode !== 0 && output.stdout.trim() === "" && /(?:auth(?:entication|orization)?|login|sign[ -]?in|oauth)/iu.test(output.stderr)) {
         throw new RouterError("provider_auth_required", `Antigravity OAuth login is required. ${childDetail(output)}`, 401);
