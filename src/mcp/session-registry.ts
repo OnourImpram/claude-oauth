@@ -26,7 +26,7 @@
 import { randomUUID } from "node:crypto";
 
 import { RouterError } from "../domain/errors.js";
-import { McpToolBridge, type McpToolDescriptor, type ParkedToolCall } from "./tool-bridge.js";
+import { McpToolBridge, type McpToolDescriptor, type McpToolResultContent, type ParkedToolCall } from "./tool-bridge.js";
 import { writeSafeLog } from "../runtime/log.js";
 
 /** A running provider agent, seen from the registry's side. */
@@ -255,6 +255,7 @@ export interface ToolResultDelivery {
     readonly toolUseId: string;
     readonly content: string;
     readonly isError: boolean;
+    readonly contentBlocks?: readonly McpToolResultContent[];
 }
 
 export class AgentSessionRegistry {
@@ -444,7 +445,7 @@ export class AgentSessionRegistry {
      * An id nobody minted, or one whose session is gone, is an unmatched result
      * -- counted and reported, never swallowed (spec §7.3).
      */
-    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal): Promise<BeginResult> {
+    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = "", tools?: readonly McpToolDescriptor[]): Promise<BeginResult> {
         if (signal?.aborted) {
             throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);
         }
@@ -463,6 +464,9 @@ export class AgentSessionRegistry {
             );
         }
         session.touchedAt = this.#now();
+        // Replace before delivering results: a released agent can immediately list or
+        // call tools. Already parked calls may finish even if their tool was removed.
+        if (tools !== undefined) session.bridge.setTools(tools);
         // The turn is armed BEFORE any result is delivered: delivering unblocks
         // the agent, which may park its next call immediately.
         const turn = session.awaitTurn();
@@ -476,7 +480,16 @@ export class AgentSessionRegistry {
                 continue;
             }
             this.#calls.delete(result.toolUseId);
-            if (session.bridge.deliverToolResult(result.toolUseId, result.content, result.isError)) {
+            // ACP is still inside session/prompt. Its pending MCP reply is the transport
+            // available now; label operator context separately from tool output and send
+            // it on every reply so concurrently waiting calls cannot miss it.
+            // Source: https://agentclientprotocol.com/protocol/prompt-turn
+            const context = continuationText === "" ? "" : `\n\nROUTER CONTINUATION CONTEXT (instructions for the active turn):\n${continuationText}`;
+            const contentBlocks = result.contentBlocks === undefined ? undefined : [
+                ...result.contentBlocks,
+                ...(context === "" ? [] : [{ type: "text" as const, text: context }]),
+            ];
+            if (session.bridge.deliverToolResult(result.toolUseId, result.content + context, result.isError, contentBlocks)) {
                 delivered += 1;
             }
         }

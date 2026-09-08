@@ -92,7 +92,6 @@ const executableHomeEntries = ["hooks", "hooks-paths", "plugins"];
 const executableProjectEntries = [
     join(".grok", "hooks"),
     join(".grok", "plugins"),
-    ".mcp.json",
 ];
 const disabledCompatibilityVariables = [
     "GROK_CLAUDE_SKILLS_ENABLED",
@@ -349,6 +348,17 @@ async function assertSafeGrokConfig(home: string, cwd: string): Promise<void> {
         await assertSafeConfigFile(join(current, ".grok", "config.toml"));
         for (const name of executableProjectEntries)
             await assertEmptyOrMissing(join(current, name));
+        // Installed Grok 1.0.13 docs/user-guide/07-mcp-servers.md, Compatibility:
+        // project .mcp.json is loaded until the Claude import marker is set. Its
+        // row has a separate gate from GROK_CLAUDE_MCPS_ENABLED, so retain refusal.
+        try {
+            await assertEmptyOrMissing(join(current, ".mcp.json"));
+        }
+        catch (error) {
+            throw new RouterError("adapter_unavailable",
+                "Project .mcp.json cannot be safely excluded from Grok MCP discovery. FIX: use an xAI workspace without .mcp.json, or relocate its MCP declarations to Claude Code user configuration before retrying. .grok/hooks and .grok/plugins must also remain empty or absent.",
+                503, { cause: error });
+        }
         if (await exists(join(current, ".git")))
             break;
         const parent = dirname(current);
@@ -622,7 +632,7 @@ export async function runGrokAcp(options: GrokAcpOptions): Promise<GrokAcpResult
 
 export interface GrokAcpSessionOptions extends GrokAcpOptions {
     /** MCP servers. In Phase 9 there is a single element: the tool bridge on the router. */
-    readonly mcpServers?: readonly unknown[];
+    readonly mcpServers?: readonly acp.McpServer[];
     /** Published MCP tool names; only a fully qualified matching MCP request can be allowed. */
     readonly bridgedToolNames?: readonly string[];
 }
@@ -648,7 +658,7 @@ function namesBridgedTool(params: RequestPermissionParams, options: GrokAcpSessi
         return false;
     }
     return (options.mcpServers ?? []).some((server) =>
-        isRecord(server) && server["type"] === "http" && typeof server["name"] === "string" &&
+        "type" in server && server.type === "http" &&
         (options.bridgedToolNames ?? []).some((name) => input["tool_name"] === `${server["name"]}__${name}`));
 }
 
@@ -708,7 +718,7 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
                     initialized = true;
                     const session = await context.request(acp.methods.agent.session.new, {
                         cwd: resolve(options.cwd),
-                        mcpServers: (options.mcpServers ?? []) as never,
+                        mcpServers: [...(options.mcpServers ?? [])],
                     });
                     await context.request(acp.methods.agent.session.prompt, {
                         sessionId: session.sessionId,
@@ -753,7 +763,9 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
  * The session nonce goes into a header; same secret, same gate. Into the header and NOT
  * the URL, because URLs get logged.
  */
-export function mcpHttpServer(name: string, url: string, headers: Readonly<Record<string, string>>): Record<string, unknown> {
+// SDK 1.4.0 schema/schema.json: McpServerHttp and HttpHeader.
+// Source: https://agentclientprotocol.com/protocol/session-setup#http-transport
+export function mcpHttpServer(name: string, url: string, headers: Readonly<Record<string, string>>): acp.McpServerHttp & { type: "http" } {
     return {
         type: "http",
         name,

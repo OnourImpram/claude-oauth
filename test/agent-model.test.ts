@@ -118,6 +118,37 @@ describe("count_tokens path", () => {
     });
 });
 
+for (const [block, expected] of [
+    [{ type: "thinking", thinking: "private reasoning", signature: "private signature" }, ""],
+    [{ type: "redacted_thinking", data: "private reasoning" }, ""],
+    [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } }, "[image: media_type=image/png, bytes=3]"],
+    [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: "AQIDBA==" } }, "[document: media_type=application/pdf, bytes=4]"],
+    [{ type: "server_tool_use", name: "web_search", input: {} }, "[tool call: web_search]"],
+    [{ type: "mcp_tool_use", name: "browser_snapshot", input: {} }, "[tool call: browser_snapshot]"],
+] as const) {
+    for (const provider of ["google", "xai"] as const) {
+        it(`G04: ${provider} compiles ${block.type} history without 422`, async () => {
+            let prompt = "";
+            const adapter = new AgentModelAdapter({
+                provider,
+                readiness: async () => ({ provider, oauthReady: true, adapterReady: true, status: "ready", detailCode: "test" }),
+                run: async (runRequest) => { prompt = runRequest.prompt; return { text: "answer" }; },
+            });
+            const current = request({ model: model.id, messages: [
+                { role: "assistant", content: [block] },
+                { role: "user", content: "Continue." },
+            ] });
+            const routed = { ...current, model: { ...model, provider } };
+            strictEqual((await adapter.send(routed)).status, 200);
+            if (expected !== "") strictEqual(prompt.includes(expected), true);
+            strictEqual(prompt.includes("private reasoning"), false);
+            strictEqual(prompt.includes("private signature"), false);
+            strictEqual(prompt.includes("AQID"), false);
+            strictEqual((await adapter.send({ ...routed, path: "/v1/messages/count_tokens" })).status, 200);
+        });
+    }
+}
+
 describe("provider/model matching", () => {
     it("rejects when the adapter's provider does not match the model's provider", async () => {
         const adapter = new AgentModelAdapter({

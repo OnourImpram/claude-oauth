@@ -27,6 +27,7 @@
 // silently -- spec §7.3 makes "unmatched tool_result count is zero" the gate.
 
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { RouterError } from "../domain/errors.js";
 
@@ -52,8 +53,14 @@ export interface ParkedToolCall {
     readonly input: Record<string, unknown>;
 }
 
+// MCP carries base64 media directly, independently of the ACP text prompt.
+// Source: https://modelcontextprotocol.io/specification/2025-06-18/server/tools#image-content
+export type McpToolResultContent =
+    | { readonly type: "text"; readonly text: string }
+    | { readonly type: "image"; readonly data: string; readonly mimeType: string };
+
 export type ToolCallOutcome =
-    | { readonly kind: "result"; readonly content: string; readonly isError: boolean }
+    | { readonly kind: "result"; readonly content: string; readonly isError: boolean; readonly contentBlocks?: readonly McpToolResultContent[] }
     | { readonly kind: "cancelled"; readonly reason: string };
 
 interface PendingToolCall {
@@ -137,6 +144,7 @@ export class McpToolBridge {
 
     /** Replaces the advertised tool set. Claude Code may change it per turn. */
     setTools(tools: readonly McpToolDescriptor[]): void {
+        if (isDeepStrictEqual(this.#tools, tools)) return;
         this.#tools = tools;
     }
 
@@ -166,7 +174,7 @@ export class McpToolBridge {
      * Answer a tool_result coming back from Claude Code.
      * Returns false when nothing was waiting for this id -- counted, never hidden.
      */
-    deliverToolResult(id: string, content: string, isError: boolean): boolean {
+    deliverToolResult(id: string, content: string, isError: boolean, contentBlocks?: readonly McpToolResultContent[]): boolean {
         const pending = this.#pendingCalls.get(id);
         if (pending === undefined) {
             // If WE dropped this call, a late answer is not lost work.
@@ -179,7 +187,7 @@ export class McpToolBridge {
         }
         this.#pendingCalls.delete(id);
         if (pending.timer !== undefined) clearTimeout(pending.timer);
-        pending.resolveOutcome({ kind: "result", content, isError });
+        pending.resolveOutcome({ kind: "result", content, isError, ...(contentBlocks === undefined ? {} : { contentBlocks }) });
         return true;
     }
 
@@ -236,7 +244,7 @@ export class McpToolBridge {
                     return this.#errorResponse(id, -32001, `Tool call cancelled: ${outcome.reason}`);
                 }
                 return this.#resultResponse(id, {
-                    content: [{ type: "text", text: outcome.content }],
+                    content: outcome.contentBlocks ?? [{ type: "text", text: outcome.content }],
                     isError: outcome.isError,
                 });
             }

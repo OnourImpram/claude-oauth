@@ -398,7 +398,7 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
                 model,
                 environment,
                 mcpServers: [mcpHttpServer("hezarfen-claude-code-tools", mcpUrl, mcpHeaders)],
-                bridgedToolNames: bridge.tools.map((tool) => tool.name),
+                get bridgedToolNames() { return bridge.tools.map((tool) => tool.name); },
             }),
     });
     const antigravityBinary = expandLockedPath(installLock.antigravity.executable, environment);

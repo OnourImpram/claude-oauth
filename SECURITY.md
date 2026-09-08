@@ -28,11 +28,16 @@ validation rejects. Both broader schedules were reproduced on Windows after the 
 the helper must not be treated as a sandbox against arbitrary concurrent
 ancestor changes. A source search in this run found no production caller of the helper.
 
-Related open items with a security dimension: **G02** (a non-empty `.mcp.json` in the project makes the xAI
-lane refuse to start; fail-closed, but it is a denial of the lane), and the fact that **B05**, the
+Related open item with a security dimension: the fact that **B05**, the
 launcher shim that separates `claude` from `claude-oauth` is not in this tree, means the
 native-separation claim cannot be verified from this repository yet. The full list is in the
 README under *Known gaps*.
+
+**~~G02~~, Repaired 2026-09-08 (diagnostic branch).** Grok 1.0.13 package documentation
+lists project `.mcp.json` as a discovery source until a Claude import marker suppresses it.
+The xAI refusal remains fail-closed and now names the file and the remedy. Root and nested
+workspace tests measure this error; `.grok/hooks` and `.grok/plugins` stay refused. Live xAI
+in repositories with non-empty `.mcp.json` is **NOT_RUN because discovery cannot be excluded**.
 
 N05 is repaired. The remaining open defects still prevent a release; see the README for the
 measured B01 native-path repair and the Agent inheritance check that remains NOT_RUN.

@@ -60,6 +60,26 @@ passes and repaired where a repair was narrow enough to carry its own regression
   equivalents (`HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`) and converts separators, so `doctor`
   runs on Linux and reports each component instead of aborting on the first path. Windows
   behaviour unchanged (negative arm in the test). The lock still pins only Windows binaries.
+### Fixed: G08 MCP handshake evidence and SDK boundary (2026-09-08)
+- `mcpHttpServer` and session MCP options now use SDK 1.4.0 types, replacing the unchecked `as never` boundary. A fake ACP peer asserts the exact transmitted name, URL and header array against the installed schema.
+- Live Grok 1.0.13 produced `agent_tool_call_parked` at `2026-09-08T10:23:44.844Z`, caller PID `49944`, tool `cluster_a_handshake_receipt`. The router continuation completed with `end_turn` and zero unmatched results. The probe used the existing CLI session without logging in or reading identity files.
+### Fixed: G02 project MCP refusal diagnosis (2026-09-08)
+- The installed Grok 1.0.13 package documents project `.mcp.json` discovery independently of the Claude vendor compatibility switch. Retain refusal; the error names the file and a workspace/user-configuration remedy. Hooks and plugins stay fail-closed.
+- Root/nested-workspace tests reproduce the former generic error. Live xAI in repositories containing non-empty `.mcp.json` is NOT_RUN because that configuration is intentionally refused.
+### Fixed: G04 agent history conversion (2026-09-08)
+- Thinking and redacted thinking are dropped; images and documents retain media-type and size placeholders; server and MCP tool-use blocks become tool-call summaries. Historical tool blocks are summarized on both session and text lanes.
+- Per-type Google/xAI tests and mixed session history cover messages and count_tokens. Initial multi-text request framing and delegate tooling are outside this repair.
+### Fixed: N04 continuation tool catalogue (2026-09-08)
+- Each adapter request derives MCP tools. Resume updates changed descriptors before releasing any parked call; equal catalogues retain their descriptors. xAI permission matching reads the live bridge names.
+- Tests measure additions, description/schema replacement, removal and unchanged catalogues. Removed tools cannot receive new calls, while parked results can finish. Provider-side cache refresh remains NOT_RUN; this change measures the bridge tools/list contract.
+### Fixed: B03 continuation identity and instructions (2026-09-08)
+- Result extraction and compilation use the same normalized conversation record. Trailing system records no longer start a second agent.
+- Continuations pass compiler validation before any result is released. All accompanying user text and current system context travel in labelled MCP result text, alongside preserved images. Tests inspect the parked reply and assert a single agent start; this is transport evidence, not model-compliance evidence.
+- Review follow-up: trailing blank text no longer rejects a valid tool result, and continuation usage bounds cover the full request body despite truncated history summaries. Both have separate reproduction and full-suite mutation controls.
+### Fixed: N01 tool-result media (2026-09-08)
+- Base64 screenshots survive the adapter, session registry and shared MCP response on xAI and Google. Unsupported blocks and compiled history retain deterministic type, media-type and size summaries. URL-source size is unknown.
+- Review follow-up: native MCP image blocks retain their payload too, including uppercase MIME types; embedded resource summaries use the known MIME type and decoded blob or UTF-8 text size. Separate red/green and full-suite mutation controls cover both formats and MIME casing.
+- Image metadata reaches the production log without payloads. Reproduction tests fail with the repair removed; live provider image interpretation is NOT_RUN because no vision task was submitted.
 
 ### Fixed: N05 capsule listener authentication (2026-09-08)
 

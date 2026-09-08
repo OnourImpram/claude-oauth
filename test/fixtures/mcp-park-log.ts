@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AgentSessionRegistry } from "../../src/mcp/session-registry.js";
+import { extractToolResults } from "../../src/adapters/agent-model.js";
 
 const mode = process.env["HEZARFEN_MCP_PARK_LOG_MODE"];
 ok(mode === "plain" || mode === "node-test", "The fixture requires an explicit logging mode.");
@@ -32,6 +33,9 @@ try {
     strictEqual(registry.liveSessionCount, 1);
     strictEqual(registry.bridgeFor(sessionKey)?.pendingCount, 1,
         "The log assertion requires a real pending call, not a fabricated log entry.");
+    extractToolResults([{ role: "user", content: [{ type: "tool_result", tool_use_id: "fixture-image",
+        content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from(privateInput).toString("base64") } }],
+    }] }]);
     const raw = await readFile(join(scratch, "Hezarfen", "claude-oauth", "router.log"), "utf8")
         .catch((error: NodeJS.ErrnoException) => {
             if (error.code !== "ENOENT") throw error;

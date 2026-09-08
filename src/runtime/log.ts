@@ -32,6 +32,9 @@ export interface SafeLogEntry {
     readonly stackFrames?: readonly string[];
     readonly requestedModel?: string;
     readonly authChannels?: readonly string[];
+    readonly contentBlockType?: string;
+    readonly contentMediaType?: string;
+    readonly contentBytes?: number;
 }
 // The router runs as the supervisor of an interactive TUI, and anything written to stderr
 // lands in the middle of that TUI -- measured: warn-level lines appeared inside the

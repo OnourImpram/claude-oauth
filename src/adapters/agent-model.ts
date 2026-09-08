@@ -3,7 +3,8 @@ import type { AdapterRequest, AdapterResponse, ModelRecord, ProviderAdapter, Pro
 import { RouterError } from "../domain/errors.js";
 import { numericUsage } from "../domain/validation.js";
 import type { AgentSessionRegistry, ToolResultDelivery, TurnOutcome } from "../mcp/session-registry.js";
-import { deriveMcpTools, type AnthropicToolDefinition, type ParkedToolCall } from "../mcp/tool-bridge.js";
+import { deriveMcpTools, type AnthropicToolDefinition, type McpToolResultContent, type ParkedToolCall } from "../mcp/tool-bridge.js";
+import { writeSafeLog } from "../runtime/log.js";
 type AgentModelProvider = "google" | "xai";
 export interface AgentModelRunRequest {
     readonly model: ModelRecord;
@@ -31,6 +32,7 @@ export interface AgentModelAdapterOptions {
 interface CompiledPrompt {
     readonly text: string;
     readonly inputTokenUpperBound: number;
+    readonly continuationText: string;
 }
 interface CompletionMetadata {
     readonly providerRequestId?: string;
@@ -45,8 +47,40 @@ function unsupported(message: string): never {
     throw new RouterError("unsupported_feature", message, 422);
 }
 
-// Phase 9. The content of a tool_result block is either plain text or an array of blocks.
-// Both are reduced to text: the bridge hands text to the MCP side.
+function blockSummary(block: Record<string, unknown>): { type: string; mediaType: string; bytes?: number; text: string } {
+    const type = typeof block["type"] === "string" && /^[a-z_]{1,48}$/u.test(block["type"]) ? block["type"] : "unknown";
+    const source = isRecord(block["source"]) ? block["source"] : isRecord(block["resource"]) ? block["resource"] : block;
+    const media = source["media_type"] ?? source["mimeType"];
+    const mediaType = typeof media === "string" && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/iu.test(media) ? media : "unknown";
+    const data = source["data"] ?? source["blob"] ?? source["text"];
+    const base64 = source["type"] === "base64" || typeof source["blob"] === "string" ||
+        (source === block && (type === "image" || type === "audio"));
+    const bytes = typeof data === "string"
+        ? (base64 ? Buffer.from(data, "base64").length : Buffer.byteLength(data, "utf8"))
+        : source["type"] === "url" ? undefined : Buffer.byteLength(JSON.stringify(block), "utf8");
+    return { type, mediaType, ...(bytes === undefined ? {} : { bytes }),
+        text: `[${type}: media_type=${mediaType}, bytes=${bytes ?? "unknown (URL source)"}]` };
+}
+
+function normalizeMessages(messages: readonly unknown[]): { index: number; role: string; content: unknown }[] {
+    return messages.map((message, index) => {
+        if (!isRecord(message)) {
+            throw new RouterError("invalid_request", `messages[${index}] must be an object.`, 400);
+        }
+        const role = message["role"];
+        if (typeof role !== "string" || !["user", "assistant", "system", "developer"].includes(role)) {
+            const roleShape = typeof role === "string" && /^[a-z_]{1,24}$/u.test(role) ? role : typeof role;
+            throw new RouterError("invalid_request", `messages[${index}] has unsupported role shape ${roleShape}.`, 400);
+        }
+        return { index, role, content: message["content"] };
+    });
+}
+
+function currentConversationMessage(messages: ReturnType<typeof normalizeMessages>) {
+    return messages.findLast((message) => message.role === "user" || message.role === "assistant");
+}
+
+// Text compilation keeps a payload-free description; live MCP results also carry images.
 function toolResultText(value: unknown): string {
     if (typeof value === "string") return value;
     if (!Array.isArray(value)) return "";
@@ -55,8 +89,33 @@ function toolResultText(value: unknown): string {
         if (isRecord(block) && block["type"] === "text" && typeof block["text"] === "string") {
             parts.push(block["text"]);
         }
+        else {
+            parts.push(blockSummary(isRecord(block) ? block : {}).text);
+        }
     }
     return parts.join("\n\n");
+}
+function toolResultBlocks(value: unknown): readonly McpToolResultContent[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const parts: McpToolResultContent[] = [];
+    for (const block of value) {
+        if (isRecord(block) && block["type"] === "text" && typeof block["text"] === "string") {
+            parts.push({ type: "text", text: block["text"] });
+            continue;
+        }
+        const record = isRecord(block) ? block : {};
+        const summary = blockSummary(record);
+        parts.push({ type: "text", text: summary.text });
+        writeSafeLog({ event: "agent_tool_result_content", level: "info", route: "mcp",
+            contentBlockType: summary.type, contentMediaType: summary.mediaType,
+            ...(summary.bytes === undefined ? {} : { contentBytes: summary.bytes }) });
+        const source = isRecord(record["source"]) ? record["source"] : record;
+        if (record["type"] === "image" && (source["type"] === "base64" || source === record) &&
+            typeof source["data"] === "string" && /^image\//iu.test(summary.mediaType)) {
+            parts.push({ type: "image", data: source["data"], mimeType: summary.mediaType });
+        }
+    }
+    return parts;
 }
 /**
  * Phase 9. Validates Claude Code tool definitions before handing them to the BRIDGE.
@@ -89,17 +148,19 @@ function anthropicTools(value: unknown): readonly AnthropicToolDefinition[] | un
  * "new session", not an error.
  */
 export function extractToolResults(messages: readonly unknown[]): readonly ToolResultDelivery[] {
-    const last = messages.at(-1);
-    if (!isRecord(last) || last["role"] !== "user" || !Array.isArray(last["content"])) return [];
+    const last = currentConversationMessage(normalizeMessages(messages));
+    if (last?.role !== "user" || !Array.isArray(last.content)) return [];
     const output: ToolResultDelivery[] = [];
-    for (const block of last["content"]) {
+    for (const block of last.content) {
         if (!isRecord(block) || block["type"] !== "tool_result") continue;
         const id = block["tool_use_id"];
         if (typeof id !== "string" || id === "") continue;
+        const contentBlocks = toolResultBlocks(block["content"]);
         output.push({
             toolUseId: id,
             content: toolResultText(block["content"]),
             isError: block["is_error"] === true,
+            ...(contentBlocks === undefined ? {} : { contentBlocks }),
         });
     }
     return output;
@@ -125,7 +186,7 @@ function textBlocks(value: unknown, location: string): string[] {
  * history. Rejecting them with 422 kills the conversation; dropping them silently makes
  * the agent forget what it did -- both are wrong. They are carried over as a summary.
  */
-function toleratedBlocks(value: unknown, location: string): string[] {
+function toleratedBlocks(value: unknown, location: string, allowTools = true): string[] {
     if (typeof value === "string") return [value];
     if (!Array.isArray(value)) {
         unsupported(`${location} must contain text or tool blocks.`);
@@ -140,11 +201,16 @@ function toleratedBlocks(value: unknown, location: string): string[] {
             parts.push(block["text"]);
             continue;
         }
-        if (kind === "tool_use" && typeof block["name"] === "string") {
+        if (kind === "thinking" || kind === "redacted_thinking") continue;
+        if (kind === "image" || kind === "document") {
+            parts.push(blockSummary(block).text);
+            continue;
+        }
+        if ((kind === "server_tool_use" || kind === "mcp_tool_use" || (allowTools && kind === "tool_use")) && typeof block["name"] === "string") {
             parts.push(`[tool call: ${block["name"]}]`);
             continue;
         }
-        if (kind === "tool_result") {
+        if (allowTools && kind === "tool_result") {
             const toolText = toolResultText(block["content"]);
             const truncatedText = toolText.length > 4000 ? `${toolText.slice(0, 4000)}\n[truncated]` : toolText;
             parts.push(`[tool result${block["is_error"] === true ? " (error)" : ""}]\n${truncatedText}`);
@@ -198,20 +264,12 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     const bindingContext = systemText === "" ? [] : [systemText];
     const messageContext: { readonly index: number; readonly role: string; readonly text: string }[] = [];
     const conversation: { readonly index: number; readonly role: string; readonly text: string; readonly blocks: readonly string[] }[] = [];
-    for (const [index, message] of messages.entries()) {
-        if (!isRecord(message)) {
-            throw new RouterError("invalid_request", `messages[${index}] must be an object.`, 400);
-        }
-        if (!["user", "assistant", "system", "developer"].includes(String(message["role"]))) {
-            const roleShape = typeof message["role"] === "string" && /^[a-z_]{1,24}$/u.test(message["role"])
-                ? message["role"]
-                : typeof message["role"];
-            throw new RouterError("invalid_request", `messages[${index}] has unsupported role shape ${roleShape}.`, 400);
-        }
-        const role = message["role"] as string;
-        const blocks = allowToolBlocks
-            ? toleratedBlocks(message["content"], `messages[${index}].content`)
-            : textBlocks(message["content"], `messages[${index}].content`);
+    const normalized = normalizeMessages(messages);
+    const currentMessage = currentConversationMessage(normalized);
+    for (const { index, role, content } of normalized) {
+        // Historical tools are summaries on every lane. A current tool result still
+        // requires a session registry, while media and thinking have explicit rules.
+        const blocks = toleratedBlocks(content, `messages[${index}].content`, allowToolBlocks || index !== currentMessage?.index);
         const text = blocks.join("\n\n");
         if (role === "system" || role === "developer") {
             messageContext.push({ index, role, text });
@@ -220,7 +278,7 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
             conversation.push({ index, role, text, blocks });
         }
     }
-    const current = conversation.at(-1);
+    const current = conversation.find((entry) => entry.index === currentMessage?.index);
     if (current?.role !== "user") {
         throw new RouterError("invalid_request", "Agent-readonly routes require the current user request as the final message.", 400);
     }
@@ -248,11 +306,12 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
         if (entry.text.trim() !== "")
             trailingSystemContext.push(entry.text);
     }
-    const currentRequest = current.blocks.at(-1) ?? "";
+    const currentRequestIndex = current.blocks.findLastIndex((block) => block.trim() !== "");
+    const currentRequest = current.blocks[currentRequestIndex] ?? "";
     if (currentRequest.trim() === "") {
         throw new RouterError("invalid_request", "Agent-readonly routes require a non-empty current user request.", 400);
     }
-    const currentTurnContext = current.blocks.slice(0, -1).filter((block) => block.trim() !== "");
+    const currentTurnContext = current.blocks.slice(0, currentRequestIndex).filter((block) => block.trim() !== "");
     const history = conversation.slice(0, -1).map((entry) => `${entry.role.toUpperCase()}:\n${entry.text}`);
     const availableTools = toolNames(request.envelope.tools);
     const prompt = [
@@ -316,7 +375,16 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     if (bytes > maximumCompiledPromptBytes) {
         throw new RouterError("invalid_request", "Compiled agent prompt exceeds the local safety limit.", 413);
     }
-    return { text: prompt, inputTokenUpperBound: Math.max(1, bytes) };
+    const currentContent = currentMessage?.content;
+    const instruction = Array.isArray(currentContent)
+        ? toleratedBlocks(currentContent.filter((block: unknown) => !isRecord(block) || block["type"] !== "tool_result"), "continuation").join("\n\n")
+        : "";
+    const continuationText = [
+        ...(bindingContext.length === 0 ? [] : ["BINDING SYSTEM AND PROJECT CONTEXT:", ...bindingContext]),
+        ...(trailingSystemContext.length === 0 ? [] : ["SESSION CAPABILITY CONTEXT:", ...trailingSystemContext]),
+        ...(instruction.trim() === "" ? [] : ["CURRENT USER INSTRUCTION:", instruction]),
+    ].join("\n\n");
+    return { text: prompt, inputTokenUpperBound: Math.max(1, bytes), continuationText };
 }
 function localUsage(inputTokenUpperBound: number, output: string): Record<string, number> {
     return {
@@ -619,19 +687,20 @@ export class AgentModelAdapter implements ProviderAdapter {
             throw new RouterError("invalid_request", "Agent routes require a messages array.", 400);
         }
         const results = extractToolResults(messages);
-        // On a resume turn there is NO compiled prompt: the agent is already inside the
-        // loop. The input upper bound is taken from the body size, not invented.
-        const inputTokenUpperBound = results.length > 0
-            ? Math.max(1, request.body.length)
-            : compilePrompt(request, true).inputTokenUpperBound;
+        // Validate continuations through the same compiler before releasing any call.
+        const compiled = compilePrompt(request, true);
+        const tools = deriveMcpTools(anthropicTools(request.envelope.tools));
+        // History compilation truncates tool summaries; MCP receives the full payload.
+        const inputTokenUpperBound = results.length === 0 ? compiled.inputTokenUpperBound
+            : Math.max(compiled.inputTokenUpperBound, request.body.length);
         const runTurn = async (): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a
             // running ACP turn would be the agent finishing on its own.
-            if (results.length > 0) return (await sessions.resume(results, request.signal)).outcome;
+            if (results.length > 0) return (await sessions.resume(results, request.signal, compiled.continuationText, tools)).outcome;
             return (await sessions.begin(
-                compilePrompt(request, true).text,
-                deriveMcpTools(anthropicTools(request.envelope.tools)),
+                compiled.text,
+                tools,
                 request.model.upstreamModel,
                 request.signal,
             )).outcome;
