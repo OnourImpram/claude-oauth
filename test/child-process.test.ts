@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { spawnFailureGuard } from "../src/runtime/child-process.js";
 
-// REGRESYON: `models refresh`, kurulu OLMAYAN grok.exe'yi spawn edince tum SUREC coktu.
-// Spawn hatasi asenkron bir 'error' olayidir; dinleyicisi yoksa Node onu yakalanamayan
-// hataya cevirir ve await/try/catch bunu goremez. Sonuc: kurulu olmayan tek bir istege
-// bagli saglayici, calisan saglayicilarin snapshot'a yazilmasini da engelliyordu.
+// REGRESSION: `models refresh` brought down the WHOLE PROCESS when it spawned a grok.exe
+// that was NOT installed. A spawn failure is an asynchronous 'error' event; with no
+// listener Node turns it into an uncaught exception, and await/try/catch cannot see it.
+// Result: a single provider tied to a request that was not installed also blocked the
+// working providers from being written to the snapshot.
 
 const MISSING = join("C:", "hezarfen-boyle-bir-ikili-yok", "hayalet.exe");
 
@@ -23,9 +24,9 @@ describe("spawnFailureGuard", () => {
 
     it("dinleyici olmadan ayni spawn yakalanamayan 'error' uretir (negatif kontrol)", async () => {
         const child = spawn(MISSING, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
-        // Muhafiz olmadan bu olayi kimse dinlemez ve Node sureci dusururdu. Burada
-        // bilerek dinleyip, olayin GERCEKTEN uretildigini kanitliyoruz -- yani muhafizin
-        // korudugu sey hayali degil.
+        // Without the guard nobody listens to this event and Node would drop the process.
+        // Here we listen deliberately and prove the event is REALLY emitted -- so what the
+        // guard protects against is not imaginary.
         const emitted = await new Promise<NodeJS.ErrnoException>((resolveWait) => {
             child.once("error", (error) => { resolveWait(error as NodeJS.ErrnoException); });
         });

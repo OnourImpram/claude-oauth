@@ -1,13 +1,13 @@
-// clean.mjs -- derleme ciktisini siler. tsc bayat dosyalari kaldirmaz; kaynaktan bir modul
-// silindiginde eski .js dist'te kalir ve import edilmeye devam eder.
+// clean.mjs -- deletes the build output. tsc does not remove stale files; when a module is
+// deleted from the source, its old .js stays in dist and keeps being imported.
 //
-// ONARIM: bu betik dist/ disinda hicbir seye dokunmaz. Silme reddedilirse dist'i acik bir
-// surec tutuyordur (calisan bir claude oturumu) -- once onu kapat.
+// FIX: this script touches nothing outside dist/. If the deletion is refused, an open
+// process is holding dist (a running claude session) -- close that first.
 import { rm, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const target = resolve(import.meta.dirname, "..", "dist");
 let existed = false;
-try { await stat(target); existed = true; } catch { /* zaten yok */ }
+try { await stat(target); existed = true; } catch { /* already absent */ }
 await rm(target, { recursive: true, force: true });
 console.log(existed ? `silindi: ${target}` : `zaten yoktu: ${target}`);

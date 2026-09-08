@@ -6,12 +6,13 @@ import {
     verifiedGrok46CatalogEntry,
 } from "./model-contracts.js";
 /**
- * A7 (2026-09-02). Native satirlar (anthropic, native-message-loop) HER ZAMAN release'in
- * pinli models.default.json'undan gelir; harici satirlar canli refresh'ten. Olculdu:
- * seedSnapshot yalniz snapshot yokken tohumlar ve refresh native satirlari snapshot'tan
- * "retained" tasir -- models.default.json'a eklenen bir native model calisan kuruluma
- * hic ulasmiyordu (claude-fable-5-1: launcher altinda unknown_model, native yolda ok).
- * Yapilandirilmis olan kosan degildi; bu fonksiyon ikisini ayni yere baglar.
+ * A7 (2026-09-02). Native rows (anthropic, native-message-loop) ALWAYS come from the
+ * release's pinned models.default.json; external rows come from the live refresh. Measured:
+ * seedSnapshot only seeds when there is no snapshot, and refresh carries native rows over
+ * from the snapshot as "retained" -- so a native model added to models.default.json never
+ * reached a running installation (claude-fable-5-1: unknown_model under the launcher, ok on
+ * the native path). What was configured was not what ran; this function binds the two to the
+ * same place.
  */
 export function isNativeModel(model: ModelRecord): boolean {
     return model.provider === "anthropic" && model.executionMode === "native-message-loop";
@@ -80,12 +81,11 @@ export interface OpenAiModelReadiness {
  * Which OpenAI contracts actually survived into the snapshot -- one row per contract,
  * DERIVED, never listed by hand.
  *
- * VAKA KAYDI: cli.ts bunu iki literalle yaziyordu (`solEnabled` / `terraEnabled`).
- * OPENAI_MODEL_CONTRACTS'a ucuncu bir model (astra) eklemek onu bu yuzeyin disinda
- * birakirdi: `doctor --require-all` yeni modeli HIC sormadan yesil verirdi. Google
- * kolunda birebir ayni defekt 2026-09-02'de olculdu (elle yazilan 2, canli 3).
- * Sayi burada sozlesme listesinden gelir, o yuzden yeni bir sozlesme sessizce
- * dusemez.
+ * CASE RECORD: cli.ts wrote this with two literals (`solEnabled` / `terraEnabled`). Adding a
+ * third model (astra) to OPENAI_MODEL_CONTRACTS would leave it outside this surface:
+ * `doctor --require-all` would go green WITHOUT EVER asking about the new model. Exactly the
+ * same defect was measured on the google arm on 2026-09-02 (hand-written 2, live 3). Here the
+ * count comes from the contract list, so a new contract cannot drop out silently.
  */
 export function openAiModelReadiness(snapshot: ModelSnapshot | undefined): readonly OpenAiModelReadiness[] {
     const verified = new Set(snapshot?.models.map((model) => model.id) ?? []);
@@ -158,27 +158,28 @@ export function withVerifiedGrokModel(baseline: ModelSnapshot, catalog: readonly
     };
 }
 /**
- * `doctor --require-all` OpenAI kolu -- KAPI ifadesinin kendisi, artik saf ve olculebilir.
+ * The `doctor --require-all` OpenAI arm -- the GATE expression itself, now pure and
+ * measurable.
  *
- * VAKA KAYDI (olculdu 2026-09-05, mutasyon M1, bagimsiz denetim ve bu kosumda tekrar):
- * bu ifade cli.ts icinde ELLE yaziliydi ve hicbir test src/cli.ts'i import etmiyor
- * (test/cli-routing.test.ts src/cli-routing.ts'i test eder). `every` -> `some`
- * mutasyonu takimi YESIL birakti: tests 270, pass 269, fail 0, exit 0. Yani "ucuncu
- * modeli HIC sormadan yesil veren --require-all" defekti -- degisikligin kapatmak icin
- * var oldugu defekt sinifi -- tam da o degisikligin tuketici ucunda duruyordu:
- * turetim olculuyordu, kapi olculmuyordu.
+ * CASE RECORD (measured 2026-09-05, mutation M1, independent audit and repeated in this run):
+ * this expression was written BY HAND inside cli.ts, and no test imports src/cli.ts
+ * (test/cli-routing.test.ts tests src/cli-routing.ts). The `every` -> `some` mutation left the
+ * suite GREEN: tests 270, pass 269, fail 0, exit 0. That is, the defect "--require-all going
+ * green WITHOUT EVER asking about the third model" -- the very defect class the change existed
+ * to close -- was sitting at the consumer end of that same change: the derivation was
+ * measured, the gate was not.
  *
- * Sayim degil KIMLIK sorulur. Eski ifadedeki
- * `readiness.length === OPENAI_MODEL_CONTRACTS.length` kolu, listeyi zaten
- * sozlesmeden ureten bir cagirici icin totolojiydi: hicbir girdide false olamiyordu,
- * yani yanlislanamaz -- ve yanlislanamayan bir kontrol olcu degildir. Bu bicimde uc
- * ayri kol dusurebilir: eksik satir, etkisiz satir, yabanci satir.
+ * IDENTITY is asked, not a count. The old expression's
+ * `readiness.length === OPENAI_MODEL_CONTRACTS.length` arm was a tautology for a caller that
+ * already produces the list from the contracts: it could not be false on any input, that is,
+ * it is unfalsifiable -- and a check that cannot be falsified is not a measurement. In this
+ * form three separate arms can drop it: a missing row, an ineffective row, a foreign row.
  */
 export function openAiGateReady(readiness: readonly OpenAiModelReadiness[]): boolean {
     const enabled = new Set(readiness.filter((entry) => entry.enabled).map((entry) => entry.id));
     return OPENAI_MODEL_CONTRACTS.every((contract) => enabled.has(contract.id));
 }
-/** Ayni sinif, google kolu: elle yazilan sayi 2026-09-02'de ucuncu google modeli gelince dusmustu. */
+/** Same class, google arm: the hand-written count fell on 2026-09-02 when the third google model arrived. */
 export function googleGateReady(readiness: readonly GoogleModelCatalogReadiness[]): boolean {
     const ready = new Set(readiness.filter((entry) => entry.status === "ready").map((entry) => entry.model));
     return AGENT_MODEL_CONTRACTS
@@ -190,7 +191,7 @@ export interface RequireAllProviderInput {
     readonly grokEnabled: boolean;
     readonly googleModels: readonly GoogleModelCatalogReadiness[];
 }
-/** Katalog hic kurulamadiysa (`undefined`) --require-all YESIL VEREMEZ; bu da bir kol. */
+/** If the catalogue could not be built at all (`undefined`), --require-all CANNOT go GREEN; that is an arm too. */
 export function requireAllProvidersReady(catalog: RequireAllProviderInput | undefined): boolean {
     if (catalog === undefined)
         return false;

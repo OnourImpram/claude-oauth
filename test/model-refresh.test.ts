@@ -4,11 +4,11 @@ import type { ModelSnapshot, ProviderModelRecord } from "../src/domain/contracts
 import { googleGateReady, openAiContextMismatches, openAiGateReady, openAiModelReadiness, requireAllProvidersReady, withPinnedNativeModels, withVerifiedOpenAiModels, type GoogleModelCatalogReadiness, type OpenAiModelReadiness } from "../src/domain/model-refresh.js";
 import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, clodexCatalogDriftDetailCode, isVerifiedOpenAiSnapshotRoute, openAiCatalogDriftReadiness, openAiSnapshotRouteDrift } from "../src/domain/model-contracts.js";
 
-// REGRESYON: Sol ve Terra canli katalogda VARDI ve OAuth calisiyordu, ama clodex baglam
-// duragi "standard"a dusunce 258.400 raporladi; kilit 828.400 bekliyordu ve
-// withVerifiedOpenAiModels modeli SESSIZCE atladi (`continue`). Ust katman ise
-// "sol_or_terra_not_in_live_oauth_catalog" -- yani "katalogda yok" -- diyordu.
-// Iki kez yanlis: model kataloglaydi ve sebep baglam penceresiydi.
+// REGRESSION: Sol and Terra WERE in the live catalog and OAuth was working, but when the
+// clodex context stop dropped to "standard" it reported 258,400; the lock expected 828,400
+// and withVerifiedOpenAiModels SILENTLY skipped the model (`continue`). The layer above
+// then said "sol_or_terra_not_in_live_oauth_catalog" -- that is, "not in the catalog".
+// Wrong twice over: the model was in the catalog, and the cause was the context window.
 
 // MEASURED 2026-09-05, clodex 2.8.2 -> 2.11.1. 2.8.2 shaved every ChatGPT-OAuth
 // window by DEFAULT_EFFECTIVE_CONTEXT_PERCENT = 95 (4 occurrences in that bundle, 0 in
@@ -52,8 +52,8 @@ describe("withVerifiedOpenAiModels", () => {
     it("canli baglam kilitle esitse HER OpenAI sozlesmesi snapshot'a girer", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED);
         const ids = snapshot.models.map((model) => model.id);
-        // Sozlesmeden turer: "sol ve terra" diye elle yazilsaydi astra eklendiginde
-        // bu test yesil kalir ve yeni modeli hic olcmezdi.
+        // Derived from the contract: had it been hand-written as "sol and terra", this test
+        // would have stayed green when astra was added and never measured the new model.
         for (const contract of OPENAI_MODEL_CONTRACTS) {
             strictEqual(ids.includes(contract.id), true, `snapshot'a girmedi: ${contract.id}`);
         }
@@ -67,10 +67,11 @@ describe("withVerifiedOpenAiModels", () => {
         strictEqual(sol?.contextWindow, LOCKED);
     });
 
-    // NEGATIF KOL (astra): canli katalog astra'yi HIC tasimiyorsa -- clodex 2.11.1
-    // tohumu ekler ama `clodex providers refresh-models openai-oauth` kosmadan
-    // providers.json onbellegine GIRMEZ (applyOAuthSeedContextMetadata models.map'tir,
-    // concat degil) -- astra snapshot'a girmemeli, sol/terra ise etkilenmemeli.
+    // NEGATIVE ARM (astra): if the live catalog does NOT carry astra at all -- the clodex
+    // 2.11.1 seed adds it, but without running `clodex providers refresh-models
+    // openai-oauth` it never ENTERS the providers.json cache (applyOAuthSeedContextMetadata
+    // is a models.map, not a concat) -- astra must not enter the snapshot, and sol/terra
+    // must be unaffected.
     it("astra canli katalogda YOKKEN snapshot'a girmez, sol/terra dusmez", () => {
         const withoutAstra = catalog(LOCKED).filter((entry) => !entry.id.includes("astra"));
         const snapshot = withVerifiedOpenAiModels(baseline, withoutAstra, LOCKED);
@@ -80,8 +81,8 @@ describe("withVerifiedOpenAiModels", () => {
         strictEqual(ids.includes("anthropic-openai-gpt-5.6-terra"), true);
     });
 
-    // POZITIF KOL: astra katalogdaysa ve baglami kilitle esitse GIRER. Negatif kolun
-    // tek basina kanitladigi sey "hicbir sey girmiyor" olabilirdi.
+    // POSITIVE ARM: if astra is in the catalog and its context equals the lock, it DOES
+    // enter. On its own, all the negative arm might have proved is "nothing ever enters".
     it("astra canli katalogdaysa ve baglam esitse snapshot'a GIRER", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED);
         const astra = snapshot.models.find((model) => model.id === "anthropic-openai-gpt-6-astra");
@@ -91,7 +92,7 @@ describe("withVerifiedOpenAiModels", () => {
         strictEqual(astra?.executionMode, "native-message-loop");
     });
 
-    // NEGATIF KONTROL: bayat pin -> model dusuyor. Kapinin fiilen elediginin kaniti.
+    // NEGATIVE CONTROL: a stale pin -> the model drops. Proof that the gate actually filters.
     it("canli baglam kilitten farkliysa modeller snapshot'a GIRMEZ", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LIVE_DEGRADED), LOCKED);
         deepStrictEqual(snapshot.models.map((model) => model.id), ["claude-opus-5"]);
@@ -121,8 +122,9 @@ describe("openAiContextMismatches", () => {
         deepStrictEqual(openAiContextMismatches(catalog(LOCKED), LOCKED), []);
     });
 
-    // Ayrim onemli: KATALOGDA YOK ile BAGLAMI TUTMUYOR ayni sey degil. Onceki mesaj
-    // ikisini birlestirdigi icin teshis yanlis saglayiciya yonlendiriyordu.
+    // The distinction matters: NOT IN THE CATALOG and CONTEXT DOES NOT MATCH are not the
+    // same thing. The previous message merged the two, so diagnosis was routed to the wrong
+    // provider.
     it("model katalogda hic yoksa uyumsuzluk olarak bildirmez", () => {
         deepStrictEqual(openAiContextMismatches([], LOCKED), []);
     });
@@ -138,8 +140,8 @@ describe("openAiContextMismatches", () => {
     });
 });
 
-// A7 (2026-09-02): models.default.json'a eklenen native satir calisan snapshot'a
-// ulasmiyordu (seedSnapshot yalniz yokken tohumlar; refresh native'i retained tasir).
+// A7 (2026-09-02): a native row added to models.default.json never reached the running
+// snapshot (seedSnapshot only seeds when absent; refresh carries native as retained).
 describe("withPinnedNativeModels", () => {
     const native = (id: string) => ({
         id, provider: "anthropic" as const, upstreamModel: id, displayName: id, oauthType: "claude.ai" as const,
@@ -158,8 +160,9 @@ describe("withPinnedNativeModels", () => {
         strictEqual(merged.source, "live-provider-refresh", "snapshot kimligi calisan snapshot'in");
     });
 
-    // NEGATIF KOL: baseline'daki BAYAT harici satir servis edilmez -- harici satirlarin
-    // tek kaynagi canli refresh'tir; yoksa pin, harici modeli de sessizce geri getirirdi.
+    // NEGATIVE ARM: a STALE external row in the baseline is not served -- the only source of
+    // external rows is a live refresh; otherwise the pin would silently bring an external
+    // model back too.
     it("baseline'daki harici satiri almaz; calisan snapshot'ta yoksa yok kalir", () => {
         const pinned: ModelSnapshot = { ...runtime, models: [native("claude-opus-5"), external("anthropic-xai-grok-4.6")] };
         const runtimeWithoutGrok: ModelSnapshot = { ...runtime, models: [native("claude-opus-5")] };
@@ -167,11 +170,11 @@ describe("withPinnedNativeModels", () => {
     });
 });
 
-// VAKA KAYDI: cli.ts'te `solEnabled`/`terraEnabled` ELLE yazilmis iki literaldi ve
-// `doctor --require-all` yalnizca onlara bakiyordu. Sozlesmeye ucuncu bir model
-// (astra) eklemek, --require-all'un o modeli HIC sormadan yesil vermesi demekti.
-// Google kolunda birebir ayni defekt 2026-09-02'de olculdu (elle yazilan 2, canli 3).
-// Bu blok, turetilmemis yuzeyin geri gelmesini mekanik olarak yakalar.
+// CASE RECORD: in cli.ts, `solEnabled`/`terraEnabled` were two HAND-WRITTEN literals and
+// `doctor --require-all` looked only at them. Adding a third model (astra) to the contract
+// meant --require-all returning green without EVER asking about that model. The exact same
+// defect was measured on the Google lane on 2026-09-02 (2 hand-written, 3 live). This block
+// catches the return of an underived surface mechanically.
 describe("openAiModelReadiness", () => {
     const snapshotOf = (ids: readonly string[]): ModelSnapshot => ({
         ...baseline,
@@ -200,15 +203,16 @@ describe("openAiModelReadiness", () => {
         strictEqual(astra?.id, "anthropic-openai-gpt-6-astra");
     });
 
-    // NEGATIF KOL: snapshot'ta olmayan model "enabled" olamaz. Kapinin fiilen
-    // elediginin kaniti -- hepsi true donen bir stub burada kirmizi yanar.
+    // NEGATIVE ARM: a model absent from the snapshot cannot be "enabled". Proof that the
+    // gate actually filters -- a stub returning all true goes red here.
     it("bos snapshot'ta HICBIR model etkin degildir", () => {
         strictEqual(openAiModelReadiness(snapshotOf([])).some((entry) => entry.enabled), false);
         strictEqual(openAiModelReadiness(undefined).some((entry) => entry.enabled), false);
     });
 
-    // Asil kaza senaryosu: sol+terra dogrulandi, astra katalogda yok. Elle yazilan
-    // iki literal burada "her sey hazir" derdi; turetilmis liste astra'yi ADIYLA dusurur.
+    // The real accident scenario: sol+terra verified, astra not in the catalog. The two
+    // hand-written literals would say "everything is ready" here; the derived list drops
+    // astra BY NAME.
     it("yalnizca astra eksikse onu ADIYLA dusurur, digerlerini etkin birakir", () => {
         const readiness = openAiModelReadiness(snapshotOf(["anthropic-openai-gpt-5.6-sol", "anthropic-openai-gpt-5.6-terra"]));
         const missing = readiness.filter((entry) => !entry.enabled).map((entry) => entry.id);
@@ -223,11 +227,11 @@ describe("openAiModelReadiness", () => {
 });
 
 // ============================================================================
-// BULGU 2 (2026-09-05, bagimsiz denetim + bu kosumda tekrar): `doctor --require-all`
-// OpenAI kolu OLCUSUZDU. Mutasyon M1 -- cli.ts icindeki `every` -> `some` -- takimi
-// YESIL biraktu: tests 270, pass 269, fail 0, exit 0. Sebep: hicbir test src/cli.ts'i
-// import etmiyor. Kapi ifadesi saf fonksiyona tasindi; asagidaki kollarin her biri o
-// mutasyonlardan birini KIRMIZI yakmak icin var.
+// FINDING 2 (2026-09-05, independent audit + repeated in this run): the `doctor
+// --require-all` OpenAI arm had NO MEASURE. Mutation M1 -- `every` -> `some` inside
+// cli.ts -- left the suite GREEN: tests 270, pass 269, fail 0, exit 0. The reason: no test
+// imports src/cli.ts. The gate expression was moved into a pure function; each of the arms
+// below exists to turn one of those mutations RED.
 // ============================================================================
 const enabledRows: readonly OpenAiModelReadiness[] = OPENAI_MODEL_CONTRACTS.map((contract) => ({
     alias: contract.alias,
@@ -248,7 +252,7 @@ describe("openAiGateReady -- doctor --require-all OpenAI kolu", () => {
         strictEqual(openAiGateReady(enabledRows), true);
     });
 
-    // M1'in oldurucu kolu: tek bir model dusunce kapi kirmizi olmak ZORUNDA.
+    // The arm that kills M1: when a single model drops, the gate MUST go red.
     it("TEK BIR sozlesme etkisizse kirmizi (every -> some mutasyonunu oldurur)", () => {
         for (const contract of OPENAI_MODEL_CONTRACTS) {
             const readiness = enabledRows.map((entry) => (entry.id === contract.id ? { ...entry, enabled: false } : entry));
@@ -256,7 +260,7 @@ describe("openAiGateReady -- doctor --require-all OpenAI kolu", () => {
         }
     });
 
-    // Eski ifadedeki sayim totolojisinin yerine gecen kol: satir HIC yoksa da kirmizi.
+    // The arm that replaces the counting tautology in the old expression: red when the row is absent entirely.
     it("sozlesme satiri listede hic yoksa kirmizi", () => {
         strictEqual(openAiGateReady(enabledRows.slice(1)), false);
         strictEqual(openAiGateReady([]), false);
@@ -295,7 +299,7 @@ describe("requireAllProvidersReady -- uc kolun birlesimi", () => {
         strictEqual(requireAllProvidersReady(tam), true);
     });
 
-    // Katalog hic kurulamadiysa --require-all yesil VEREMEZ.
+    // If the catalog could not be built at all, --require-all CANNOT return green.
     it("katalog yoksa kirmizi", () => {
         strictEqual(requireAllProvidersReady(undefined), false);
     });
@@ -308,10 +312,11 @@ describe("requireAllProvidersReady -- uc kolun birlesimi", () => {
 });
 
 // ============================================================================
-// BULGU 1: yayin sonrasi pencerede dusen sey YENI model degil, calisan sol/terra
-// seridiydi -- ve operatorun gordugu tek dize ("clodex_session_catalog_drift") ne
-// modeli ne de iki sayidan birini soyluyordu. Olculdu 2026-09-05: canli snapshot
-// sol/terra icin 828400 tasiyor, kilit 872000. Asagisi ayni catismanin birim kurgusu.
+// FINDING 1: in the post-release window what dropped was not the NEW model but the working
+// sol/terra lane -- and the only string the operator saw ("clodex_session_catalog_drift")
+// named neither the model nor either of the two numbers. Measured 2026-09-05: the live
+// snapshot carries 828400 for sol/terra, the lock 872000. Below is the unit fixture of that
+// same conflict.
 // ============================================================================
 describe("openAiSnapshotRouteDrift -- 'neden dustu' sorusunun cevabi", () => {
     const kurulu = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED).models.filter((model) => model.provider === "openai");
@@ -327,14 +332,14 @@ describe("openAiSnapshotRouteDrift -- 'neden dustu' sorusunun cevabi", () => {
         strictEqual(code.includes(`snapshot${LOCKED}`), true, "snapshot sayisi kodda yok");
     });
 
-    // NEGATIF KOL: uyusan katalogda surukleme YOKTUR. Bu olmadan yukaridaki kol
-    // "fonksiyon her zaman satir uretiyor" ile ayirt edilemez.
+    // NEGATIVE ARM: in a matching catalog there is NO drift. Without this, the arm above
+    // cannot be told apart from "the function always produces rows".
     it("katalog snapshot'la uyusuyorsa surukleme YOK ve kod sade bicimine doner", () => {
         deepStrictEqual(openAiSnapshotRouteDrift(kurulu, catalog(LOCKED)), []);
         strictEqual(clodexCatalogDriftDetailCode([]), "clodex_session_catalog_drift");
     });
 
-    // Bos katalog "yok" demektir, sifir demek DEGILDIR: eksik sayi uydurulmaz.
+    // An empty catalog means "absent", it does NOT mean zero: a missing number is not invented.
     it("katalogda hic olmayan model icin sayi uydurulmaz", () => {
         const drift = openAiSnapshotRouteDrift(kurulu, []);
         strictEqual(drift.length, OPENAI_MODEL_CONTRACTS.length);
@@ -342,13 +347,14 @@ describe("openAiSnapshotRouteDrift -- 'neden dustu' sorusunun cevabi", () => {
         strictEqual(clodexCatalogDriftDetailCode(drift).includes("=liveabsent"), true);
     });
 
-    // ILAN 1M OLSA DA DOGRULAMA CANLI SAYIYA BAKAR (2026-09-05). Astra Claude Code'a
-    // 1_000_000 ilan eder, ama o sayi snapshot'a HIC girmez -- ilan yalnizca kesif
-    // izdusumunde yasar (src/domain/registry.ts). Bu ayrimin bedeli tam olarak burada
-    // odenir: canli katalog 872_000'den 272_000'e dustugunde ("standard" duragina
-    // sifirlanma, 5.6 seridinde 2026-09-01'de olculdu) satir dogrulanmaz ve surukleme
-    // satiri iki sayiyi da adiyla yazar. Ilan snapshot'a yazilsaydi bu kol YESIL kalirdi:
-    // politika sayisi kendisiyle eslesir, dedektor kor olurdu.
+    // EVEN WITH A 1M ADVERTISEMENT, VERIFICATION LOOKS AT THE LIVE NUMBER (2026-09-05).
+    // Astra advertises 1_000_000 to Claude Code, but that number NEVER enters the snapshot
+    // -- the advertisement lives only in the discovery projection (src/domain/registry.ts).
+    // The price of that distinction is paid exactly here: when the live catalog drops from
+    // 872_000 to 272_000 (a reset to the "standard" stop, measured on the 5.6 lane on
+    // 2026-09-01) the row is not verified and the drift line writes both numbers by name.
+    // Had the advertisement been written into the snapshot this arm would stay GREEN: the
+    // policy number would match itself and the detector would be blind.
     it("Astra ilani 1M olsa da canli pencere dususu ADIYLA yakalanir", () => {
         const astra = kurulu.find((model) => model.id === "anthropic-openai-gpt-6-astra");
         ok(astra !== undefined, "astra snapshot satiri yok");
@@ -356,12 +362,12 @@ describe("openAiSnapshotRouteDrift -- 'neden dustu' sorusunun cevabi", () => {
         strictEqual(isVerifiedOpenAiSnapshotRoute(astra, catalog(LIVE_DEGRADED)), false, "dusen canli pencere dogrulanmis sayildi");
         const kod = clodexCatalogDriftDetailCode(openAiSnapshotRouteDrift([astra], catalog(LIVE_DEGRADED)));
         strictEqual(kod.includes(`anthropic-openai-gpt-6-astra=live${LIVE_DEGRADED}_snapshot${LOCKED}`), true, kod);
-        // POZITIF KOL: canli sayi yerindeyken ayni satir dogrulanir -- kol "her zaman
-        // false donuyor" ile ayirt edilebilir olsun.
+        // POSITIVE ARM: with the live number in place the same row verifies -- so the arm is
+        // distinguishable from "always returns false".
         strictEqual(isVerifiedOpenAiSnapshotRoute(astra, catalog(LOCKED)), true);
     });
 
-    // Bir detektor caresiyle birlikte gelir: sinyal eyleme donusemezse gurultudur.
+    // A detector ships with its remedy: a signal that cannot become an action is noise.
     it("readiness caresini tasir ve durumu unavailable'dir", () => {
         const readiness = openAiCatalogDriftReadiness(kurulu, catalog(LIVE_DEGRADED));
         strictEqual(readiness.provider, "openai");

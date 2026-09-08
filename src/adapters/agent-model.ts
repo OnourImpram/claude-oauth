@@ -17,15 +17,15 @@ export interface AgentModelRunResult {
 }
 export type AgentModelRunner = (request: AgentModelRunRequest) => Promise<AgentModelRunResult>;
 export interface AgentModelAdapterOptions {
-    /** Ajanin KENDI arac dongusu var (agy gibi): onsoz salt-okunur demez, ama Anthropic tool_use uretilmez. */
+    /** The agent has its OWN tool loop (like agy): the preamble does not say read-only, but no Anthropic tool_use is produced. */
     readonly selfDrivenTools?: boolean;
     readonly provider: AgentModelProvider;
     readonly readiness: () => Promise<ProviderReadiness>;
     readonly run: AgentModelRunner;
     readonly pingIntervalMs?: number;
-    // Faz 9. VERILMEZSE bu rota bugunku metin-yalniz davranisini birebir
-    // korur -- tool blogu gorunce 422. Verildiginde ayni rota Claude Code
-    // araclarini ACP ajanina sunar ve tool_use dongusunu tasir.
+    // Phase 9. IF NOT SUPPLIED, this route preserves today's text-only behaviour
+    // exactly -- 422 as soon as it sees a tool block. When supplied, the same route
+    // exposes Claude Code's tools to the ACP agent and carries the tool_use loop.
     readonly sessions?: AgentSessionRegistry;
 }
 interface CompiledPrompt {
@@ -45,8 +45,8 @@ function unsupported(message: string): never {
     throw new RouterError("unsupported_feature", message, 422);
 }
 
-// Faz 9. Bir tool_result blogunun icerigi ya duz metin ya da blok dizisidir.
-// Ikisi de metne indirgenir: kopru MCP tarafina metin verir.
+// Phase 9. The content of a tool_result block is either plain text or an array of blocks.
+// Both are reduced to text: the bridge hands text to the MCP side.
 function toolResultText(value: unknown): string {
     if (typeof value === "string") return value;
     if (!Array.isArray(value)) return "";
@@ -59,11 +59,11 @@ function toolResultText(value: unknown): string {
     return parts.join("\n\n");
 }
 /**
- * Faz 9. Claude Code arac tanimlarini KOPRUYE vermeden once dogrular.
+ * Phase 9. Validates Claude Code tool definitions before handing them to the BRIDGE.
  *
- * `toolNames` ile ayni sekli sinar ama sonucu tipli dondurur: sema kopruye
- * oldugu gibi gecer ve dogrulanmamis bir sema, ajanin yanlis sekilde cagirdigi
- * bir arac demektir.
+ * It checks the same shape as `toolNames` but returns the result typed: the schema
+ * passes through to the bridge as-is, and an unvalidated schema means a tool the
+ * agent calls in the wrong shape.
  */
 function anthropicTools(value: unknown): readonly AnthropicToolDefinition[] | undefined {
     if (value === undefined) return undefined;
@@ -82,11 +82,11 @@ function anthropicTools(value: unknown): readonly AnthropicToolDefinition[] | un
     });
 }
 /**
- * Son kullanici mesajindaki tool_result bloklari.
+ * The tool_result blocks in the last user message.
  *
- * Bunlar oturumun KIMLIGIDIR (session-registry basligi): tool_use_id bizim
- * urettigimiz iddir ve Claude Code onu aynen geri verir. Bos dizi "yeni oturum"
- * demektir, hata degil.
+ * These are the session's IDENTITY (see the session-registry header): the tool_use_id
+ * is the id we generated and Claude Code returns it verbatim. An empty array means
+ * "new session", not an error.
  */
 export function extractToolResults(messages: readonly unknown[]): readonly ToolResultDelivery[] {
     const last = messages.at(-1);
@@ -119,11 +119,11 @@ function textBlocks(value: unknown, location: string): string[] {
     return parts;
 }
 /**
- * Faz 9 gecmis okuyucusu: tool bloklarini DUSURMEZ, metne cevirir.
+ * Phase 9 history reader: it does NOT DROP tool blocks, it converts them to text.
  *
- * Bir onceki (emekli) oturumdan kalan tool_use/tool_result bloklari gecmiste
- * durur. Onlari 422 ile reddetmek konusmayi oldurur; sessizce atmak ise ajanin
- * ne yaptigini unutturur -- ikisi de yanlis. Ozet olarak tasinirlar.
+ * tool_use/tool_result blocks left over from a previous (retired) session stay in the
+ * history. Rejecting them with 422 kills the conversation; dropping them silently makes
+ * the agent forget what it did -- both are wrong. They are carried over as a summary.
  */
 function toleratedBlocks(value: unknown, location: string): string[] {
     if (typeof value === "string") return [value];
@@ -241,12 +241,13 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     const history = conversation.slice(0, -1).map((entry) => `${entry.role.toUpperCase()}:\n${entry.text}`);
     const availableTools = toolNames(request.envelope.tools);
     const prompt = [
-        // 2026-09-03: bu iki satir KOSULSUZDU. Arac dongusu (Faz 9) acikken bile
-        // modele "salt-okunur analiz ajanisin, yalniz metin don" deniyordu; asagida
-        // ise "GERCEK araclarin var, cagir" deniyor. Celiskiyi model dogru cozmedi:
-        // operator testinde Grok kendini HEZARFEN_AGENT_READONLY_V1 diye tanitip
-        // "disk yazimi bu rotada yok" dedi -- yetkisi VARKEN. Artik ikisi de rotanin
-        // gercek durumuna bagli.
+        // 2026-09-03: these two lines were UNCONDITIONAL. Even with the tool loop
+        // (Phase 9) on, the model was told "you are a read-only analysis agent, return
+        // text only", while below it was told "you have REAL tools, call them". The
+        // model did not resolve the contradiction correctly: in the operator test Grok
+        // introduced itself as HEZARFEN_AGENT_READONLY_V1 and said "writing to disk is
+        // not available on this route" -- WHILE IT HAD the authority. Both now depend on
+        // the route's real state.
         allowToolBlocks ? "HEZARFEN_AGENT_TOOLS_V1" : (selfDrivenTools ? "HEZARFEN_AGENT_SELFTOOLS_V1" : "HEZARFEN_AGENT_READONLY_V1"),
         `Requested compatibility model: ${request.model.upstreamModel}`,
         allowToolBlocks
@@ -373,8 +374,9 @@ function streamEvents(controller: ReadableStreamDefaultController<Uint8Array>, r
     controller.enqueue(sseEvent("message_stop", { type: "message_stop" }));
 }
 
-// Faz 9. Ajan bir arac cagirdiginda Claude Code'a donen yanit. Metin blogu
-// YALNIZ doluysa eklenir: bos bir text blogu bazi istemcilerde bos balon cizer.
+// Phase 9. The response returned to Claude Code when the agent calls a tool. The text
+// block is added ONLY if it is non-empty: an empty text block draws an empty bubble in
+// some clients.
 function toolUsePayload(request: AdapterRequest, text: string, call: ParkedToolCall, usage: Record<string, number>, messageId: string): Record<string, unknown> {
     const content: Record<string, unknown>[] = [];
     if (text.trim() !== "") content.push({ type: "text", text });
@@ -416,8 +418,8 @@ function toolUseStreamEvents(controller: ReadableStreamDefaultController<Uint8Ar
         index,
         content_block: { type: "tool_use", id: call.id, name: call.name, input: {} },
     }));
-    // Girdi tek parcada gonderilir. Anthropic akisi input_json_delta bekler ve
-    // bos bir partial_json zinciri istemcide gecersiz JSON birakir.
+    // The input is sent in a single chunk. The Anthropic stream expects input_json_delta,
+    // and an empty partial_json chain leaves invalid JSON on the client.
     controller.enqueue(sseEvent("content_block_delta", {
         type: "content_block_delta",
         index,
@@ -468,17 +470,17 @@ export class AgentModelAdapter implements ProviderAdapter {
         if (request.model.provider !== this.provider) {
             throw new RouterError("adapter_unavailable", "Provider adapter and model do not match.", 503);
         }
-        // Faz 9. Oturum defteri VARSA bu rota gercek bir arac dongusu tasir.
-        // Yoksa asagisi bugunku metin-yalniz yolun ta kendisidir -- tek satiri
-        // degismedi, ve mevcut agent-model testleri bunun makbuzudur.
+        // Phase 9. IF the session registry is present, this route carries a real tool
+        // loop. If not, what follows is exactly today's text-only path -- not a single
+        // line of it changed, and the existing agent-model tests are the receipt.
         if (this.#sessions !== undefined && request.path === "/v1/messages") {
             return await this.#sendWithTools(request, this.#sessions);
         }
-        // BULGU 5 (adversaryal inceleme). count_tokens arac dongusu ACIKKEN de
-        // ayni govdeyi gorur. Onu allowToolBlocks=false ile derlemek, AYNI
-        // konusmaya iki kapida ZIT cevap vermek demekti: /v1/messages kabul
-        // ederken /v1/messages/count_tokens 422 doner ve compaction o kapida
-        // olur -- Faz 9'un kapatmak icin var oldugu kusurun ta kendisi.
+        // FINDING 5 (adversarial review). count_tokens sees the same body even when the
+        // tool loop is ON. Compiling it with allowToolBlocks=false meant giving OPPOSITE
+        // answers to the SAME conversation at two gates: /v1/messages accepts it while
+        // /v1/messages/count_tokens returns 422, and compaction dies at that gate -- the
+        // very defect Phase 9 exists to close.
         const compiled = compilePrompt(request, this.#sessions !== undefined, this.#selfDrivenTools);
         if (request.path === "/v1/messages/count_tokens") {
             const body = Buffer.from(JSON.stringify({ input_tokens: compiled.inputTokenUpperBound }), "utf8");
@@ -580,11 +582,11 @@ export class AgentModelAdapter implements ProviderAdapter {
         };
     }
     /**
-     * Faz 9 -- durumsuz istegi durumlu ACP oturumuna baglar.
+     * Phase 9 -- binds the stateless request to a stateful ACP session.
      *
-     * Son kullanici mesajinda tool_result varsa BU KONUSMA bir oturumu adlandirir
-     * ve devam eder; yoksa yeni bir oturum acilir. Ajan arac cagirinca tur
-     * stop_reason: tool_use ile biter ve araci Claude Code calistirir (spec §6).
+     * If the last user message carries a tool_result, THIS CONVERSATION names a session
+     * and resumes it; otherwise a new session is opened. When the agent calls a tool the
+     * turn ends with stop_reason: tool_use and Claude Code runs the tool (spec §6).
      */
     async #sendWithTools(request: AdapterRequest, sessions: AgentSessionRegistry): Promise<AdapterResponse> {
         if (request.model.executionMode !== "agent-readonly") {
@@ -595,15 +597,15 @@ export class AgentModelAdapter implements ProviderAdapter {
             throw new RouterError("invalid_request", "Agent routes require a messages array.", 400);
         }
         const results = extractToolResults(messages);
-        // Devam turunda derlenmis prompt YOKTUR: ajan zaten dongunun icinde.
-        // Girdi ust siniri govde boyutundan alinir, uydurulmaz.
+        // On a resume turn there is NO compiled prompt: the agent is already inside the
+        // loop. The input upper bound is taken from the body size, not invented.
         const inputTokenUpperBound = results.length > 0
             ? Math.max(1, request.body.length)
             : compilePrompt(request, true).inputTokenUpperBound;
         const calis = async (): Promise<TurnOutcome> => {
-            // BULGU 1. Bu signal olmadan router'in 300 sn istek zaman asimi ve
-            // istemci kopmasi bu rotada hicbir sey yapmaz: kosan bir ACP turunu
-            // bitirecek tek sey ajanin kendiliginden bitmesi olurdu.
+            // FINDING 1. Without this signal the router's 300 s request timeout and the
+            // client disconnect do nothing on this route: the only thing that would end a
+            // running ACP turn would be the agent finishing on its own.
             if (results.length > 0) return (await sessions.resume(results, request.signal)).outcome;
             return (await sessions.begin(
                 compilePrompt(request, true).text,
@@ -634,9 +636,9 @@ export class AgentModelAdapter implements ProviderAdapter {
         };
         const body = new ReadableStream<Uint8Array>({
             start: (controller) => {
-                // Bir ajan turu dakikalar surebilir. Ping olmadan istemci sessiz bir
-                // baglantiyi olu sayar; bu, "model secilmis, yanit yok" belirtisinin
-                // tam olarak nasil goründügüdür.
+                // An agent turn can take minutes. Without a ping the client treats a silent
+                // connection as dead; that is exactly what the "model selected, no answer"
+                // symptom looks like.
                 ping = setInterval(() => {
                     if (!streamOpen) return;
                     try {

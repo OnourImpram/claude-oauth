@@ -8,10 +8,11 @@ import { agentModelContract } from "../src/domain/model-contracts.js";
 import { runtimePaths } from "../src/runtime/paths.js";
 import { startProviderSet } from "../src/supervisor/provider-set.js";
 
-// A4 (2026-09-02): kilit ihlali olan YAN saglayici, seti kurmayi durdurmaz --
-// adapter'i kurulmaz, modelleri servis edilen snapshot'tan duser, readiness bunu
-// ADIYLA soyler. Ana yol (anthropic) dokunulmadan kalir. openai/google istenmez ki
-// test clodex kapsulu ya da agy ikilisi baslatmasin: yalniz saf dallar kosar.
+// A4 (2026-09-02): a SIDE provider that violates the lock does not stop the set from
+// coming up -- its adapter is not installed, its models drop out of the served snapshot,
+// and readiness says so BY NAME. The main path (anthropic) is left untouched.
+// openai/google are not requested so the test starts neither the clodex capsule nor the
+// agy binary: only the pure branches run.
 const GROK = agentModelContract("anthropic-xai-grok-4.6");
 if (GROK === undefined)
     throw new Error("grok sozlesmesi yok: AGENT_MODEL_CONTRACTS degisti");
@@ -30,8 +31,9 @@ const snapshot: ModelSnapshot = {
             discoverable: true,
             capabilities: ["messages"],
         },
-        // Sozlesmeden turetilir: isVerifiedAgentSnapshotRoute her alani sozlesmeyle
-        // karsilastirir; elle yazilan sabit, sozlesme degisince testi sessizce bosaltir.
+        // Derived from the contract: isVerifiedAgentSnapshotRoute compares every field
+        // against the contract; a hand-written constant silently empties the test when the
+        // contract changes.
         {
             id: GROK.id,
             provider: GROK.provider,
@@ -79,9 +81,10 @@ describe("startProviderSet -- A4 yan saglayici devre disi", () => {
         }
     });
 
-    // NEGATIF KOL: ayni snapshot, devre disi kume BOS -> xai dali normal yolundan gecer
-    // (gercek ikili yok, ama adapter kurulur ve modeli listede kalir). Ilk test bu
-    // kolu ayirt edemeseydi "install_lock_drift" bir etiket olurdu, olcu degil.
+    // NEGATIVE ARM: same snapshot, disabled set EMPTY -> the xai branch takes its normal
+    // path (no real binary, but the adapter is installed and its model stays in the list).
+    // If the first test could not tell this arm apart, "install_lock_drift" would be a
+    // label, not a measure.
     it("devre disi kume bossa xai dali yumusamaz: adapter kurulur, model kalir", async () => {
         const set = await startProviderSet(snapshot, runtimePaths({ LOCALAPPDATA: dizin }), "nonce", {
             cwd: dizin,

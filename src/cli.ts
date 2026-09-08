@@ -206,7 +206,7 @@ async function catalogSnapshot(ctx: CliContext, write: boolean, allowShrink = fa
     const providers = await startCatalogProviders(paths, createSessionNonce());
     const readiness: ProviderReadiness[] = [];
     let snapshot = baseline;
-    // Turetilmis, elle yazilmis DEGIL -- gerekcesi openAiModelReadiness'in basinda.
+    // Derived, NOT hand-written -- the reason is at the top of openAiModelReadiness.
     let openAiModels: readonly OpenAiModelReadiness[] = openAiModelReadiness(undefined);
     let grokEnabled = false;
     let googleModels: readonly GoogleModelCatalogReadiness[] = [];
@@ -225,9 +225,9 @@ async function catalogSnapshot(ctx: CliContext, write: boolean, allowShrink = fa
                     ? ready("openai", "clodex_live_oauth_context_verified")
                     : unavailable("openai", mismatches.length > 0
                         ? `openai_context_window_pin_stale:${mismatches.map((entry) => `${entry.id}=${entry.liveContextWindow ?? "?"}`).join(",")}_pinned=${ctx.installLock.claudeShadow.openAiContextWindow}`
-                        // Eskiden sabit "sol_or_terra_not_in_live_oauth_catalog" idi: sozlesme
-                        // listesi buyudukce yalan soyleyen bir dizgi. Eksik olan model ADIYLA
-                        // yazilir, yoksa teshis yanlis saglayiciya gider.
+                        // This used to be the fixed string "sol_or_terra_not_in_live_oauth_catalog":
+                        // a string that starts lying as soon as the contract list grows. The missing
+                        // model is written BY NAME, otherwise the diagnosis goes to the wrong provider.
                         : `openai_models_not_in_live_oauth_catalog:${missing.join(",")}`));
             }
             catch {
@@ -332,8 +332,8 @@ async function probeAntigravityModel(ctx: CliContext, model: string): Promise<Go
             detailCode: `antigravity_install_${install?.detailCode ?? "check_absent"}`,
         };
     }
-    // Isaret de turetilir: elle yazilan ikili secim ucuncu model eklendiginde
-    // iki modele ayni isareti verirdi ve hangisinin cevapladigi ayirt edilemezdi.
+    // The marker is derived too: a hand-written binary choice would give the same marker to
+    // two models once a third was added, and which one answered could not be told apart.
     const marker = `${model.toUpperCase().replace(/[^A-Z0-9]+/gu, "_")}_OAUTH_READY`;
     try {
         const result = await runAntigravityHeadless({
@@ -397,9 +397,10 @@ async function probeAntigravityModel(ctx: CliContext, model: string): Promise<Go
             oauthReady: false,
             adapterReady: false,
             status: error instanceof RouterError && error.code === "provider_auth_required" ? "auth_required" : "unavailable",
-            // Olculdu 2026-09-02: prob ANTHROPIC_BASE_URL tasiyan bir kabuktan kosunca uc
-            // model 'probe_failed' gorundu -- canli ariza degil, olcum ortaminin kusuru.
-            // Sebep ORTAMDAN okunur, hata metninden cikarilmaz; doctor.security de listeler.
+            // Measured 2026-09-02: when the probe ran from a shell carrying ANTHROPIC_BASE_URL,
+            // three models appeared as 'probe_failed' -- not a live outage, a defect of the
+            // measurement environment. The reason is read FROM THE ENVIRONMENT, not inferred from
+            // the error text; doctor.security lists it too.
             detailCode: error instanceof RouterError && error.code === "provider_auth_required"
                 ? "antigravity_oauth_required"
                 : blockingCustomSelectors(ctx.environment).length > 0
@@ -416,14 +417,15 @@ async function doctor(ctx: CliContext, args: readonly string[]): Promise<number>
         throw new RouterError("invalid_request", `Unknown doctor option: ${unknown[0]}`, 400);
     const paths = runtimePaths(ctx.environment);
     const activeApiKeySelectors = presentApiKeySelectors(ctx.environment);
-    // Antigravity koprusunun reddettigi uc-nokta secicileri (orn. ANTHROPIC_BASE_URL):
-    // oauthOnly'yi dusurmez ama google probunu dusurur; ADIYLA gorunmeli.
+    // Endpoint selectors the Antigravity bridge refuses (e.g. ANTHROPIC_BASE_URL): they do not
+    // drop oauthOnly but they do drop the google probe; they must be visible BY NAME.
     const activeAntigravitySelectors = activeCustomSelectors(ctx.environment);
     const oauthOnly = activeApiKeySelectors.length === 0;
     const native = await nativeAuthStatus(ctx);
     const activeSessions = await readActiveSupervisorStatuses(paths);
-    // Picker onbellegi: calisan oturumun adresine, yoksa sabit porta gore. Ana yolun
-    // parcasi degil (ok'i etkilemez) ama bos picker ADIYLA ve caresiyle raporlanir.
+    // Picker cache: judged against the running session's address, or the fixed port when there
+    // is none. Not part of the main path (it does not affect ok), but an empty picker is
+    // reported BY NAME and with its remedy.
     const pickerLiveBaseUrl = activeSessions.find((session) => session.baseUrl !== undefined)?.baseUrl
         ?? `http://127.0.0.1:${preferredLoopbackPort(ctx.environment)}`;
     const pickerCacheStatus = await gatewayModelsCacheStatus(gatewayModelsCachePath(ctx.environment), pickerLiveBaseUrl);
@@ -449,10 +451,10 @@ async function doctor(ctx: CliContext, args: readonly string[]): Promise<number>
     const installReady = ctx.installChecks
         .filter((check) => check.component !== "gemini")
         .every((check) => check.status === "ok");
-    // Kapinin KENDISI artik test edilen saf bir fonksiyonda (model-refresh.ts VAKA
-    // KAYDI): burada elle yazildigi surece `every` -> `some` mutasyonu takimi yesil
-    // birakiyordu, cunku hicbir test bu dosyayi import etmiyor. Bu satirin tasidigi tek
-    // sey artik "--require-all istendi mi" sorusu.
+    // The gate ITSELF now lives in a tested pure function (see the CASE RECORD in
+    // model-refresh.ts): as long as it was hand-written here, the `every` -> `some` mutation
+    // left the suite green, because no test imports this file. The only thing this line still
+    // carries is the question "was --require-all asked for".
     const providerReady = !requireAll || requireAllProvidersReady(catalog === undefined
         ? undefined
         : { openAiModels: catalog.openAiModels, grokEnabled: catalog.grokEnabled, googleModels });
@@ -485,8 +487,8 @@ async function doctor(ctx: CliContext, args: readonly string[]): Promise<number>
             ? {
                 live: {
                     providers: catalog?.providers ?? [],
-                    // Model model, adiyla: "openai unavailable" tek satiri hangi
-                    // sozlesmenin dustugunu soylemiyordu.
+                    // Model by model, by name: the single line "openai unavailable" did not say
+                    // which contract had fallen.
                     openAiModels: catalog?.openAiModels ?? [],
                     googleModels,
                     ...(geminiAcp === undefined ? {} : { geminiAcpBridge: geminiAcp }),

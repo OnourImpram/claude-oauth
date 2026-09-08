@@ -44,7 +44,7 @@ export function advertisedContextWindow(model: ModelRecord): number | undefined 
 /**
  * The one row `claude-oauth models --refresh` and `claude-oauth doctor` print per model.
  *
- * WHY this is a function and not two inline object literals (2026-09-05, audit BULGU 3).
+ * WHY this is a function and not two inline object literals (2026-09-05, audit FINDING 3).
  * Both surfaces built the identical object by hand and both printed model.contextWindow
  * alone -- the MEASURED number. For Astra that is 872_000 while Claude Code is told
  * 1_000_000, so the operator who pins a correct release and then runs `doctor` out of habit

@@ -2,10 +2,10 @@ import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { assertNoApiKeySelectors, presentApiKeySelectors, sanitizedClaudeEnvironment, sanitizedWorkerEnvironment } from "../src/security/environment.js";
 
-// Bu sistem OAuth-only'dir: hicbir saglayici icin API-key yedegi YOKTUR. Bir anahtar
-// secicisi ortamda kalirsa, kullanici OAuth kullandigini sanirken sessizce anahtarla
-// faturalanabilir. Bu yuzden secici tespiti hem RAPORLANIR hem de is parcaciklarina
-// gecen ortamdan SILINIR -- ikisi ayri kontroldur.
+// This system is OAuth-only: there is NO API-key fallback for any provider. If a key
+// selector is left in the environment, the user can be billed silently against the key
+// while believing they are on OAuth. That is why selector detection is both REPORTED and
+// STRIPPED from the environment handed to worker threads -- two separate checks.
 
 describe("presentApiKeySelectors", () => {
     it("temiz ortamda hicbir sey bildirmez", () => {
@@ -55,8 +55,8 @@ describe("sanitizedWorkerEnvironment", () => {
         strictEqual(cleaned["PATH"], "/usr/bin");
     });
     it("ANTHROPIC_BASE_URL'i siler", () => {
-        // Bu degisken bu oturumda GERCEKTEN sorun cikardi: Claude Code'un kendi surecinden
-        // miras alinip antigravity probunu OAuth-only kontrolunde dusurdu.
+        // This variable REALLY caused trouble in this session: it was inherited from Claude
+        // Code's own process and dropped the antigravity probe at the OAuth-only check.
         const cleaned = sanitizedWorkerEnvironment("openai", { ANTHROPIC_BASE_URL: "https://ornek", PATH: "/usr/bin" });
         strictEqual(cleaned["ANTHROPIC_BASE_URL"], undefined);
         strictEqual(cleaned["PATH"], "/usr/bin");
@@ -80,9 +80,10 @@ describe("sanitizedWorkerEnvironment", () => {
         strictEqual(source["ANTHROPIC_API_KEY"], "x");
     });
 
-    // clodex 2.11.1 ile gelen uc yeni override (olculdu 2026-09-05: 2.8.2 bundle'inda
-    // 0 gecis, 2.11.1'de 1'er gecis). Silme listesine yeni surumle birlikte eklenmezse
-    // is oturumundan sessizce miras alinirlar; "hijyenik ortam" iddiasi olcusuz kalir.
+    // Three new overrides that arrived with clodex 2.11.1 (measured 2026-09-05: 0
+    // occurrences in the 2.8.2 bundle, 1 each in 2.11.1). If they are not added to the
+    // strip list alongside the new version, they are silently inherited from the work
+    // session, and the "hygienic environment" claim is left without a measurement.
     it("clodex 2.11.1'in yeni CLODEX_* override'larini siler", () => {
         const cleaned = sanitizedWorkerEnvironment("openai", {
             CLODEX_UPSTREAM_IDLE_TIMEOUT_MS: "1",
@@ -95,8 +96,9 @@ describe("sanitizedWorkerEnvironment", () => {
         strictEqual(cleaned["CLODEX_UPSTREAM_TOTAL_TIMEOUT_MS"], undefined);
         strictEqual(cleaned["CLODEX_WS_MAX_NEW_CONNECTIONS_PER_MIN"], undefined);
         strictEqual(cleaned["CLODEX_UPSTREAM_MAX_RETRIES"], undefined);
-        // NEGATIF KOL: temizleyici "CLODEX_ ile baslayani sil" degildir -- CLODEX_HOME
-        // kapsulun calismasi icin GEREKLI ve silinirse saglayici hic acilmaz.
+        // NEGATIVE ARM: the sanitizer is not "strip anything starting with CLODEX_" --
+        // CLODEX_HOME is REQUIRED for the capsule to run, and stripping it means the
+        // provider never comes up at all.
         strictEqual(cleaned["PATH"], "/usr/bin");
     });
 

@@ -8,7 +8,7 @@ import {
 } from "../src/mcp/tool-bridge.js";
 import { RouterError } from "../src/domain/errors.js";
 
-// Faz 9 / Yol 4. The gate that matters is spec §7.3: the number of tool_result
+// Phase 9 / Path 4. The gate that matters is spec §7.3: the number of tool_result
 // blocks that arrive with nothing waiting for them must be ZERO. Everything
 // below exists to make that number honest -- a bridge that silently swallowed a
 // mismatch would report zero while losing work.

@@ -29,16 +29,16 @@ export function runtimePaths(environment: NodeJS.ProcessEnv = process.env): Runt
         shadowRoot: join(root, "shadow"),
         shadowManifest: join(root, "shadow", "current.json"),
         shadowLock: join(root, "shadow", "self-heal.lock"),
-        // TWEAKCC_CONFIG_DIR. Adi eskiden "patch-state-2.8.2" idi: yola gomulen bir
-        // surum numarasi ilk yukseltmede YALAN soyler, ve yalan soyleyen bir yol
-        // yedekleri sessizce karistirir. Surum kilitte yasar, yolda degil.
+        // TWEAKCC_CONFIG_DIR. Its name used to be "patch-state-2.8.2": a version number
+        // embedded in a path LIES at the first upgrade, and a lying path silently mixes up
+        // the backups. The version lives in the lock, not in the path.
         //
-        // OLCUSU: test/runtime-paths.test.ts -- (a) bu yolun adi surum tasimaz,
-        // (b) hicbir RuntimePaths degeri surum tasimaz, (c) enstrumanin eski adi
-        // FIILEN yakaladigi pozitif kolla kanitlanir. Yeniden adlandirmanin kendisi
-        // 2026-09-05'e kadar olcusuzdu (BULGU 6): `grep -rn shadowPatchBackups test/`
-        // sifir sonuc veriyordu. Gecis notu: eski dizindeki pristine yedek OKSUZ kalir;
-        // silinmesi operatorun karari, bu kod onu silmez.
+        // ITS MEASURE: test/runtime-paths.test.ts -- (a) this path's name carries no version,
+        // (b) no RuntimePaths value carries a version, (c) the instrument is proved by a
+        // positive arm that ACTUALLY catches the old name. The rename itself was unmeasured
+        // until 2026-09-05 (FINDING 6): `grep -rn shadowPatchBackups test/` returned zero
+        // results. Migration note: the pristine backup in the old directory is ORPHANED;
+        // deleting it is the operator's decision, this code does not delete it.
         shadowPatchBackups: join(root, "shadow", "patch-state"),
         clodexHome: join(root, "providers", "clodex"),
         grokHome: join(root, "providers", "grok"),

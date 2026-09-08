@@ -10,18 +10,18 @@ export async function allocateLoopbackPort(): Promise<number> {
     await once(server, "close");
     return port;
 }
-// Claude Code'un ag gecidi model kesfi, onbellegini ANTHROPIC_BASE_URL'e BIREBIR
-// anahtarlar (binary'de: `e.baseUrl !== a.ANTHROPIC_BASE_URL -> return []`). Her
-// oturumda efemeral bir port o onbellegi her defasinda gecersiz kilar ve /model
-// listesi harici modelleri HIC gostermez. Bu yuzden port sabittir.
+// Claude Code's gateway model discovery keys its cache to ANTHROPIC_BASE_URL EXACTLY
+// (in the binary: `e.baseUrl !== a.ANTHROPIC_BASE_URL -> return []`). An ephemeral port
+// per session invalidates that cache every single time and the /model list NEVER shows
+// external models. That is why the port is fixed.
 //
-// Loopback'te sabit bir port tahmin edilebilirdir, ama tek basina bir sey acmaz:
-// her istek 256-bit oturum nonce'unu (baslik ya da yol) tasimak zorunda, aksi
-// halde 401 doner.
-// 8787 BILEREK KULLANILMIYOR: bu makinede ~/.claude/cache/gateway-models.json
-// hala 2026-05-05 tarihli, baseUrl'i http://127.0.0.1:8787 olan ve artik
-// var olmayan bir ag gecidinin dort modelini tasiyor. O portu secmek, bizim
-// sunmadigimiz hayalet modelleri picker'a dusururdu.
+// A fixed port on loopback is predictable, but on its own it opens nothing: every request
+// must carry the 256-bit session nonce (in a header or in the path), otherwise it gets a
+// 401.
+// 8787 IS DELIBERATELY NOT USED: on this machine ~/.claude/cache/gateway-models.json is
+// still dated 2026-05-05, has baseUrl http://127.0.0.1:8787 and carries four models of a
+// gateway that no longer exists. Choosing that port would drop ghost models we do not
+// serve into the picker.
 export const PINNED_LOOPBACK_PORT = 8791;
 export function preferredLoopbackPort(environment: NodeJS.ProcessEnv = process.env): number {
     const raw = environment["HEZARFEN_ROUTER_PORT"];

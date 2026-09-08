@@ -8,7 +8,7 @@ import {
 import { McpToolBridge, deriveMcpTools } from "../src/mcp/tool-bridge.js";
 import { RouterError } from "../src/domain/errors.js";
 
-// Faz 9 / Yol 4. This registry is the join between a STATELESS Messages API and
+// Phase 9 / Path 4. This registry is the join between a STATELESS Messages API and
 // a STATEFUL ACP session. The gate is spec §7.3: tool results that match nothing
 // must be COUNTED. Everything here exists to keep that number honest, and to
 // prove the two ways a turn can hang -- an outcome produced before the turn was

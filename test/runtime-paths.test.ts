@@ -3,21 +3,21 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runtimePaths } from "../src/runtime/paths.js";
 
-// VAKA KAYDI (BULGU 6, 2026-09-05, bagimsiz denetim): `shadow/patch-state-2.8.2` ->
-// `shadow/patch-state` yeniden adlandirmasinin HICBIR olcusu yoktu --
-// `grep -rn shadowPatchBackups test/` sifir sonuc veriyordu. Yola gomulen bir surum
-// numarasi ilk yukseltmede yalan soyler: kurulu `patch-state.json` hala eski dizini
-// gosteriyor ve claude-shadow.ts assertPathInside onu artik DISARIDA sayiyor (503).
-// Kod okumasi kendini onaran bir yol gosteriyor (bayat manifest -> pristine reset ->
-// yeniden yamalama), ama kural olculmediginde curur ve bunu haber vermez.
+// CASE RECORD (FINDING 6, 2026-09-05, independent audit): the `shadow/patch-state-2.8.2`
+// -> `shadow/patch-state` rename had NO measure at all -- `grep -rn shadowPatchBackups
+// test/` returned zero results. A version number buried in a path starts lying at the
+// first upgrade: the installed `patch-state.json` still points at the old directory and
+// claude-shadow.ts assertPathInside now counts it as OUTSIDE (503). Reading the code
+// shows a self-repairing path (stale manifest -> pristine reset -> re-patch), but an
+// unmeasured rule rots, and it does not announce it.
 //
-// Eski dizindeki pristine yedek OKSUZ kalir. Silmek OPERATORUN karari: bu test onu
-// olcmez, silme de onermez.
+// The pristine backup in the old directory is left ORPHANED. Deleting it is the
+// OPERATOR's call: this test does not measure it and does not propose the deletion.
 
 const BASE = process.platform === "win32" ? "C:\\hezarfen-olcum" : "/hezarfen-olcum";
 const paths = runtimePaths({ LOCALAPPDATA: BASE });
 
-// Bir yol parcasina gomulmus surum numarasi: "patch-state-2.8.2", "claude-2.1.251"...
+// A version number buried in a path segment: "patch-state-2.8.2", "claude-2.1.251"...
 const YOLDA_SURUM = /(?:^|[^0-9])\d+\.\d+\.\d+(?:[^0-9]|$)/u;
 
 describe("runtimePaths -- surum yola gomulmez", () => {
@@ -32,9 +32,9 @@ describe("runtimePaths -- surum yola gomulmez", () => {
         deepStrictEqual(tasiyanlar, []);
     });
 
-    // POZITIF KONTROL: yukaridaki kol bos cikti uretiyor olabilir. Olcut, kaldirilan
-    // ADI FIILEN yakaliyor mu? Yakalamiyorsa test kuralin adini olcuyor demektir,
-    // kuralin kendisini degil.
+    // POSITIVE CONTROL: the arm above may simply be producing empty output. Does the
+    // criterion ACTUALLY catch the NAME that was removed? If it does not, the test is
+    // measuring the rule's name, not the rule itself.
     it("olcut kaldirilan eski adi (patch-state-2.8.2) yakalar", () => {
         strictEqual(YOLDA_SURUM.test(join(paths.root, "shadow", "patch-state-2.8.2")), true);
         strictEqual(YOLDA_SURUM.test(paths.shadowPatchBackups), false);

@@ -7,12 +7,12 @@ import { join } from "node:path";
 import { RouterError } from "../domain/errors.js";
 import { AGENT_MODEL_CONTRACTS } from "../domain/model-contracts.js";
 import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security/environment.js";
-// Izin listesi bir GUVENLIK kontroludur: yalnizca gozden gecirilmis modeller
-// spawn edilebilir. Ama listeyi elle yazmak, sozlesmeye model eklendiginde onu
-// sessizce disarida birakiyordu -- ve hata kodu bunu Google'in reddi
-// ("model_not_available") gibi gosterdigi icin teshis yanlis katmani suclariyordu.
-// Gozden gecirilmis kume zaten AGENT_MODEL_CONTRACTS'tir; liste ondan turetilir,
-// boylece kontrol korunur ama surukleme imkansizlasir.
+// The allowlist is a SECURITY control: only reviewed models may be spawned. But writing
+// the list by hand silently left a model out whenever one was added to the contracts --
+// and because the error code presented that as Google's own refusal
+// ("model_not_available"), the diagnosis blamed the wrong layer.
+// The reviewed set is already AGENT_MODEL_CONTRACTS; the list is derived from it, so the
+// control is preserved but drift becomes impossible.
 export const antigravityAllowedModels: readonly string[] = AGENT_MODEL_CONTRACTS
     .filter((contract) => contract.provider === "google")
     .map((contract) => contract.upstreamModel);
@@ -36,7 +36,7 @@ export interface HeadlessProcessOutput {
 }
 export type AntigravityProcessRunner = (request: HeadlessProcessRequest) => Promise<HeadlessProcessOutput>;
 export interface AntigravityHeadlessOptions {
-    /** true ise agy tam calisan ajan olur (accept-edits); delege seridi false birakir. */
+    /** If true, agy becomes a fully working agent (accept-edits); the delegation lane leaves it false. */
     readonly allowEdits?: boolean;
     readonly binary: string;
     readonly cwd: string;
@@ -87,11 +87,13 @@ export function activeCustomSelectors(environment: NodeJS.ProcessEnv): string[] 
     })
         .sort();
 }
-// Engelleyici olan yalniz antigravity/Google anahtar-uc secicileridir: operator agy'yi API anahtarina
-// yonlendirmisse OAuth-only readiness dusmelidir. Jenerik uc secicileri (ANTHROPIC_BASE_URL, OPENAI_BASE_URL,
-// XAI_*) baska saglayicilarin degiskenleridir; processEnvironment() onlari cocuktan zaten siler. Launcher'in
-// kendi cocuguna verdigi ANTHROPIC_BASE_URL ic ice oturumda router'a miras kalir -- bunu engel saymak her
-// google istegini adapter_unavailable yapiyordu (2026-09-02 olcumu). activeCustomSelectors raporlama icin kalir.
+// Only the antigravity/Google key-and-endpoint selectors are blocking: if the operator has
+// pointed agy at an API key, OAuth-only readiness must drop. The generic endpoint selectors
+// (ANTHROPIC_BASE_URL, OPENAI_BASE_URL, XAI_*) are other providers' variables;
+// processEnvironment() already strips them from the child. The ANTHROPIC_BASE_URL the
+// launcher gives its own child is inherited by the router in a nested session -- counting
+// that as blocking turned every google request into adapter_unavailable (measured
+// 2026-09-02). activeCustomSelectors stays for reporting.
 export function blockingCustomSelectors(environment: NodeJS.ProcessEnv): string[] {
     return activeCustomSelectors(environment).filter((name) => antigravitySelectorPattern.test(name));
 }
@@ -255,24 +257,27 @@ function processEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
         delete environment[name];
     }
     environment["AGY_CLI_HIDE_ACCOUNT_INFO"] = "1";
-    // 2026-09-05: agy her `--print` baslatilisinda ARKA PLAN guncelleyici dogurur
-    // (auto_updater.go:305 "Spawned background update process") ve ikiliyi yerinde yazmaz,
-    // `agy.exe -> agy.exe.<ts>.old` diye YENIDEN ADLANDIRIP yenisini yazar -- IsReadOnly bayragi
-    // bunu durdurmaz (09-03 korumasi 09-05 09:47:37'de tam boyle asildi; 14. civi ihlali).
-    // Iki kollu deney (1.1.25 kopyasi, gercek print cagrisi): deger "1" ile GUNCELLEDI, "true" ile
-    // log "auto_updater.go:218 Auto-update disabled via environment variable" yazdi ve ikili sabit
-    // kaldi. Yeni surum kabulu: agy-manifest-dogrulama.py (Google manifesti) -> yeni release.
+    // 2026-09-05: on every `--print` launch agy spawns a BACKGROUND updater
+    // (auto_updater.go:305 "Spawned background update process") and does not write the binary
+    // in place -- it RENAMES it `agy.exe -> agy.exe.<ts>.old` and writes the new one; the
+    // IsReadOnly flag does not stop that (the 09-03 protection was bypassed in exactly this
+    // way at 09-05 09:47:37; violation of nail 14).
+    // Two-arm experiment (a copy of 1.1.25, a real print call): with the value "1" it UPDATED;
+    // with "true" the log said "auto_updater.go:218 Auto-update disabled via environment
+    // variable" and the binary stayed fixed. Accepting a new version:
+    // agy-manifest-dogrulama.py (Google manifest) -> new release.
     environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
     return environment;
 }
 function processArguments(model: string, timeoutMs: number, allowEdits = false): string[] {
-    // 2026-09-03: `--mode plan --sandbox` agy'yi SALT-OKUNUR yapar. Bu bir sir/guvenlik
-    // kisiti degil, bizim verdigimiz bir bayrakti; olculdu: `--mode accept-edits
-    // --dangerously-skip-permissions` ile agy kendi filesystem MCP sunucusuyla dosya
-    // YAZDI (kanit: tasks/sistem-onarim-20260903/kanit.md A13). Arac koprusu enjekte
-    // EDILMIYOR -- agy zaten operatorun kalici mcp_config.json'undaki araclari tasiyor,
-    // yani oturum sirri hicbir yere yazilmiyor; Faz 9 itirazi bu yolu kapsamaz.
-    // Delege tek-atis seridi (cli.ts) allowEdits VERMEZ: orada plan modu dogru davranistir.
+    // 2026-09-03: `--mode plan --sandbox` makes agy READ-ONLY. That was not a secrecy or
+    // security constraint but a flag we passed ourselves; measured: with `--mode accept-edits
+    // --dangerously-skip-permissions` agy WROTE a file through its own filesystem MCP server
+    // (evidence: tasks/sistem-onarim-20260903/kanit.md A13). The tool bridge is NOT injected --
+    // agy already carries the tools from the operator's persistent mcp_config.json, so no
+    // session secret is written anywhere; the Phase 9 objection does not cover this path.
+    // The one-shot delegation lane (cli.ts) does NOT pass allowEdits: there, plan mode is the
+    // correct behaviour.
     return [
         "--input-format",
         "stream-json",

@@ -1,8 +1,9 @@
-// lint.mjs -- bu depoda eslint yok; kural setini derleyicinin yakalamadigi ve bu olayda
-// FIILEN zarar vermis desenlere daralttik. Her kural bir vaka kaydidir, stil tercihi degil.
+// lint.mjs -- there is no eslint in this repository; the rule set is narrowed to the
+// patterns the compiler does not catch and that ACTUALLY did damage in this incident.
+// Every rule is a case record, not a style preference.
 //
-// ONARIM: bir bulgu ciktida dosya:satir olarak gosterilir. Bilerek yapiyorsan satirin
-// sonuna `// lint-izin: <gerekce>` ekle -- gerekcesiz izin kabul edilmez.
+// FIX: a finding is shown in the output as file:line. If you are doing it deliberately,
+// append `// lint-izin: <reason>` to the line -- an exemption without a reason is not accepted.
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
@@ -12,23 +13,23 @@ const SCAN = ["src", "test", "scripts"];
 const RULES = [
   {
     id: "ham-hata-dokumu",
-    // cli.ts bir zamanlar console.error("!!! FATAL ERROR !!!", caught) yapiyordu. Hata
-    // MESAJLARI oturum nonce'u tasiyan URL'ler icerebilir; yapilandirilmis log kullan.
+    // cli.ts once did console.error("!!! FATAL ERROR !!!", caught). Error MESSAGES can
+    // contain URLs carrying the session nonce; use structured logging instead.
     pattern: /console\.(?:error|log|warn)\s*\([^)]*\b(?:caught|error|err)\b\s*\)/g,
     message: "ham hata nesnesi konsola basiliyor; writeSafeLog kullan (mesaj sizdirabilir)",
     kanarya: 'console.error("bir sey oldu", caught)',
   },
   {
     id: "yoruma-alinmis-kapi",
-    // verifyShadowModelSurface ve patch-proof throw'lari aylarca yorumda kaldi ve
-    // hicbir sey bunu bildirmedi.
+    // The verifyShadowModelSurface and patch-proof throws stayed commented out for
+    // months and nothing reported it.
     pattern: /^\s*\/\/\s*throw new RouterError/gm,
     message: "yorum satirina alinmis throw: kapi sessizce devre disi",
     kanarya: "    // throw new RouterError(\"x\", \"y\", 503);",
   },
   {
     id: "korumasiz-spawn",
-    // spawn hatasi asenkron 'error' olayidir; dinleyicisiz kalirsa SURECI DUSURUR.
+    // A spawn failure is an asynchronous 'error' event; with no listener it DROPS THE PROCESS.
     pattern: /\bspawn\s*\(/g,
     message: "spawn: ayni modulde spawnFailureGuard ya da child.once(\"error\") olmali",
     check: (source) => !/spawnFailureGuard|\.once\("error"/.test(source),
@@ -36,7 +37,8 @@ const RULES = [
   },
   {
     id: "kosulsuz-ok-donduren-dogrulayici",
-    // verifyClodexPackageLock kosulsuz status:"ok" donen bir stub'di; alan hic olculmedi.
+    // verifyClodexPackageLock was a stub returning status:"ok" unconditionally; the field
+    // was never measured.
     pattern: /function\s+verify[A-Z]\w*\([^)]*\)\s*:\s*Promise<InstallCheck>\s*\{\s*return\s*\{[^}]*status:\s*"ok"/g,
     message: "dogrulayici kosulsuz ok donuyor: stub kapi",
     kanarya: 'function verifyThing(lock: InstallLock): Promise<InstallCheck> { return { component: "x", status: "ok" };',
@@ -58,10 +60,11 @@ async function collect(directory) {
   return found;
 }
 
-// Kural tablosu kurallarin kendi metnini icerir; bu dosyayi taramak her yeni kural icin
-// bir yalanci bulgu uretir. "Bir tarama kendi desenini eslesebilir" -- tarayici kendini taramaz.
-// Pozitif kontrol: bos cikti kanit degildir. Her kural, kendi sentetik kanaryasini
-// yakalayabildigini kanitlamadan gecerli sayilmaz.
+// The rule table contains the text of the rules themselves; scanning this file would
+// produce one false finding per new rule. "A scan can match its own pattern" -- the
+// scanner does not scan itself.
+// Positive control: empty output is not evidence. No rule counts as valid until it has
+// proven it can catch its own synthetic canary.
 if (process.argv.includes("--ozdenetim")) {
   let failed = 0;
   for (const rule of RULES) {

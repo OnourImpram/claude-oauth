@@ -10,7 +10,7 @@ import { startRouterServer, type RunningRouter } from "../src/router/server.js";
 import { SESSION_HEADER } from "../src/security/nonce.js";
 import { McpToolBridge, deriveMcpTools, type ParkedToolCall } from "../src/mcp/tool-bridge.js";
 
-// Faz 9 / Yol 4 -- the MCP endpoint served on the router's OWN loopback server.
+// Phase 9 / Path 4 -- the MCP endpoint served on the router's OWN loopback server.
 //
 // The whole security argument for this design is that the endpoint sits BEHIND the
 // existing nonce gate: no new listener, no new port, no new credential class
@@ -129,7 +129,7 @@ describe("MCP protocol over HTTP", () => {
 
     // A notification MUST get no body. Answering one desyncs the JSON-RPC stream
     // and the agent stops mid-loop -- which reaches the operator as "the model is
-    // selected but no answer comes back", the exact symptom Faz 9 exists to end.
+    // selected but no answer comes back", the exact symptom Phase 9 exists to end.
     it("a notification gets 202 and an empty body", async () => {
         const { status, text } = await mcpGonder({ jsonrpc: "2.0", method: "notifications/initialized" });
         strictEqual(status, 202);

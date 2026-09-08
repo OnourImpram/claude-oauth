@@ -10,9 +10,9 @@ import {
 import { McpToolBridge, deriveMcpTools } from "../src/mcp/tool-bridge.js";
 import { RouterError } from "../src/domain/errors.js";
 
-// Faz 9 SERTLESTIRME. Her kol, adversaryal incelemenin AYAKTA KALAN bir
-// bulgusunu civiliyor. Bulgular okunarak degil OLCULEREK bulundu; onarimlari da
-// olculmeden iddia olarak kalirdi.
+// Phase 9 HARDENING. Every arm pins a SURVIVING finding from the adversarial review. The
+// findings were located by MEASUREMENT, not by reading; unmeasured, their remedies would
+// have stayed claims.
 
 class SahteAjan {
     #parcalar: string[] = [];
@@ -72,15 +72,15 @@ function defter(
 }
 
 describe("BULGU 1 -- iptal sinyali turu bitirir", () => {
-    // Bu baglanti olmadan router'in 300 sn istek zaman asimi ve iki
-    // client-disconnect abort'u BU ROTADA OLUYDU: kosan bir ACP turunu
-    // bitirecek tek sey ajanin kendiliginden bitmesiydi. Ustelik #running bir
-    // oturum sweep edilmez, yani takilan oturum olumsuzdu.
+    // Without this wiring, the router's 300 s request timeout and both
+    // client-disconnect aborts were DEAD ON THIS ROUTE: the only thing that could end a
+    // running ACP turn was the agent finishing on its own. On top of that, a #running
+    // session is never swept, so a stuck session was immortal.
     it("abort, bekleyen turu dusurur ve oturumu emekli eder", async () => {
         let ajan: SahteAjan | undefined;
         const registry = defter(
             () => (ajan = new SahteAjan()),
-            () => undefined, // ajan HICBIR SEY yapmaz: ne arac cagirir ne biter
+            () => undefined, // the agent does NOTHING: it neither calls a tool nor finishes
         );
         const kontrol = new AbortController();
         const bekleyen = registry.begin("p", ARACLAR, "m", kontrol.signal);
@@ -114,8 +114,8 @@ describe("BULGU 1 -- iptal sinyali turu bitirir", () => {
 });
 
 describe("BULGU 3 + 6 -- adressiz oturumlar geri alinir, tavan var", () => {
-    // Kimlik tool_use.id oldugu icin, duz bir turla acilan yeni konusma eski
-    // oturumu ADRESSIZ birakir: kimse ona ulasamaz ama sureci yasar.
+    // Because identity is tool_use.id, a new conversation opened with a plain turn leaves
+    // the old session UNADDRESSABLE: nobody can reach it, yet its process lives on.
     it("tavana varinca en eski BOSTA oturum geri alinir, istek 503 almaz", async () => {
         const ajanlar: SahteAjan[] = [];
         const registry = defter(
@@ -136,12 +136,12 @@ describe("BULGU 3 + 6 -- adressiz oturumlar geri alinir, tavan var", () => {
         registry.closeAll("test teardown");
     });
 
-    // Hepsi tur ortasindaysa geri alinacak bir sey yoktur; sessizce bir tane
-    // daha acmak makineyi doldururdu.
+    // If they are all mid-turn there is nothing to reclaim; silently opening one more
+    // would fill up the machine.
     it("hepsi tur ortasindaysa yeni oturum acikca reddedilir", async () => {
         const registry = defter(() => new SahteAjan(), () => undefined, { maxLiveSessions: 1 });
-        // Bu tur ASLA bitmez; teardown onu iptal edecek. Reddi burada
-        // yutulmazsa test bittikten SONRA unhandledRejection olarak patlar.
+        // This turn NEVER finishes; teardown will cancel it. If its rejection is not
+        // swallowed here it blows up as an unhandledRejection AFTER the test has ended.
         const askida = registry.begin("bir", ARACLAR).catch(() => undefined);
         await new Promise((r) => setTimeout(r, 10));
         let durum = 0;
@@ -157,8 +157,8 @@ describe("BULGU 3 + 6 -- adressiz oturumlar geri alinir, tavan var", () => {
 });
 
 describe("BULGU 4 -- iki farkli olay iki farkli sayaca yazilir", () => {
-    // "Is kayboldu" ile "biz vazgectik" ayni sayida cokerse, §7.3 kapisi neyi
-    // olctugunu soyleyemez.
+    // If "work was lost" and "we gave up" collapse into the same counter, the §7.3 gate
+    // cannot say what it measures.
     it("bizim dusurdugumuz cagrinin gec cevabi eslesmeyen SAYILMAZ", async () => {
         const bridge = new McpToolBridge({ onToolCall: () => undefined, callTimeoutMs: 5 });
         bridge.setTools(deriveMcpTools([{ name: "Read" }]));
@@ -167,7 +167,7 @@ describe("BULGU 4 -- iki farkli olay iki farkli sayaca yazilir", () => {
         });
         const cevap = await bekleyen;
         strictEqual((cevap?.["error"] as { code: number }).code, -32001);
-        // Claude Code cevabi GEC gonderiyor.
+        // Claude Code sends the answer LATE.
         const id = String((cevap?.["error"] as { message: string }).message);
         ok(id.includes("timed out"));
         strictEqual(bridge.unmatchedResultCount, 0);
@@ -181,7 +181,7 @@ describe("BULGU 4 -- iki farkli olay iki farkli sayaca yazilir", () => {
         strictEqual(bridge.timedOutResultCount, 0);
     });
 
-    // Her zaman sifir donen bir sayac, olmayan bir sayactan daha kotudur.
+    // A counter that always returns zero is worse than no counter at all.
     it("zaman asimi sayaci gercekten hareket eder", async () => {
         const idler: string[] = [];
         const bridge = new McpToolBridge({
@@ -244,7 +244,7 @@ describe("BULGU 5 -- ayni govde iki kapida ayni cevabi alir", () => {
         strictEqual(response.status, 200);
     });
 
-    // Ayni govde, defter YOKKEN hala 422 -- eski davranis korunuyor.
+    // The same body, still 422 when there is NO registry -- the old behaviour is preserved.
     it("defter yokken count_tokens hala 422 doner", async () => {
         const adapter = new AgentModelAdapter({
             provider: "xai",

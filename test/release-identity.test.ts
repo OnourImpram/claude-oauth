@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { computeReleaseId, RELEASE_ID_PATTERN, verifyReleaseIdentity } from "../src/runtime/release-identity.js";
 
-// REGRESYON: release dizinleri router-v3-<distHash>-<configHash> adini tasiyor ve
-// "icerik-adresli, degismez" deniyordu, ama hicbir sey bu hash'leri yeniden
-// hesaplamiyordu -- publicLauncherStatus yalnizca BICIMI kontrol ediyordu. Bu yuzden
-// aktif release elle yamalanip adini koruyabildi ve gunlerce fark edilmedi.
+// REGRESSION: release directories are named router-v3-<distHash>-<configHash> and were
+// described as "content-addressed, immutable", but nothing recomputed those hashes --
+// publicLauncherStatus only checked the FORMAT. So the active release could be patched by
+// hand and keep its name, and this went unnoticed for days.
 
 let root = "";
 
@@ -89,7 +89,7 @@ describe("verifyReleaseIdentity", () => {
         strictEqual(identity.computedId, declared);
     });
 
-    // NEGATIF KONTROL -- olayin ta kendisi: release yerinde duzenlendi, adi ayni kaldi.
+    // NEGATIVE CONTROL -- the event itself: the release was edited in place and kept its name.
     it("icerik degistiginde mismatch verir (yerinde duzenlenmis release)", async () => {
         const declared = await computeReleaseId(root);
         await writeFile(join(root, "dist", "src", "cli.js"), "export const a = 1;\n// elle yamalandi\n", "utf8");

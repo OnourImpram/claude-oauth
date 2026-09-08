@@ -5,7 +5,7 @@ import { AgentModelAdapter, extractToolResults } from "../src/adapters/agent-mod
 import { AgentSessionRegistry, type AgentRunHandle } from "../src/mcp/session-registry.js";
 import type { McpToolBridge } from "../src/mcp/tool-bridge.js";
 
-// Faz 9 / Yol 4 -- the loop, end to end through the adapter.
+// Phase 9 / Path 4 -- the loop, end to end through the adapter.
 //
 // The claim being tested is the one the operator reported broken: Grok and
 // Gemini "look selected but nothing comes back". The cause was that this route

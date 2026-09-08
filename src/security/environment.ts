@@ -143,9 +143,10 @@ const clodexRuntimeOverrides = [
     "CLODEX_TRACE",
     "CLODEX_SERVICE_TIER",
     "CLODEX_UPSTREAM_MAX_RETRIES",
-    // clodex 2.11.1'de eklenen ucu (olculdu 2026-09-05: 2.8.2 bundle'inda 0 gecis).
-    // Yeni bir surumun getirdigi override, silme listesine ayni pasta eklenmezse
-    // is oturumundan sessizce miras alinir: hijyenik ortam iddiasi olcusuz kalir.
+    // The endpoint added in clodex 2.11.1 (measured 2026-09-05: 0 occurrences in the 2.8.2
+    // bundle). An override introduced by a new version, if it is not added to the strip list
+    // in the same pass, is silently inherited from the working session: the claim of a
+    // hygienic environment is left unmeasured.
     "CLODEX_UPSTREAM_IDLE_TIMEOUT_MS",
     "CLODEX_UPSTREAM_TOTAL_TIMEOUT_MS",
     "CLODEX_WS_MAX_NEW_CONNECTIONS_PER_MIN",

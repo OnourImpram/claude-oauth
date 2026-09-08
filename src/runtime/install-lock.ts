@@ -43,11 +43,10 @@ export interface InstallLock {
         readonly sourceManifest: string;
     };
 }
-// Hangi Claude istemcisinin baslatilacagi. "native-gateway" imzali, DEGISTIRILMEMIS
-// claude.exe'yi kullanir ve harici modelleri ag gecidi model kesfi uzerinden sunar;
-// "patched-shadow" ise clodex ile yamalanmis bir kopyayi kullanir. Yamali kopya
-// Windows Application Control tarafindan bloklanabilir; native yol bloklanamaz
-// cunku imzali binary'ye hic dokunmaz.
+// Which Claude client is launched. "native-gateway" uses the signed, UNMODIFIED claude.exe
+// and serves external models through gateway model discovery; "patched-shadow" uses a copy
+// patched with clodex. The patched copy can be blocked by Windows Application Control; the
+// native path cannot, because it never touches the signed binary.
 export type ClaudeClientMode = "native-gateway" | "patched-shadow";
 export function resolveClaudeClientMode(lock: InstallLock, environment: NodeJS.ProcessEnv = process.env): ClaudeClientMode {
     const override = environment["HEZARFEN_CLAUDE_CLIENT_MODE"];
@@ -111,7 +110,8 @@ function parseInstallLock(value: unknown): InstallLock {
         throw new Error("installer SHA-256 is invalid");
     // Short form accepted: the binary announces an abbreviated commit and the vendor
     // publishes no source tree, so a full 40-char value could only ever be invented.
-    // Alan yoksa native varsayilir: yamali yol artik istisnadir, kural degil.
+    // When the field is absent, native is assumed: the patched path is now the exception,
+    // not the rule.
     const clientRecord = value["claudeClient"];
     const declaredMode = isRecord(clientRecord) ? clientRecord["mode"] : undefined;
     if (declaredMode !== undefined && declaredMode !== "native-gateway" && declaredMode !== "patched-shadow")
@@ -387,10 +387,11 @@ export async function verifyInstallLock(lock: InstallLock, moduleRoot: string, e
     return [nodeCheck, claude, claudeShadow, clodex, grok, gemini, antigravity];
 }
 /**
- * A4 (2026-09-02). Yan saglayici civileri: ihlalleri ANA YOLU KAPATMAZ. Ayni gun uc
- * kez yasandi -- antigravity surukledi, `claude` hic acilmadi. Bu iki bilesen icin
- * ihlal, saglayiciyi bu oturumda devre disi birakir (provider-set: install_lock_drift)
- * ve adiyla loglanir; node/claude/claude-shadow/clodex requireInstallChecks ile SERT kalir.
+ * A4 (2026-09-02). Side-provider nails: their violations do NOT CLOSE THE MAIN PATH. This
+ * happened three times in one day -- antigravity drifted and `claude` never started at all.
+ * For these two components a violation disables the provider for this session (provider-set:
+ * install_lock_drift) and is logged by name; node/claude/claude-shadow/clodex stay HARD
+ * through requireInstallChecks.
  */
 export const SIDE_PROVIDER_COMPONENTS: Readonly<Partial<Record<InstallComponent, ProviderId>>> = {
     grok: "xai",

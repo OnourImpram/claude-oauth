@@ -1,4 +1,4 @@
-// Faz 9 / Yol 4 -- Claude Code'un araclarini ACP ajanina MCP olarak sunan kopru.
+// Phase 9 / Path 4 -- the bridge that exposes Claude Code's tools to the ACP agent as MCP.
 //
 // WHY THIS EXISTS
 // The agent-readonly route can only carry TEXT (adapters/agent-model.ts). The
@@ -122,9 +122,9 @@ export class McpToolBridge {
     #initialized = false;
     #kapali = false;
     #eslesmeyenSonuc = 0;
-    // Zaman asimina UGRATTIGIMIZ cagrilar. Bunlarin gec gelen cevabi
-    // eslesmeyen SAYILMAZ: 'is kayboldu' baska bir olaydir, 'biz vazgectik'
-    // baska. Ikisi ayni sayaca yazilirsa kapi neyi olctugunu soyleyemez.
+    // Calls WE timed out. A late answer to one of these is NOT COUNTED as unmatched:
+    // 'work was lost' is one event, 'we gave up' is another. If both are written to the
+    // same counter the gate cannot say what it measures.
     #zamanAsimiSonuc = 0;
     readonly #zamanAsimina = new Set<string>();
     readonly #onToolCall: (call: ParkedToolCall) => void;
@@ -153,7 +153,7 @@ export class McpToolBridge {
         return this.#eslesmeyenSonuc;
     }
 
-    /** Bizim dusurdugumuz cagrilarin gec gelen cevaplari. AYRI olcu. */
+    /** Late answers to calls we dropped ourselves. A SEPARATE measurement. */
     get timedOutResultCount(): number {
         return this.#zamanAsimiSonuc;
     }
@@ -169,7 +169,7 @@ export class McpToolBridge {
     deliverToolResult(id: string, content: string, isError: boolean): boolean {
         const bekleyen = this.#bekleyenler.get(id);
         if (bekleyen === undefined) {
-            // Bu cagriyi BIZ dusurduysek, gec gelen cevap kayip is degildir.
+            // If WE dropped this call, a late answer is not lost work.
             if (this.#zamanAsimina.delete(id)) {
                 this.#zamanAsimiSonuc += 1;
                 return false;

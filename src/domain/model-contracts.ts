@@ -46,7 +46,7 @@ export const OPENAI_AUTO_COMPACT_WINDOW_TOKENS = 220_000;
 //
 // 1_000_000 rather than the model card's own 1,050,000, and the reason is NOT the picker id.
 //
-// CORRECTED 2026-09-05 (independent audit BULGU 1, reproduced in this run). This comment used
+// CORRECTED 2026-09-05 (independent audit FINDING 1, reproduced in this run). This comment used
 // to claim the value stayed clear of claudeClientDiscoveryId's `[1m]` suffix rule. It cannot:
 // that rule reads model.contextWindow -- the SNAPSHOT number -- and this constant never reaches
 // it. MEASURED by raising the constant to 1_050_000 in the staging tree: the picker id stayed
@@ -215,7 +215,7 @@ export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
         // The rate-card sentence below carries a real EM DASH (U+2014) because that is what the
         // source string carries. It was ASCII-folded to "--" when this row was written and the
         // fold was not marked -- an unmarked character change inside quotation marks (audit
-        // BULGU 4). MEASURED 2026-09-05: this repository is NOT ASCII-only (11 files under
+        // FINDING 4). MEASURED 2026-09-05: this repository is NOT ASCII-only (11 files under
         // src/ test/ scripts/ already carry U+A7 / U+B7 / U+FC), so the honest repair is the
         // character itself rather than a footnote about it. test/contract-derivation.test.ts
         // holds it in place from both sides.
@@ -266,7 +266,7 @@ export interface OpenAiSnapshotRouteDrift {
 // WHY a snapshot route stopped verifying: one row per failing model, carrying BOTH
 // numbers.
 //
-// MEASURED 2026-09-05 (independent audit, BULGU 1). The live snapshot under
+// MEASURED 2026-09-05 (independent audit, FINDING 1). The live snapshot under
 // %LOCALAPPDATA% outlives a release upgrade and still carried contextWindow 828400 for
 // sol and terra while the clodex pin moved to 872000. The first session served by the
 // new clodex therefore fails isVerifiedOpenAiSnapshotRoute for EVERY OpenAI row, and

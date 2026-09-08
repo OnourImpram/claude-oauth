@@ -15,12 +15,12 @@ export interface RouterServerOptions {
     readonly nonce: string;
     readonly registry: ModelRegistry;
     readonly receipts: ReceiptStore;
-    // Verilmezse efemeral port kullanilir; o durumda /model listesi harici
-    // modelleri gostermez (bkz. preferredLoopbackPort).
+    // If not supplied, an ephemeral port is used; in that case the /model list does not
+    // show external models (see preferredLoopbackPort).
     readonly preferredPort?: number;
-    // Faz 9: Claude Code araclarini ACP ajanina sunan MCP ucu. Verilmezse
-    // /mcp yolu 404 doner -- yani bu yetenek YAPILANDIRILMAMIS demektir, ve
-    // o durum sessiz bir basarisizlik degil, adi konmus bir 404'tur.
+    // Phase 9: the MCP endpoint that exposes Claude Code's tools to the ACP agent. If not
+    // supplied, the /mcp path returns 404 -- meaning this capability is NOT CONFIGURED, and
+    // that state is a named 404, not a silent failure.
     readonly mcpBridge?: (sessionKey: string) => McpToolBridge | undefined;
 }
 export interface RunningRouter {
@@ -101,9 +101,9 @@ export async function startRouterServer(options: RouterServerOptions): Promise<R
     server.keepAliveTimeout = 75_000;
     server.headersTimeout = 80_000;
     server.requestTimeout = 0;
-    // Sabit port denenir; mesgulse efemerale duseriz -- ama SESSIZCE degil.
-    // Efemeral porta dusmek picker'i yeniden bosaltir, bu yuzden sebebi gorunur
-    // olmak zorunda: alarmin sessizligi kabul olcutu yapilamaz.
+    // The fixed port is tried first; if it is busy we fall back to an ephemeral one -- but
+    // NOT SILENTLY. Falling back to an ephemeral port empties the picker again, so the
+    // reason has to be visible: an alarm's silence cannot be the acceptance criterion.
     let listenFallbackReason: string | undefined;
     if (options.preferredPort !== undefined) {
         server.listen(options.preferredPort, "127.0.0.1");
@@ -164,9 +164,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const routedTarget = sessionTarget(request.url, options.nonce);
     const route = classifyRoute(routedTarget.target.pathname);
     let receiptBase: Pick<RouteReceipt, "requestedModel" | "configuredModel" | "provider" | "oauthType"> | undefined;
-    // registry.resolve() firlatirsa receiptBase hic atanmaz, makbuz yazilmaz ve log
-    // hangi modelin istendigini soylemez -- "model_not_available" teshis edilemez olur.
-    // Istenen model, cozumlemeden ONCE yakalanir.
+    // If registry.resolve() throws, receiptBase is never assigned, no receipt is written and
+    // the log does not say which model was requested -- "model_not_available" becomes
+    // undiagnosable. The requested model is captured BEFORE resolution.
     let requestedModel: string | undefined;
     try {
         const { target, pathNonceValid } = routedTarget;
@@ -198,10 +198,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             });
             throw new RouterError("session_auth_required", "A valid local session header is required.", 401);
         }
-        // Faz 9 / Yol 4 -- MCP ucu. Kapinin ARKASINDA duruyor: buraya gelen her
-        // istek yukaridaki nonce kolundan gecmistir, yani saglayici ajani da ayni
-        // oturum sirrini tasimak zorunda. Ayri dinleyici, ayri port, yeni kimlik
-        // sinifi YOK (spec §6): kapi zaten kurulu ve negatif kontrollu.
+        // Phase 9 / Path 4 -- the MCP endpoint. It sits BEHIND the gate: every request that
+        // reaches here has passed the nonce arm above, so the provider agent must carry the
+        // same session secret too. There is NO separate listener, separate port, or new
+        // credential class (spec §6): the gate is already in place and has a negative control.
         const mcpMatch = /^\/mcp\/([A-Za-z0-9_-]{1,128})$/u.exec(target.pathname);
         if (mcpMatch !== null) {
             await handleMcp(request, response, options, mcpMatch[1] as string);
@@ -324,9 +324,9 @@ function sessionTarget(url: string | undefined, nonce: string): { readonly targe
     target.pathname = match[2] ?? "/";
     return { target, pathNonceValid: nonceMatches(nonce, supplied) };
 }
-// MCP ucu: JSON-RPC girer, JSON-RPC cikar. Araclari BU sunucu CALISTIRMAZ --
-// kopru cagriyi park eder, yanit Claude Code bir sonraki turda gonderdiginde
-// gelir. Yetki Claude Code tarafinda kalir (spec §6).
+// The MCP endpoint: JSON-RPC in, JSON-RPC out. THIS server does NOT RUN the tools -- the
+// bridge parks the call, and the answer arrives when Claude Code sends it on the next turn.
+// Authority stays on the Claude Code side (spec §6).
 async function handleMcp(request: IncomingMessage, response: ServerResponse, options: RouterServerOptions, sessionKey: string): Promise<void> {
     if (request.method !== "POST") {
         throw new RouterError("invalid_request", "The MCP endpoint accepts POST only.", 405);
@@ -336,8 +336,8 @@ async function handleMcp(request: IncomingMessage, response: ServerResponse, opt
     }
     const bridge = options.mcpBridge(sessionKey);
     if (bridge === undefined) {
-        // Adi konmus bir hata. Sessiz bir 404 ajani sonsuz yeniden denemeye iter,
-        // ve bu disaridan "saglayici yavas" gibi gorunur.
+        // A named error. A silent 404 pushes the agent into endless retries, and from the
+        // outside that looks like "the provider is slow".
         throw new RouterError("invalid_request", "No live agent session for this MCP endpoint. ONARIM: the session was swept or the router restarted; send the turn again so a fresh session starts.", 409);
     }
     const body = await readBody(request);
@@ -349,17 +349,17 @@ async function handleMcp(request: IncomingMessage, response: ServerResponse, opt
         writeJson(response, 400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
         return;
     }
-    // MCP 2025-06-18 toplu JSON-RPC istegini kaldirdi. Diziyi sessizce ilk ogeye
-    // indirgemek yerine ACIKCA reddediyoruz: yarim islenen bir toplu istek tam
-    // olarak §7.3 kapisinin saydigi seyi uretir -- eslesmeyen tool_result.
+    // MCP 2025-06-18 removed batched JSON-RPC requests. Rather than silently reducing the
+    // array to its first element we refuse EXPLICITLY: a half-processed batch produces
+    // exactly what the §7.3 gate counts -- an unmatched tool_result.
     if (Array.isArray(message)) {
         writeJson(response, 400, { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Batched JSON-RPC is not supported." } });
         return;
     }
     const answer = await bridge.handle(message);
     if (answer === undefined) {
-        // Bildirim: govde YOK. Govde yazmak JSON-RPC akisini desenkronize eder ve
-        // ajan dongusunun ortasinda durur.
+        // A notification: NO body. Writing a body desynchronises the JSON-RPC stream and
+        // stalls in the middle of the agent loop.
         response.writeHead(202);
         response.end();
         return;

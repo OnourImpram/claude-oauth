@@ -209,15 +209,15 @@ export async function readBoundedWorkspaceText(options: WorkspaceTextReadOptions
 }
 
 /**
- * ACP `fs/write_text_file` kolunun govdesi (2026-09-03).
+ * The body of the ACP `fs/write_text_file` arm (2026-09-03).
  *
- * NEDEN: etkilesimli grok rotasi `clientCapabilities.fs.writeTextFile = true` BEYAN
- * ediyordu ama karsiliginda hicbir kol KAYITLI DEGILDI -- protokolde soylenmis ama
- * tutulmamis bir soz. Ya beyan dusecekti ya kol yazilacakti; kol yazildi.
+ * WHY: the interactive grok route DECLARED `clientCapabilities.fs.writeTextFile = true` but NO
+ * arm was REGISTERED behind it -- a promise made in the protocol and not kept. Either the
+ * declaration had to fall or the arm had to be written; the arm was written.
  *
- * Sinirlar okuma kolunun ta kendisi: calisma alanindan kacan yol, korumali dizin/dosya
- * adlari (.git, .gemini, .ssh, secrets vb.) ve boyut tavani REDDEDILIR. Sembolik bag
- * ya da cok-baglantili bir dosyanin uzerine yazilmaz.
+ * The limits are exactly the read arm's: a path escaping the workspace, protected
+ * directory/file names (.git, .gemini, .ssh, secrets and so on) and the size ceiling are
+ * REFUSED. A symbolic link or a multiply-linked file is never overwritten.
  */
 export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptions): Promise<void> {
     const bytes = Buffer.byteLength(options.content, "utf8");
@@ -229,15 +229,15 @@ export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptio
         ? options.requestedPath
         : resolve(workspace, options.requestedPath);
 
-    // GUVENLIK (2026-09-03, otomatik denetim bulgusu -- bu kod ayni gun benim yazdigimdi):
-    // ilk surum kapsama kontrolunu COZULMEMIS yol uzerinde yapiyordu. Okuma kolu
-    // `realpath` ile cozuyor, yazma kolu cozmuyordu: sembolik bagli bir UST DIZIN
-    // (Windows'ta junction) calisma alanindan disari cikarabilirdi. Artik kapsama
-    // kontrolu daima COZULMUS yol uzerinde yapilir.
+    // SECURITY (2026-09-03, automated-audit finding -- this code was written by me the same
+    // day): the first version performed the containment check on the UNRESOLVED path. The read
+    // arm resolved with `realpath`, the write arm did not: a symlinked PARENT DIRECTORY (a
+    // junction on Windows) could lead outside the workspace. The containment check is now always
+    // performed on the RESOLVED path.
     const ensureInside = (real: string): string => {
         const pathFromWorkspace = relative(workspace, real);
-        // Calisma alaninin KENDISI: goreli yol bos dize olur ve korumali-yol denetimi
-        // onu yanlislikla reddeder. Kok, tanimi geregi iceridedir ve korumali degildir.
+        // The workspace ITSELF: the relative path becomes the empty string and the protected-path
+        // check would wrongly refuse it. The root is inside by definition and is not protected.
         if (pathFromWorkspace === "") return pathFromWorkspace;
         if (escapesWorkspace(pathFromWorkspace)) {
             throw new RouterError("unsupported_feature", "ACP attempted to write outside the allowed workspace.", 422);
@@ -265,9 +265,10 @@ export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptio
         return;
     }
 
-    // Hedef yok: EN DERIN VAR OLAN atayi coz, onun icerde oldugunu dogrula, kalan
-    // dizinleri ancak ondan sonra yarat. Ayrica ata zincirinde sembolik bag/junction
-    // varsa reddet -- kontrol ile yazma arasindaki TOCTOU penceresini kapatir.
+    // The target does not exist: resolve the DEEPEST EXISTING ancestor, verify that it is inside,
+    // and only then create the remaining directories. Also refuse if there is a symbolic
+    // link/junction anywhere in the ancestor chain -- this closes the TOCTOU window between the
+    // check and the write.
     let ancestor = dirname(requested);
     const missing: string[] = [];
     for (;;) {
@@ -290,7 +291,7 @@ export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptio
     }
     const realAncestor = await realpath(ancestor);
     ensureInside(realAncestor);
-    // Nihai yol, COZULMUS atanin altinda yeniden kurulur; istekteki ham yol degil.
+    // The final path is rebuilt under the RESOLVED ancestor; not the raw path from the request.
     const target = resolve(realAncestor, relative(ancestor, requested));
     ensureInside(target);
     await mkdir(dirname(target), { recursive: true });

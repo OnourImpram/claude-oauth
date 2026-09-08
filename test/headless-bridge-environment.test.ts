@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAntigravityHeadless, type HeadlessProcessRequest } from "../src/antigravity/headless-bridge.js";
 
-// agy'ye giden ortam. 2026-09-05: agy her print baslatilisinda arka planda kendini guncelliyor ve
-// civi (install-lock antigravity.sha256) dusuyordu; IsReadOnly bayragi yeniden-adlandirmayi
-// durdurmaz. Olculen calisan onlem AGY_CLI_DISABLE_AUTO_UPDATE="true" (deger "1" ISE YARAMAZ --
-// deneyde "1" ile guncelledi). Bu test o degiskenin agy surecine TAM DEGERIYLE ulastigini sinar;
-// negatif kol: degisken yanlis degerle ya da hic konmadiginda test kirmizi olur.
+// The environment that goes to agy. 2026-09-05: agy updated itself in the background on
+// every print launch and the pin (install-lock antigravity.sha256) dropped; the IsReadOnly
+// flag does not stop the rename. The measured working countermeasure is
+// AGY_CLI_DISABLE_AUTO_UPDATE="true" (the value "1" DOES NOT WORK -- in the experiment it
+// still updated with "1"). This test checks that the variable reaches the agy process with
+// its EXACT VALUE; negative arm: the test goes red when the variable carries the wrong
+// value or is not set at all.
 async function agyOrtami(source: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
     const home = mkdtempSync(join(tmpdir(), "agy-env-"));
     let seen: HeadlessProcessRequest | undefined;
@@ -23,7 +25,7 @@ async function agyOrtami(source: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> 
             environment: source,
             processRunner: async (request) => {
                 seen = request;
-                // agy stream-json: tek satirlik NDJSON, terminal "result" olayi (parseResponse'un bekledigi sekil)
+                // agy stream-json: single-line NDJSON, terminal "result" event (the shape parseResponse expects)
                 return { exitCode: 0, stdout: JSON.stringify({ event: "result", result: { status: "success", response: "OK" } }) + "\n", stderr: "" };
             },
         });

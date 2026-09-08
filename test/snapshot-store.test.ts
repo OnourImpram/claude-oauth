@@ -6,10 +6,11 @@ import { after, before, describe, it } from "node:test";
 import type { ModelSnapshot } from "../src/domain/contracts.js";
 import { readSnapshot, readSnapshotOrDefault, seedSnapshot, writeSnapshot } from "../src/runtime/snapshot-store.js";
 
-// Snapshot, /model listesinin tek kaynagidir. Iki terminal ayni anda acildiginda ilk
-// tohumlama yarisiyor; Windows'ta bu EBUSY olarak patliyordu. Ayrica snapshot'in
-// 4-modelli tabana GERILEMESI bu olayin gorunur belirtisiydi -- yazma yolunun atomik
-// olmasi ve okuma yolunun bozuk dosyada tabana dusmesi bu yuzden onemli.
+// The snapshot is the single source of the /model list. When two terminals open at the
+// same time the first seeding races; on Windows that blew up as EBUSY. The snapshot
+// REGRESSING to the 4-model baseline was the visible symptom of that event -- which is
+// why the write path must be atomic and the read path must fall back to the baseline on
+// a corrupt file.
 
 let directory = "";
 const defaultPath = (): string => join(directory, "models.default.json");
@@ -77,8 +78,9 @@ describe("readSnapshotOrDefault", () => {
         strictEqual((await readSnapshotOrDefault(broken, defaultPath())).source, "pinned-install-baseline");
     });
 
-    // REGRESYON: bozuk bir snapshot dosyasi `claude`'u ham SyntaxError ile acilmaz
-    // hale getiriyordu. Artik tabana duser -- ama sessizce degil, yapilandirilmis uyariyla.
+    // REGRESSION: a corrupt snapshot file made `claude` unable to start, with a raw
+    // SyntaxError. It now falls back to the baseline -- but not silently, with a
+    // structured warning.
     it("bozuk snapshot'i olan seedSnapshot yeniden tohumlar, firlatmaz", async () => {
         const broken = join(directory, "bozuk-tohum.json");
         await writeFile(broken, "{ yarim yazilmis", "utf8");
@@ -111,7 +113,7 @@ describe("seedSnapshot", () => {
         strictEqual((await readSnapshot(runtimePath())).source, "live-provider-refresh");
     });
 
-    // REGRESYON: iki terminal ayni anda acilinca ilk tohumlama yarisiyordu (Windows EBUSY).
+    // REGRESSION: when two terminals opened at the same time the first seeding raced (Windows EBUSY).
     it("es zamanli sekiz tohumlama yarismaz ve dosyayi bozmaz", async () => {
         const racing = join(directory, "yaris.json");
         await Promise.all(Array.from({ length: 8 }, async () => { await seedSnapshot(racing, defaultPath()); }));
@@ -131,10 +133,11 @@ describe("seedSnapshot", () => {
         strictEqual(parsed.source.startsWith("kosum-"), true);
     });
 
-    // NEGATIF KONTROL: yukaridaki test, yazma yolundaki sinirli rename yeniden-denemesi
-    // sayesinde yesil. O yeniden-deneme YALNIZ gecici cakisma icindir -- kalici bir hatayi
-    // yutarsa, kapinin yesili anlamini kaybeder. Hedef bir DIZIN oldugunda rename asla
-    // basarili olamaz; burada beklenen sey hatanin bastirilmasi degil, FIRLATILMASIDIR.
+    // NEGATIVE CONTROL: the test above is green thanks to the bounded rename retry on the
+    // write path. That retry is ONLY for a transient collision -- if it swallows a
+    // permanent error, the gate's green loses its meaning. When the target is a DIRECTORY
+    // the rename can never succeed; what is expected here is not that the error is
+    // suppressed but that it is THROWN.
     it("kalici rename hatasini yutmaz", async () => {
         const blocked = join(directory, "engel-dizini");
         await mkdir(blocked, { recursive: true });

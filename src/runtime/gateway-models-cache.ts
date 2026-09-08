@@ -1,28 +1,29 @@
-// gateway-models-cache.ts -- Claude Code'un picker onbellegini ROUTER yazar.
+// gateway-models-cache.ts -- the ROUTER writes Claude Code's picker cache.
 //
-// NEDEN VAR (2026-09-02, olculdu)
-// Claude Code /model listesi icin ~/.claude/cache/gateway-models.json okur. O
-// dosyayi normalde kendi kesfi yazar: ANTHROPIC_BASE_URL'e GET /v1/models atar ve
-// sonucu BASE URL'E ANAHTARLAYARAK saklar. Iki kusur birlesince picker bosaliyor:
-//   (1) Sabit port (8791) doluysa router efemeral porta duser; kesif onbellegi o
-//       portla yazar; router olunce onbellek OLU bir adrese civili kalir.
-//   (2) Kesif KIMLIK ister (ANTHROPIC_AUTH_TOKEN / apiKeyHelper / API key). Kimlik
-//       bilerek verilmiyor -- verildiginde Claude Code kendi OAuth tokenini birakip
-//       onu Bearer olarak gonderiyor ve ana yol 401 ile kiriliyor (2026-08-31 dersi).
-//       Yani bayat onbellek KENDILIGINDEN yenilenemez.
-// Olculen durum: baseUrl=http://127.0.0.1:51654 (olu), modeller icinde ama
-// ulasilamaz; router.log'da loopback_pinned_port_unavailable x5.
+// WHY IT EXISTS (2026-09-02, measured)
+// Claude Code reads ~/.claude/cache/gateway-models.json for the /model list. Normally its
+// own discovery writes that file: it sends GET /v1/models to ANTHROPIC_BASE_URL and stores
+// the result KEYED BY THE BASE URL. Two defects combine to empty the picker:
+//   (1) If the fixed port (8791) is taken, the router falls back to an ephemeral port;
+//       discovery writes the cache with that port; once the router dies the cache stays
+//       nailed to a DEAD address.
+//   (2) Discovery demands a CREDENTIAL (ANTHROPIC_AUTH_TOKEN / apiKeyHelper / API key). The
+//       credential is deliberately withheld -- when it is supplied, Claude Code drops its own
+//       OAuth token and sends it as Bearer instead, and the main path breaks with 401 (the
+//       2026-08-31 lesson). So a stale cache CANNOT refresh ITSELF.
+// Measured state: baseUrl=http://127.0.0.1:51654 (dead), the models present in it but
+// unreachable; loopback_pinned_port_unavailable x5 in router.log.
 //
-// COZUM: kesfin yazacagi dosyayi router kendisi yazar -- Claude'u baslatmadan
-// hemen once, FIILEN bagli oldugu adresle ve kendi model listesiyle. Kimlik
-// gerekmez, olu adres kendiliginden onarilir, efemeral port picker icin zararsiz
-// hale gelir. Icerik, discoveryPayload()'un birebir izdusumudur: kesif ne
-// yazacaksa o.
+// SOLUTION: the router writes the file discovery would have written itself -- immediately
+// before starting Claude, with the address it is ACTUALLY bound to and its own model list. No
+// credential is needed, a dead address repairs itself, and an ephemeral port becomes harmless
+// for the picker. The content is an exact projection of discoveryPayload(): whatever
+// discovery would have written.
 //
-// SINIR: bu dosya Claude Code'un onbellegidir, sozlesmesi degil. Sema olculen
-// gercek dosyadan alindi ({baseUrl, fetchedAt, models:[{id, display_name}]});
-// Claude Code semayi degistirirse readGatewayModelsCache "unreadable" doner ve
-// doctor bunu ADIYLA raporlar -- sessiz bir bos liste degil.
+// LIMIT: this file is Claude Code's cache, not its contract. The schema was taken from the
+// measured real file ({baseUrl, fetchedAt, models:[{id, display_name}]}); if Claude Code
+// changes the schema, readGatewayModelsCache returns "unreadable" and doctor reports it BY
+// NAME -- not as a silent empty list.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -44,7 +45,7 @@ export type GatewayModelsCacheStatus =
     | { readonly status: "missing"; readonly path: string }
     | { readonly status: "unreadable"; readonly path: string; readonly reason: string };
 
-/** Claude Code'un yapilandirma koku: CLAUDE_CONFIG_DIR varsa o, yoksa ~/.claude. */
+/** Claude Code's configuration root: CLAUDE_CONFIG_DIR when set, otherwise ~/.claude. */
 export function claudeConfigDirectory(environment: NodeJS.ProcessEnv = process.env): string {
     const explicit = environment["CLAUDE_CONFIG_DIR"];
     if (explicit !== undefined && explicit.trim() !== "")
@@ -56,7 +57,7 @@ export function gatewayModelsCachePath(environment: NodeJS.ProcessEnv = process.
     return join(claudeConfigDirectory(environment), "cache", "gateway-models.json");
 }
 
-/** discoveryPayload() ciktisini onbellek satirlarina izdusur: kesif ne yazacaksa o. */
+/** Projects discoveryPayload()'s output onto cache rows: whatever discovery would write. */
 export function projectDiscoveryPayload(payload: Readonly<Record<string, unknown>>): GatewayModelsCacheEntry[] {
     const data = payload["data"];
     if (!Array.isArray(data))
@@ -80,9 +81,9 @@ function normalizeBaseUrl(baseUrl: string): string {
 }
 
 /**
- * Onbellegi ATOMIK yazar (gecici dosya + rename): Claude Code ayni anda okuyorsa
- * yarim bir JSON gormez. Yazma hatasi CAGIRANA doner -- launcher bunu loglar ama
- * baslatmayi durdurmaz; picker onbellegi ana yolun bedeli olamaz.
+ * Writes the cache ATOMICALLY (temporary file + rename): if Claude Code is reading at the
+ * same moment it never sees half a JSON document. A write error is returned to the CALLER --
+ * the launcher logs it but does not stop startup; the picker cache cannot cost the main path.
  */
 export async function writeGatewayModelsCache(
     path: string,
@@ -126,8 +127,8 @@ export async function readGatewayModelsCache(path: string): Promise<GatewayModel
 }
 
 /**
- * Doctor kolu: onbellek CANLI adrese esit mi? "stale" picker'in bos oldugu
- * durumdur; "missing" hic kesif kosmadigi; "unreadable" sema degistigi.
+ * Doctor arm: does the cache match the LIVE address? "stale" is the state in which the picker
+ * is empty; "missing" that discovery never ran; "unreadable" that the schema changed.
  */
 export async function gatewayModelsCacheStatus(path: string, liveBaseUrl: string): Promise<GatewayModelsCacheStatus> {
     let cache: GatewayModelsCache | undefined;
@@ -146,17 +147,18 @@ export async function gatewayModelsCacheStatus(path: string, liveBaseUrl: string
 }
 
 /**
- * A1/A3 kurali (plan 2026-09-02): onbellek YALNIZ sabit porta baglaninca yazilir.
- * Claude Code tek bir dosya tutar; efemeral porttaki ikinci oturum yazarsa sabit
- * porttaki oturumun picker'ini ezer. Ikinci oturum yazmaz: orada harici modeller
- * kimlikleriyle (--model ...) yine ulasilabilir, yalniz /model listesi bos kalir ve
- * bu, gateway_models_cache_skipped olayiyla ADIYLA loglanir -- sessiz degil.
+ * A1/A3 rule (plan of 2026-09-02): the cache is written ONLY when bound to the fixed port.
+ * Claude Code keeps a single file; if a second session on an ephemeral port writes it, it
+ * overwrites the picker of the session on the fixed port. The second session does not write:
+ * there the external models are still reachable by their identities (--model ...), only the
+ * /model list stays empty, and that is logged BY NAME through the
+ * gateway_models_cache_skipped event -- not silently.
  */
 export function shouldWriteGatewayModelsCache(livePort: number, preferredPort: number): boolean {
     return livePort === preferredPort;
 }
 
-/** Doctor'un pickerCache kolu: dedektor caresiyle gelir; "matches" care tasimaz. */
+/** Doctor's pickerCache arm: a detector ships with its remedy; "matches" carries none. */
 export function gatewayModelsCacheRemedy(status: GatewayModelsCacheStatus): string | undefined {
     switch (status.status) {
         case "matches":

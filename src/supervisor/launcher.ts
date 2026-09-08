@@ -56,16 +56,16 @@ const patchedModelAliases = new Map([...OPENAI_MODEL_CONTRACTS, ...AGENT_MODEL_C
     [model.alias, model.alias],
 ]));
 const nativeOAuthAgentTools = ["Read", "Write", "Edit", "Grep", "Glob", "PowerShell"];
-// Ajanin Claude Code'a soyleyecegi model dizgisi moda baglidir: yamali picker
-// alias bekler ("sol"), native ag gecidi ise TAM snapshot kimligini bekler
-// ("anthropic-openai-gpt-5.6-sol") -- native binary alias'lari tanimaz.
+// The model string the agent will hand to Claude Code depends on the mode: the patched
+// picker expects an alias ("sol"), while the native gateway expects the FULL snapshot
+// identity ("anthropic-openai-gpt-5.6-sol") -- the native binary does not recognise aliases.
 function clientModelFor(mode: ClaudeClientMode, alias: string, id: string): string {
     return mode === "native-gateway" ? id : alias;
 }
-// Ad ARTIK TURETILIYOR. Onceki hali `alias === "gemini" ? "gemini-delege" :
-// "opus-google-delege"` idi: iki Google modeliyle calisiyor, ucuncusu eklenince
-// iki ajan ayni adi aliyor ve Object.fromEntries birini sessizce eziyordu.
-// Ayrica filtre `provider === "google"` oldugu icin grok-delege HIC uretilmiyordu.
+// The name is NOW DERIVED. Its previous shape was `alias === "gemini" ? "gemini-delege" :
+// "opus-google-delege"`: that worked with two Google models, but once a third was added two
+// agents took the same name and Object.fromEntries silently overwrote one of them.
+// Also, because the filter was `provider === "google"`, grok-delege was NEVER produced.
 function oauthAgentContractsFor(mode: ClaudeClientMode): readonly OAuthAgentContract[] {
     return [
         {
@@ -108,7 +108,7 @@ function oauthAgentContractsFor(mode: ClaudeClientMode): readonly OAuthAgentCont
     ];
 }
 function patchedModelAlias(modelId: string, mode: ClaudeClientMode = "patched-shadow"): string {
-    // Native yolda yeniden yazim YOKTUR: tam kimlik oldugu gibi gecer.
+    // On the native path there is NO rewriting: the full identity passes through as-is.
     if (mode === "native-gateway")
         return modelId;
     return patchedModelAliases.get(modelId) ?? modelId;
@@ -278,27 +278,28 @@ export function requestedModelArgument(args: readonly string[]): string | undefi
 }
 export function claudeRouterEnvironment(baseUrl: string, nonce: string, source: NodeJS.ProcessEnv = process.env, requestedModel?: string): NodeJS.ProcessEnv {
     const environment = sanitizedClaudeEnvironment(source);
-    // SABIT taban URL. Nonce ARTIK YOLDA DEGIL, yalnizca baslikta -- router iki
-    // kanali da kabul eder (olculdu: baslik tek basina HTTP 200, ikisi de yokken
-    // 401). Sir ayni sirdir, yalnizca tasindigi yer degisti; guvenlik zayiflamaz.
+    // FIXED base URL. The nonce is NO LONGER IN THE PATH, only in the header -- the router
+    // accepts both channels (measured: the header alone gives HTTP 200; with neither present,
+    // 401). The secret is the same secret, only where it is carried changed; security is not
+    // weakened.
     //
-    // Sebep: Claude Code ag gecidi model kesfini ANTHROPIC_BASE_URL'e BIREBIR
-    // anahtarlar. Yolda oturuma ozel bir nonce tasindigi surece taban URL her
-    // oturumda degisir, onbellek hicbir zaman eslesmez ve /model listesi harici
-    // modelleri HIC gostermez.
+    // Reason: Claude Code keys gateway model discovery to ANTHROPIC_BASE_URL EXACTLY. As long
+    // as a session-specific nonce is carried in the path, the base URL changes every session,
+    // the cache never matches, and the /model list NEVER shows external models.
     environment["ANTHROPIC_BASE_URL"] = baseUrl.replace(/\/$/u, "");
     environment["ANTHROPIC_CUSTOM_HEADERS"] = `${SESSION_HEADER}: ${nonce}`;
     environment["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1";
-    // ANTHROPIC_AUTH_TOKEN BURAYA KONULAMAZ. Kesif onsuz caliyor gibi gorunuyordu --
-    // binary "skipped: no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API key)"
-    // diyor -- ama olculdu: konuldugunda Claude Code kendi OAuth tokenini BIRAKIP bu degeri
-    // Authorization: Bearer olarak gonderiyor, AnthropicAdapter onu yukari akisa aynen
-    // iletiyor ve Anthropic "401 Invalid bearer token" donuyor. Yani Claude ana yolu kirilir
-    // ve /login bunu duzeltemez, cunku sorun oturumda degil basliktadir.
+    // ANTHROPIC_AUTH_TOKEN CANNOT BE PUT HERE. Discovery looked like it was failing without it
+    // -- the binary says "skipped: no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API
+    // key)" -- but it was measured: when it is set, Claude Code DROPS its own OAuth token and
+    // sends this value as Authorization: Bearer, AnthropicAdapter forwards it upstream verbatim,
+    // and Anthropic returns "401 Invalid bearer token". That is, the Claude main path breaks and
+    // /login cannot fix it, because the problem is not in the session but in the header.
     //
-    // Kesif zaten bir kez kostu ve ~/.claude/cache/gateway-models.json'i sabit taban URL ile
-    // yazdi; picker onbellegi okur, kesfi her oturumda yeniden kosturmaz. Kimlik gerektiren
-    // kanal, bedeli Claude ana yolu olan bir kanaldir -- odenmez.
+    // Discovery has already run once and wrote ~/.claude/cache/gateway-models.json with the
+    // fixed base URL; the picker reads the cache and does not re-run discovery every session. A
+    // channel that requires a credential is a channel whose price is the Claude main path -- and
+    // that price is not paid.
     environment["NO_PROXY"] = "127.0.0.1,localhost";
     delete environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"];
     // Per-model auto-compaction. Deliberately scoped to external models: for a Claude
@@ -338,15 +339,15 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
     requireInstallChecks(installChecks, ["node", "claude", "claude-shadow", "clodex"]);
     const defaultSnapshot = resolve(root, "config", "models.default.json");
     await seedSnapshot(paths.snapshot, defaultSnapshot);
-    // Native satirlar pinli baseline'dan, harici satirlar calisan snapshot'tan (A7).
+    // Native rows come from the pinned baseline, external rows from the running snapshot (A7).
     const snapshot = withPinnedNativeModels(await readSnapshotOrDefault(paths.snapshot, defaultSnapshot), await readSnapshot(defaultSnapshot));
     const conditionalComponents: InstallComponent[] = [
         ...(snapshot.models.some((model) => model.provider === "google") ? ["antigravity" as const] : []),
         ...(snapshot.models.some((model) => model.provider === "xai") ? ["grok" as const] : []),
     ];
-    // A4: yan saglayicinin civi ihlali ana yolu KAPATMAZ (install-lock.ts basligi).
-    // Ihlal uyariya duser, o saglayicinin modelleri bu oturumda servis edilmez ve
-    // picker onbellegi de onlari listelemez; `claude` acilir.
+    // A4: a side provider's nail violation does NOT CLOSE the main path (see the install-lock.ts
+    // header). The violation drops to a warning, that provider's models are not served this
+    // session and the picker cache does not list them either; `claude` still starts.
     const sideDrift = sideProviderInstallDrift(installChecks, conditionalComponents);
     for (const drift of sideDrift) {
         writeSafeLog({
@@ -358,11 +359,11 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
     }
     const disabledProviders = new Set(sideDrift.map((drift) => drift.provider));
     const grokBinary = expandLockedPath(installLock.grok.executable, environment);
-    // Faz 9 -- TAVUK-YUMURTA. Bu defter saglayici setinden ONCE kurulmak
-    // zorunda (adaptorler ona baglanacak), ama MCP ucunun URL'i ve oturum
-    // nonce'u router BASLAYINCA belli olur. Ikisi de LAZY okunur; enjeksiyon
-    // yapilmadan bir oturum acilirsa mcpUrlFor sessiz bozuk bir URL degil,
-    // adi konmus bir hata firlatir.
+    // Phase 9 -- CHICKEN AND EGG. This registry has to be built BEFORE the provider set (the
+    // adapters will bind to it), but the MCP endpoint's URL and the session nonce are only
+    // known ONCE the router STARTS. Both are read LAZILY; if a session is opened before the
+    // injection happens, mcpUrlFor throws a named error rather than producing a silently
+    // broken URL.
     let routerBaseUrl = "";
     let routerNonce = "";
     const grokSessions = new AgentSessionRegistry({
@@ -399,16 +400,17 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
             preferredPort: preferredLoopbackPort(environment),
             mcpBridge: (sessionKey) => grokSessions.bridgeFor(sessionKey),
         });
-        // Kapinin arkasindaki uc ancak SIMDI adreslenebilir.
+        // The endpoint behind the gate becomes addressable only NOW.
         routerBaseUrl = router.baseUrl;
-        // Picker onbellegini ROUTER yazar (gateway-models-cache.ts basligi). Kesif
-        // kimlik ister ve kimlik ana yolu kirar; router kimliksiz, fiilen bagli
-        // oldugu adresle yazar. Yazamazsa loglar ve DEVAM eder: picker'in bos
-        // olmasi bir kusurdur, claude'un acilmamasi bir kirilma.
+        // The ROUTER writes the picker cache (see the gateway-models-cache.ts header). Discovery
+        // demands a credential and a credential breaks the main path; the router writes without
+        // one, using the address it is actually bound to. If it cannot write, it logs and
+        // CONTINUES: an empty picker is a defect, `claude` not starting is a breakage.
         const gatewayCachePath = gatewayModelsCachePath(environment);
         const pinnedPort = preferredLoopbackPort(environment);
         if (!shouldWriteGatewayModelsCache(router.port, pinnedPort)) {
-            // A3: efemeral porttaki oturum, sabit porttaki oturumun picker'ini ezmez.
+            // A3: a session on an ephemeral port must not overwrite the picker of the session on
+            // the fixed port.
             writeSafeLog({
                 event: "gateway_models_cache_skipped",
                 level: "warn",
@@ -447,8 +449,8 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         }
         finally {
             await ipc?.close().catch(() => undefined);
-            // Terk edilmis ACP surecleri surecagaci sizintisidir; kapanista
-            // park edilmis cagrilar da serbest birakilir.
+            // Abandoned ACP processes are a process-tree leak; on shutdown the parked calls are
+            // released as well.
             grokSessions.closeAll("router shutdown");
             await router.close().catch(() => undefined);
             await removeSupervisorState(paths.state).catch(() => undefined);

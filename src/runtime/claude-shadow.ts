@@ -473,7 +473,7 @@ export async function ensureClaudeShadow(options: EnsureClaudeShadowOptions): Pr
         // decide whether to rewrite the manifest file. Editing the local patch --
         // adding a model row, for instance -- therefore never took effect: the stale
         // shadow was reused, verifyShadowModelSurface then refused it, and the system
-        // became unlaunchable while its own ONARIM line pointed at a command that does
+        // became unlaunchable while its own FIX line pointed at a command that does
         // not repatch. A stale manifest now forces a pristine reset and a real repatch.
         if (beforeSha256 !== nativeSha256 && !manifestIsCurrent) {
             await installPristineTarget(nativeExecutable, nativeSha256, target, paths, true);
@@ -626,10 +626,10 @@ export async function prepareEffectiveInstallation(root: string, environment: No
     }
     const clientMode = resolveClaudeClientMode(baseLock, environment);
     if (clientMode === "native-gateway") {
-        // Yamalama YOK. Istemci, imzali native binary'nin ta kendisidir; harici
-        // modeller Claude Code'un kendi ag gecidi model kesfi ve tam model
-        // kimlikleri uzerinden gelir. Clodex bu yolda hic calistirilmaz, bu yuzden
-        // clodex paket kontrolu de bir on kosul degildir.
+        // NO patching. The client is the signed native binary itself; external models
+        // arrive through Claude Code's own gateway model discovery and their full model
+        // identities. Clodex is never run on this path, so the clodex package check is not
+        // a precondition either.
         const nativeExecutable = expandLockedPath(baseLock.claude.executable, environment);
         const nativeSha256 = await sha256File(nativeExecutable);
         const nativeLock: InstallLock = {

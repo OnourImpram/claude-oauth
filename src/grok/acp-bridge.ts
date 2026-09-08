@@ -36,9 +36,9 @@ export interface GrokProcessEnvironmentOptions {
     readonly cwd: string;
     readonly environment?: NodeJS.ProcessEnv;
     /**
-     * 2026-09-03: `/model` ile secilen ETKILESIMLI oturum mu?
-     * true ise grok tam yetkili calisir (izin kolu allow, yazma acik).
-     * false/undefined -> tek-atislik DELEGE yolu, salt okunur kalir.
+     * 2026-09-03: is this an INTERACTIVE session selected through `/model`?
+     * If true, grok runs with full authority (the permission arm allows, writing is on).
+     * false/undefined -> the one-shot DELEGATION path, which stays read-only.
      */
     readonly interactive?: boolean;
 }
@@ -407,13 +407,13 @@ function childStream(child: ChildProcess): acp.Stream {
     child.stderr?.resume();
     return acp.ndJsonStream(Writable.toWeb(child.stdin) as WritableStream<Uint8Array>, Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>);
 }
-// Grok Build 1.0.13 katalogu AYRI BIR METOTTA SUNMAZ; `initialize` yanitinin
-// `_meta.modelState` alanina gomer. Onceki `x.ai/models/list` cagrisi artik
-// -32601 Method not found doner.
+// Grok Build 1.0.13 does NOT EXPOSE the catalog IN A SEPARATE METHOD; it buries it in
+// the `_meta.modelState` field of the `initialize` response. The former `x.ai/models/list`
+// call now returns -32601 Method not found.
 //
-// Alan adlari da degisti: `id` -> `modelId`, `meta` -> `_meta`. Ikisi de kabul
-// ediliyor cunku bu yeniden adlandirmanin ta kendisi kopruyu kirmisti; asil siki
-// kontrol (baglam penceresi esitligi) korunuyor.
+// The field names changed too: `id` -> `modelId`, `meta` -> `_meta`. Both are accepted,
+// because that very renaming is what broke the bridge; the real strict check (context
+// window equality) is preserved.
 function modelStateOf(initializeResponse: unknown): unknown {
     if (!isRecord(initializeResponse))
         return undefined;
@@ -505,9 +505,9 @@ export async function inspectGrokModels(options: GrokCatalogOptions): Promise<re
         }
         if (error instanceof RouterError)
             throw error;
-        // JSON-RPC -32601 "Method not found" bir kimlik dogrulama sorunu DEGILDIR;
-        // koprunun bekledigi ACP yuzeyi degismistir. Ikisini ayni etiketle
-        // raporlamak bir kez "login yapin" diyen yanlis bir teshise yol acti.
+        // JSON-RPC -32601 "Method not found" is NOT an authentication problem; the ACP
+        // surface the bridge expects has changed. Reporting the two under the same label
+        // once led to a wrong diagnosis that said "log in".
         const rpcCode: unknown = isRecord(error) ? error["code"] : undefined;
         if (rpcCode === -32601) {
             throw new RouterError("upstream_protocol_error", "Grok ACP no longer exposes the expected model-catalog surface. ONARIM: re-inspect the initialize response and update src/grok/acp-bridge.ts.", 502, { cause: error });
@@ -617,36 +617,36 @@ export async function runGrokAcp(options: GrokAcpOptions): Promise<GrokAcpResult
 }
 
 // ---------------------------------------------------------------------------
-// Faz 9 / Yol 4 -- uzun-omurlu ACP oturumu.
+// Phase 9 / Path 4 -- long-lived ACP session.
 //
-// runGrokAcp TEK ATISLIK: baglanir, sorar, kapatir. Bir arac dongusu tur
-// sinirini boyle asamaz, cunku Claude Code her turda AYRI bir HTTP istegi
-// gonderir. Bu fonksiyon ayni islemi yapar ama BEKLEMEZ: tutamaci hemen
-// dondurur, boylece oturum defteri sureci ve baglantiyi canli tutabilir.
+// runGrokAcp is ONE-SHOT: it connects, asks, closes. A tool loop cannot cross the turn
+// boundary that way, because Claude Code sends a SEPARATE HTTP request for every turn.
+// This function does the same work but does NOT WAIT: it returns the handle immediately,
+// so the session registry can keep the process and the connection alive.
 // ---------------------------------------------------------------------------
 
 export interface GrokAcpSessionOptions extends GrokAcpOptions {
-    /** MCP sunuculari. Faz 9'da tek eleman: router uzerindeki arac koprusu. */
+    /** MCP servers. In Phase 9 there is a single element: the tool bridge on the router. */
     readonly mcpServers?: readonly unknown[];
-    /** Kopruden yayimlanan arac adlari; izin kolu bunlari tanir. */
+    /** Tool names published by the bridge; the permission arm recognises these. */
     readonly bridgedToolNames?: readonly string[];
 }
 
 export interface GrokAcpSession {
-    /** Ajanin prompt cagrisi kendiliginden bitince cozulur. */
+    /** Resolves when the agent's prompt call finishes on its own. */
     readonly done: Promise<void>;
     text(): string;
     cancel(reason: string): void;
 }
 
 /**
- * Kopruden yayimlanan bir araca ait izin istegi mi?
+ * Is this a permission request for a tool published by the bridge?
  *
- * [DOGRULANMADI] ACP ajaninin MCP arac cagrisi icin KENDI izin akisini
- * isletip isletmedigi, isletiyorsa istegin hangi alaninda arac adini
- * tasidigi CANLI KOSUMDA olculecek. O zamana kadar bu kol FAIL-CLOSED:
- * adi taniyamazsa reddeder. Yanlis tarafa acilmis bir izin kapisi, ajanin
- * kendi yazma araclarini da serbest birakirdi.
+ * [UNVERIFIED] Whether the ACP agent runs its OWN permission flow for an MCP tool call,
+ * and if it does, which field of the request carries the tool name, will be MEASURED IN A
+ * LIVE RUN. Until then this arm is FAIL-CLOSED: if it cannot recognise the name it
+ * refuses. A permission gate opened on the wrong side would also let loose the agent's
+ * own write tools.
  */
 function namesBridgedTool(params: unknown, bridged: readonly string[]): boolean {
     if (bridged.length === 0) return false;
@@ -657,9 +657,9 @@ function namesBridgedTool(params: unknown, bridged: readonly string[]): boolean 
 export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSession {
     const implementation = new ReadOnlyGrokClient(options.cwd);
     const bridged = options.bridgedToolNames ?? [];
-    // BULGU 2 (adversaryal inceleme). cancel() cocuk SPAWN EDILMEDEN once
-    // cagrilabilir; o durumda eski hal hicbir sey yapmaz ve IIFE cocugu
-    // yine de baslatirdi -- oldurulemeyen bir surec, ve kapanmayan router.
+    // FINDING 2 (adversarial review). cancel() can be called BEFORE the child is SPAWNED;
+    // in the old shape it then did nothing and the IIFE would still start the child --
+    // a process that cannot be killed, and a router that does not shut down.
     let iptalEdildi = false;
     let child: ChildProcess | undefined;
     let detach: (() => void) | undefined;
@@ -671,7 +671,7 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
         if (iptalEdildi) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled before start.", 504);
         const environment = await prepareGrokProcessEnvironment({ ...options, interactive: true });
         child = spawnGrok(options, environment, options.model);
-        // Yaris: cancel() spawn ile bu satir arasinda gelmis olabilir.
+        // Race: cancel() may have arrived between the spawn and this line.
         if (iptalEdildi) {
             child.kill();
             throw new RouterError("upstream_timeout", "Grok ACP session was cancelled during start.", 504);
@@ -682,10 +682,10 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
             await acp
                 .client({ name: "hezarfen-claude-oauth" })
                 .onRequest(acp.methods.client.session.requestPermission, (context) => {
-                    // 2026-09-03: etkilesimli oturumda grok tam calisan bir modeldir.
-                    // Kopru artik varsayilan olarak REDDETMEZ; allow varsa onu secer.
-                    // Kopru bir izin katmani DEGILDIR -- gercek sinir Claude Code'un
-                    // kendi izin sistemi (bkz. bridged arac kolu asagida korunuyor).
+                    // 2026-09-03: in an interactive session grok is a fully working model.
+                    // The bridge no longer REFUSES by default; if an allow option exists it
+                    // selects it. The bridge is NOT a permission layer -- the real boundary is
+                    // Claude Code's own permission system (see the bridged tool arm kept below).
                     void bridged;
                     const allowed = context.params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always");
                     if (allowed !== undefined) {
@@ -699,8 +699,9 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
                 .connectWith(childStream(child), async (context) => {
                     await context.request(acp.methods.agent.initialize, {
                         protocolVersion: acp.PROTOCOL_VERSION,
-                        // 2026-09-03: etkilesimli oturum tam yetkili. Yazma izni burada
-                        // aciliyor; sinir Claude Code'un KENDI izin katmani, bu kopru degil.
+                        // 2026-09-03: the interactive session has full authority. Write permission
+                        // is opened here; the boundary is Claude Code's OWN permission layer, not
+                        // this bridge.
                         clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
                     });
                     initialized = true;
@@ -741,10 +742,10 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
 }
 
 /**
- * Faz 9 -- kopruyu ACP'nin bekledigi MCP sunucu tanimina cevirir.
+ * Phase 9 -- converts the bridge into the MCP server definition ACP expects.
  *
- * Basliga oturum nonce'u konur; ayni sir, ayni kapi. URL'e DEGIL basliga,
- * cunku URL'ler log'lanir.
+ * The session nonce goes into a header; same secret, same gate. Into the header and NOT
+ * the URL, because URLs get logged.
  */
 export function mcpHttpServer(name: string, url: string, headers: Readonly<Record<string, string>>): Record<string, unknown> {
     return {

@@ -1,11 +1,11 @@
-// secret-scan.mjs -- kaynak agacinda sir-benzeri deger arar.
+// secret-scan.mjs -- looks for secret-shaped values in the source tree.
 //
-// ONARIM: bir bulgu ciktida KONUM ve TUR olarak raporlanir, DEGER asla basilmaz.
-// Bulguyu ac, degeri env degiskenine ya da 06-Altyapi/secrets/ altina tasi, kaynakta
-// yerine process.env okumasi birak, sonra bu taramayi yeniden kostur.
+// FIX: a finding is reported as LOCATION and TYPE; the VALUE is never printed. Open the
+// finding, move the value into an env variable or under 06-Altyapi/secrets/, leave a
+// process.env read in its place in the source, then run this scan again.
 //
-// "Bos cikti kanit degildir": --ozdenetim sentetik bir kanarya enjekte edip kanalin
-// fiilen ates ettigini kanitlar. Kapi, negatif kontrolu olmadan gecerli sayilmaz.
+// "Empty output is not evidence": --ozdenetim injects a synthetic canary and proves the
+// channel actually fires. A gate does not count as valid without its negative control.
 
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
@@ -14,7 +14,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const SCAN_DIRECTORIES = ["src", "test", "scripts", "config"];
 const SCAN_EXTENSIONS = [".ts", ".mts", ".js", ".mjs", ".json", ".ps1", ".cmd"];
 
-// Her kural: bir sir SINIFI. Ad rapora girer, eslesen metin girmez.
+// Each rule is one secret CLASS. The name enters the report; the matched text does not.
 const RULES = [
   ["openai_api_key", /\bsk-[A-Za-z0-9_-]{20,}/g],
   ["anthropic_api_key", /\bsk-ant-[A-Za-z0-9_-]{20,}/g],
@@ -30,8 +30,8 @@ const RULES = [
   ["inline_credential_assignment", /\b(?:password|passwd|secret|client_secret|api_key|apikey|access_token|refresh_token)\s*[:=]\s*["'][^"'\s]{12,}["']/gi],
 ];
 
-// Bilinerek kabul edilenler. Her girdi NEDEN guvenli oldugunu soyler; gerekcesiz
-// girdi eklemek kapiyi sessizce delmektir.
+// Deliberate acceptances. Every entry states WHY it is safe; adding an entry without a
+// reason is punching a silent hole in the gate.
 const ACCEPTED = [
   [/^config\/install-lock\.json$/, "surum sabitleme: sha256 hex ve npm SRI -- ikisi de acik artefakt ozeti, sir degil"],
 ];
@@ -74,7 +74,7 @@ function scanText(text) {
 const selfCheck = process.argv.includes("--ozdenetim");
 
 if (selfCheck) {
-  // Pozitif kontrol: kanalin ates ettigini kanitla. Kanarya sentetiktir, gercek sir degildir.
+  // Positive control: prove the channel fires. The canary is synthetic, not a real secret.
   const canary = ["sk-", "A".repeat(32)].join("") + "\n" + ["xai-", "B".repeat(24)].join("");
   const hits = scanText(canary);
   const rules = new Set(hits.map((hit) => hit.rule));

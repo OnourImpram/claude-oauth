@@ -174,27 +174,27 @@ export async function runGeminiAcp(options: GeminiAcpOptions): Promise<GeminiAcp
 }
 
 // ---------------------------------------------------------------------------
-// Faz 9 / Yol 4 -- uzun-omurlu ACP oturumu (Grok tarafiyla ayni iskelet).
+// Phase 9 / Path 4 -- long-lived ACP session (the same skeleton as the Grok side).
 //
-// runGeminiAcp TEK ATISLIK ve bir arac dongusunu tur sinirinin otesine tasiyamaz:
-// Claude Code her tur icin AYRI bir HTTP istegi gonderir, oysa ACP prompt cagrisi
-// ajan isini bitirene kadar donmez. Bu fonksiyon tutamaci HEMEN dondurur, boylece
-// oturum defteri sureci ve baglantiyi canli tutabilir.
+// runGeminiAcp is ONE-SHOT and cannot carry a tool loop past the turn boundary: Claude Code
+// sends a SEPARATE HTTP request for every turn, whereas the ACP prompt call does not return
+// until the agent has finished its work. This function returns the handle IMMEDIATELY, so the
+// session registry can keep the process and the connection alive.
 //
-// Gemini'de session/resume YOK (olculdu). Sureklilik bu yuzden resume'a degil,
-// surecin kendisinin canli kalmasina dayanir.
+// Gemini has NO session/resume (measured). Continuity therefore does not rest on resume but on
+// the process itself staying alive.
 // ---------------------------------------------------------------------------
 
 export interface GeminiAcpSessionOptions extends GeminiAcpOptions {
-    /** MCP sunuculari. Faz 9'da tek eleman: router uzerindeki arac koprusu. */
+    /** MCP servers. In Phase 9 there is a single element: the tool bridge on the router. */
     readonly mcpServers?: readonly unknown[];
-    /** Kopruden yayimlanan arac adlari; izin kolu bunlari tanir. */
+    /** Tool names published by the bridge; the permission arm recognises these. */
     readonly bridgedToolNames?: readonly string[];
     /**
-     * Arac dongusu aciksa salt-okunur talimat GONDERILMEZ.
+     * When the tool loop is on, the read-only instruction is NOT SENT.
      *
-     * Ayni ajana hem "yazma" hem "araclarin var" demek celiskidir ve olculen
-     * sonucu, ajanin araci hic cagirmamasidir.
+     * Telling the same agent both "do not write" and "you have tools" is a contradiction, and
+     * its measured result is that the agent never calls the tool at all.
      */
     readonly toolsEnabled?: boolean;
 }
@@ -206,12 +206,12 @@ export interface GeminiAcpSession {
 }
 
 /**
- * Kopruden yayimlanan bir araca ait izin istegi mi?
+ * Is this a permission request for a tool published by the bridge?
  *
- * [DOGRULANMADI] ACP ajaninin MCP arac cagrisi icin KENDI izin akisini isletip
- * isletmedigi CANLI KOSUMDA olculecek. O zamana kadar FAIL-CLOSED: adi
- * taniyamazsa reddeder. Yanlis tarafa acilmis bir izin kapisi ajanin KENDI
- * yazma araclarini da serbest birakirdi.
+ * [UNVERIFIED] Whether the ACP agent runs its OWN permission flow for an MCP tool call will be
+ * MEASURED IN A LIVE RUN. Until then it is FAIL-CLOSED: if it cannot recognise the name it
+ * refuses. A permission gate opened on the wrong side would also let loose the agent's OWN
+ * write tools.
  */
 function geminiNamesBridgedTool(params: unknown, bridged: readonly string[]): boolean {
     if (bridged.length === 0) return false;
@@ -229,9 +229,9 @@ const READ_ONLY_PREAMBLE = [
 export function startGeminiAcpSession(options: GeminiAcpSessionOptions): GeminiAcpSession {
     const implementation = new ReadOnlyGeminiClient(options.cwd);
     const bridged = options.bridgedToolNames ?? [];
-    // BULGU 2 (adversaryal inceleme). cancel() cocuk SPAWN EDILMEDEN once
-    // cagrilabilir; o durumda eski hal hicbir sey yapmaz ve IIFE cocugu
-    // yine de baslatirdi -- oldurulemeyen bir surec, ve kapanmayan router.
+    // FINDING 2 (adversarial review). cancel() can be called BEFORE the child is SPAWNED;
+    // in the old shape it then did nothing and the IIFE would still start the child --
+    // a process that cannot be killed, and a router that does not shut down.
     let iptalEdildi = false;
     let child: ChildProcess | undefined;
     let onAbort: (() => void) | undefined;
@@ -243,7 +243,7 @@ export function startGeminiAcpSession(options: GeminiAcpSessionOptions): GeminiA
         if (iptalEdildi) throw new RouterError("upstream_timeout", "Gemini ACP session was cancelled before start.", 504);
         const systemSettings = await ensureGeminiOAuthConfiguration(options.home);
         child = spawnGemini(options, systemSettings);
-        // Yaris: cancel() spawn ile bu satir arasinda gelmis olabilir.
+        // Race: cancel() may have arrived between the spawn and this line.
         if (iptalEdildi) {
             child.kill();
             throw new RouterError("upstream_timeout", "Gemini ACP session was cancelled during start.", 504);

@@ -81,9 +81,9 @@ describe("router kimlik kapisi", () => {
         strictEqual(response.status, 401);
     });
 
-    // KARAR PINI, kolaylik defekti degil: dogru nonce'u tasisa bile Authorization
-    // kapiyi ACMAZ. Bu testi "duzeltmek" icin kapiyi acan biri, ayni hamlede yerel
-    // sirri saglayiciya gonderen yolu da acmis olur.
+    // A PINNED DECISION, not a convenience defect: Authorization does NOT open the gate,
+    // even when it carries the correct nonce. Anyone who opens the gate to "fix" this test
+    // opens, in the same move, the path that sends the local secret to the provider.
     it("DOGRU nonce'u tasisa bile Authorization kapiyi ACMAZ", async () => {
         const response = await fetch(`${base()}/v1/models`, { headers: { authorization: `Bearer ${nonce}` } });
         strictEqual(response.status, 401);

@@ -3,9 +3,9 @@ import { describe, it } from "node:test";
 import { claudeOAuthAgentArguments, claudePatchedModelArguments, claudeRouterEnvironment } from "../src/supervisor/launcher.js";
 import { presentApiKeySelectors } from "../src/security/environment.js";
 
-// Alt-ajan delegasyonu (sol-delege, terra-delege, gemini-delege) --agents enjeksiyonuyla
-// calisir. Bu fonksiyonlar kullanicinin argumanlarini YENIDEN YAZAR; sessiz bir hata
-// burada ya delegasyonu oldurur ya da kullanicinin kendi ajan tanimlarini ezer.
+// Subagent delegation (sol-delege, terra-delege, gemini-delege) works by injecting
+// --agents. These functions REWRITE the user's arguments; a silent bug here either kills
+// delegation or overwrites the user's own agent definitions.
 
 const AVAILABLE = ["anthropic-openai-gpt-5.6-sol", "anthropic-openai-gpt-5.6-terra", "anthropic-google-gemini-3.8-flash-high"];
 
@@ -53,8 +53,8 @@ describe("claudeOAuthAgentArguments", () => {
         strictEqual(Object.keys(parsed as Record<string, unknown>).some((name) => name.endsWith("-delege")), true);
     });
 
-    // Kapi model BASINA calisir: bir delege ancak modeli snapshot'ta DOGRULANMISSA
-    // enjekte edilir. claude-opus-delege harici model gerektirmedigi icin her zaman gelir.
+    // The gate runs PER model: a delegate is injected only if its model is VERIFIED in the
+    // snapshot. claude-opus-delege requires no external model, so it always appears.
     it("harici model yokken yalnizca claude-opus-delege enjekte edilir", () => {
         const rewritten = claudeOAuthAgentArguments(["--print", "x"], []);
         const names = Object.keys(JSON.parse(rewritten[rewritten.indexOf("--agents") + 1] ?? "{}") as Record<string, unknown>);
@@ -70,9 +70,10 @@ describe("claudeOAuthAgentArguments", () => {
         strictEqual(names.includes("gemini-delege"), false);
     });
 
-    // astra-delege ajan adi SOZLESMEDEN turer (launcher.ts: `${contract.alias}-delege`);
-    // elle bir yere yazilmaz. Iki kol: dogrulanmissa gelir, dogrulanmamissa GELMEZ --
-    // ikincisi olmadan birincisi "her zaman enjekte ediyor" ile ayirt edilemez.
+    // The astra-delege agent name is DERIVED FROM THE CONTRACT (launcher.ts:
+    // `${contract.alias}-delege`); it is written by hand nowhere. Two arms: it appears when
+    // verified, it does NOT appear when unverified -- without the second, the first cannot
+    // be told apart from "always injecting".
     it("astra dogrulaninca astra-delege gelir, dogrulanmayinca GELMEZ", () => {
         const withAstra = claudeOAuthAgentArguments([], ["anthropic-openai-gpt-6-astra"]);
         const withNames = Object.keys(JSON.parse(withAstra[withAstra.indexOf("--agents") + 1] ?? "{}") as Record<string, unknown>);
@@ -84,8 +85,8 @@ describe("claudeOAuthAgentArguments", () => {
         strictEqual(withoutNames.includes("astra-delege"), false, "katalogda olmayan astra icin delege sizdi");
     });
 
-    // native-gateway modunda delege TAM kimlik tasir: native binary alias tanimaz ve
-    // "astra" gonderilirse unrecognized_model doner.
+    // In native-gateway mode the delegate carries the FULL identity: the native binary does
+    // not recognise aliases and returns unrecognized_model if "astra" is sent.
     it("astra-delege native modda tam snapshot kimligi tasir", () => {
         const rewritten = claudeOAuthAgentArguments([], ["anthropic-openai-gpt-6-astra"], "native-gateway");
         const parsed = JSON.parse(rewritten[rewritten.indexOf("--agents") + 1] ?? "{}") as Record<string, { model?: string }>;
@@ -98,8 +99,8 @@ describe("claudeOAuthAgentArguments", () => {
         strictEqual(names.includes("gemini-delege"), true);
     });
 
-    // Rezerve bir delegenin model rotasi degistirilirse sessizce kabul edilmemeli:
-    // "sol-delege" adiyla baska bir modele gitmek delegasyonu goze gorunmez sekilde bozar.
+    // If a reserved delegate's model route is altered it must not be accepted silently:
+    // going to a different model under the name "sol-delege" breaks delegation invisibly.
     it("rezerve bir delegenin model rotasi degistirilirse REDDEDER", () => {
         const tampered = JSON.stringify({ "sol-delege": { description: "d", prompt: "p", model: "haiku" } });
         throws(
@@ -124,7 +125,7 @@ describe("claudeOAuthAgentArguments", () => {
         strictEqual("benim-ajanim" in merged, true);
     });
 
-    // Belirsizligi sessizce cozmek yanlis ajan setini yuklemek demektir; reddetmek dogrudur.
+    // Resolving the ambiguity silently means loading the wrong agent set; refusing is correct.
     it("birden fazla --agents argumanini REDDEDER", () => {
         throws(
             () => claudeOAuthAgentArguments(["--agents", "{}", "--agents", "{}"], AVAILABLE),
@@ -142,14 +143,14 @@ describe("claudeOAuthAgentArguments", () => {
 describe("claudeRouterEnvironment", () => {
     const nonce = "a".repeat(64);
 
-    // VAKA KAYDI: base URL eskiden `/_session/<nonce>` tasiyordu ve bu, /model
-    // listesinin harici modelleri HIC gostermemesinin sebebiydi. Claude Code ag
-    // gecidi model kesfini ANTHROPIC_BASE_URL'e BIREBIR anahtarlar (binary:
-    // `e.baseUrl !== a.ANTHROPIC_BASE_URL -> return []`); oturuma ozel bir nonce
-    // yolda oldugu surece taban URL her oturumda degisir ve onbellek asla eslesmez.
+    // CASE RECORD: the base URL used to carry `/_session/<nonce>`, and that was the reason
+    // the /model list NEVER showed external models. Claude Code keys gateway model discovery
+    // to ANTHROPIC_BASE_URL VERBATIM (binary: `e.baseUrl !== a.ANTHROPIC_BASE_URL ->
+    // return []`); as long as a per-session nonce sits in the path, the base URL changes
+    // every session and the cache never matches.
     //
-    // Sir kaybolmadi, yalnizca kanal degisti: router hem yol hem baslik nonce'unu
-    // kabul eder ve ikisi de yoksa 401 doner (olculdu).
+    // The secret was not lost, only its channel changed: the router accepts the nonce in
+    // both the path and the header, and returns 401 when neither is present (measured).
     it("base URL SABITTIR: oturuma ozel hicbir sey tasimaz", () => {
         const environment = claudeRouterEnvironment("http://127.0.0.1:5555", nonce, {});
         strictEqual(environment["ANTHROPIC_BASE_URL"], "http://127.0.0.1:5555");
@@ -157,27 +158,29 @@ describe("claudeRouterEnvironment", () => {
         strictEqual(environment["ANTHROPIC_BASE_URL"]?.includes("_session"), false);
     });
 
-    // Kesfin calismasinin sarti: AYNI port ile iki ayri oturum AYNI taban URL'i
-    // uretmeli. Nonce'lar farkli olsa bile.
+    // The condition for discovery to work: two separate sessions on the SAME port must
+    // produce the SAME base URL. Even when their nonces differ.
     it("ayni port, farkli nonce -> AYNI taban URL", () => {
         const first = claudeRouterEnvironment("http://127.0.0.1:8787", "a".repeat(64), {});
         const second = claudeRouterEnvironment("http://127.0.0.1:8787", "b".repeat(64), {});
         strictEqual(first["ANTHROPIC_BASE_URL"], second["ANTHROPIC_BASE_URL"]);
     });
 
-    // GUVENLIK KOLU: URL'den dusen sir, baslikta HALA tam olarak duruyor olmali.
+    // SECURITY ARM: the secret dropped from the URL must STILL be present, in full, in the header.
     it("nonce URL'den dustu ama BASLIKTA tam olarak duruyor", () => {
         const environment = claudeRouterEnvironment("http://127.0.0.1:5555", nonce, {});
         strictEqual(environment["ANTHROPIC_CUSTOM_HEADERS"]?.includes(nonce), true);
     });
 
-    // VAKA KAYDI (2026-08-31): kesif kimlik istedigi icin buraya ANTHROPIC_AUTH_TOKEN
-    // konuldu ve Claude ana yolu KIRILDI -- Claude Code kendi OAuth tokenini birakip o
-    // degeri Authorization: Bearer olarak gonderdi, AnthropicAdapter onu yukari akisa
-    // aynen iletti, Anthropic "401 Invalid bearer token" dondu. Operatorun /login
-    // denemeleri sonucu degistirmedi, cunku sorun oturumda degil basliktaydi.
+    // CASE RECORD (2026-08-31): because discovery demanded a credential,
+    // ANTHROPIC_AUTH_TOKEN was placed here and the Claude main path BROKE -- Claude Code
+    // dropped its own OAuth token and sent that value as Authorization: Bearer, the
+    // AnthropicAdapter forwarded it upstream verbatim, and Anthropic returned "401 Invalid
+    // bearer token". The operator's /login attempts changed nothing, because the problem was
+    // not in the session but in the header.
     //
-    // Bu test o gunu pinler: cocuk ortami bu degiskeni TASIMAZ, kaynak ortam tasisa bile.
+    // This test pins that day: the child environment does NOT carry this variable, even when
+    // the source environment does.
     it("ANTHROPIC_AUTH_TOKEN cocuk ortamina ASLA girmez", () => {
         const environment = claudeRouterEnvironment("http://127.0.0.1:5555", nonce, {});
         strictEqual(environment["ANTHROPIC_AUTH_TOKEN"], undefined);

@@ -3,10 +3,11 @@ import { describe, it } from "node:test";
 import { AgentModelAdapter, type AgentModelRunRequest } from "../src/adapters/agent-model.js";
 import type { AdapterRequest, MessageEnvelope, ModelRecord } from "../src/domain/contracts.js";
 
-// Gemini ve Grok "agent-readonly" modunda kosar: konusma, tek bir metin prompt'una
-// DERLENIR. Bu derlemede gecmis turlar ile SIMDIKI istek birbirine karisirsa model
-// onceki turu yeniden cevaplar ya da konusmayi bastan baslatir -- kullaniciya
-// "model beni dinlemiyor" olarak gorunen sinif budur. Sinir bu yuzden test edilir.
+// Gemini and Grok run in "agent-readonly" mode: the conversation is COMPILED into a
+// single text prompt. If that compilation lets past turns and the CURRENT request blur
+// into each other, the model answers the previous turn again or restarts the
+// conversation from scratch -- this is the class the user sees as "the model is not
+// listening to me". That is why the boundary is tested.
 
 const model: ModelRecord = {
     id: "anthropic-google-gemini-3.8-flash-high",
@@ -60,7 +61,8 @@ describe("derlenen agent prompt'u", () => {
         strictEqual(prompt.trimEnd().endsWith("son istek"), true);
     });
 
-    // Sinirin kendisi: gecmis "baglam", son mesaj "istek". Ikisi ayri basliklar altinda olmali.
+    // The boundary itself: history is "context", the last message is the "request". The two
+    // must sit under separate headings.
     it("gecmis turlari ISTEK olarak degil BAGLAM olarak isaretler", async () => {
         const prompt = await compiledPromptFor({
             model: model.id,

@@ -1,5 +1,5 @@
-// Faz 1 kapisi: yeniden derlenen dist, temiz referans release ile birebir ayni mi?
-// Kullanim: node scripts/sadakat-diff.mjs [referans-dist-dizini]
+// Phase 1 gate: is the rebuilt dist byte-for-byte identical to the clean reference release?
+// Usage: node scripts/fidelity-diff.mjs [reference-dist-directory]
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,17 +12,17 @@ const referenceRoot = process.argv[2] ?? process.env["CLAUDE_OAUTH_REFERENCE_DIS
 if (!referenceRoot) {
   console.error(
     "NOT_RUN: reference dist not given.\n" +
-    "  usage: node scripts/sadakat-diff.mjs <reference-dist-dir>\n" +
+    "  usage: node scripts/fidelity-diff.mjs <reference-dist-dir>\n" +
     "  or set CLAUDE_OAUTH_REFERENCE_DIST to a released dist/src directory."
   );
   process.exit(3);
 }
 const builtRoot = join(projectRoot, "dist", "src");
 
-// ONARIM: bir dosya burada listeli degilse ve fark ediyorsa, ya derlemede istenmeyen bir
-// sapma vardir ya da bilincli bir Faz 2 degisikligi bu deftere yazilmamistir. Farki incele,
-// sonra ya kaynagi geri al ya da asagiya gerekcesiyle ekle.
-// Her girdi bir Faz 2 kararidir; gerekce girdinin yanindadir.
+// FIX: if a file is not listed here and it differs, either the build has an unwanted
+// deviation or a deliberate Phase 2 change was never written into this ledger. Inspect the
+// difference, then either revert the source or add it below with its reason.
+// Every entry is a Phase 2 decision; the reason sits next to the entry.
 const DELIBERATE_DIFFERENCES = new Map([
   ["runtime/claude-shadow.js",
     "Faz 1: referans build PARSE EDILEMIYOR (try/catch/finally govde disina dusmus, " +

@@ -57,7 +57,7 @@ describe("writeBoundedWorkspaceText", () => {
             await symlink(disari, join(root, "kapi"), "junction");
         }
         catch {
-            return; // junction kurulamiyorsa kol atlanir; sessiz gecmez, kosum raporunda gorunur
+            return; // if the junction cannot be created the arm is skipped; not a silent pass, it shows up in the run report
         }
         await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "kapi/sizinti.txt", content: "x", maximumBytes: 1024 }),
             (error: Error) => /outside the allowed workspace|symlinked directory/u.test(error.message));

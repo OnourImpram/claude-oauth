@@ -1,13 +1,13 @@
-// release-id.mjs -- icerik-adresli release kimligini HESAPLAR ve DOGRULAR.
+// release-id.mjs -- COMPUTES and VERIFIES the content-addressed release identity.
 //
-// ONARIM: "computed" ile "declared" ayrisiyorsa release yerinde duzenlenmis demektir.
-// Dizini yeniden kur (temiz kopya) ya da yeni kimlikle yeniden adlandir; elle duzenlenmis
-// bir release'i adiyla kabul etme -- bu olayin kok sebebi tam olarak buydu.
+// FIX: if "computed" and "declared" have drifted apart, the release was edited in place.
+// Rebuild the directory (a clean copy) or rename it with the new identity; never accept an
+// edited release on the strength of its name -- that was exactly the root cause of this incident.
 //
-// Kullanim:
-//   node scripts/release-id.mjs --compute <dizin>
-//   node scripts/release-id.mjs --verify  <release-dizini>       (ad ile icerigi karsilastirir)
-//   node scripts/release-id.mjs --ozdenetim                      (negatif kontrol)
+// Usage:
+//   node scripts/release-id.mjs --compute <directory>
+//   node scripts/release-id.mjs --verify  <release-directory>    (compares the name against the content)
+//   node scripts/release-id.mjs --ozdenetim                      (negative control)
 
 import { createHash } from "node:crypto";
 import { readdir, readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
@@ -54,7 +54,8 @@ export async function computeReleaseId(root) {
 const [mode, target] = process.argv.slice(2);
 
 if (mode === "--ozdenetim") {
-  // Pozitif kol: ayni agac ayni kimligi verir. Negatif kol: tek bayt degisince kimlik degisir.
+  // Positive arm: the same tree yields the same identity. Negative arm: change one byte
+  // and the identity changes.
   const root = await mkdtemp(join(tmpdir(), "relid-"));
   for (const d of HASHED_DIRECTORIES) await mkdir(join(root, d), { recursive: true });
   await writeFile(join(root, "dist", "a.js"), "export const a = 1;\n", "utf8");

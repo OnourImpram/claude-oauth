@@ -70,9 +70,10 @@ describe("auto-compaction window policy", () => {
         }
     });
 
-    // POZITIF KOL: Astra sinirin USTUNDEDIR ve bu bir kusur degil, olculmus bir istisnadir
-    // (ChatGPT Enterprise rate card, "Codex long-context exception"; alinti sozlesmenin
-    // contextWindowSource alaninda). Bu kol dusmeye baslarsa istisna kaybolmus demektir.
+    // POSITIVE ARM: Astra is ABOVE the boundary, and that is not a defect but a measured
+    // exception (ChatGPT Enterprise rate card, "Codex long-context exception"; the quote
+    // lives in the contract's contextWindowSource field). If this arm starts falling, the
+    // exception has been lost.
     it("Astra fiyat sinirinin USTUNDE kompaktlanir -- Codex uzun-baglam istisnasi", () => {
         strictEqual(OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS > OPENAI_LONG_CONTEXT_PRICING_BOUNDARY_TOKENS, true);
         strictEqual(astra?.autoCompactWindow, OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS);
@@ -86,11 +87,12 @@ describe("auto-compaction window policy", () => {
         }
     });
 
-    // ASIL RISK, ve tek gercek olcusu. Ilan edilen 1_000_000 bir POLITIKA sayisidir;
-    // upstream'in fiilen kabul ettigi tavan config/install-lock.json'daki pindir (bugun
-    // 872_000, clodex 2.11.1'in Astra tohumu). Kompaktlama penceresi ilanin altinda ama
-    // pinin USTUNDE olsaydi -- ornegin 900_000 -- oturum clodex'in gercek duragini asar ve
-    // bunu hicbir sey soylemezdi. Sayi burada elle yazilmaz, kilitten OKUNUR.
+    // THE REAL RISK, and its only real measure. The advertised 1_000_000 is a POLICY
+    // number; the ceiling upstream actually accepts is the pin in config/install-lock.json
+    // (today 872_000, the Astra seed of clodex 2.11.1). If the compaction window were below
+    // the advertisement but ABOVE the pin -- say 900_000 -- the session would exceed
+    // clodex's real stop and nothing would say so. The number is not written by hand here,
+    // it is READ from the lock.
     it("her OpenAI kompaktlama penceresi GERCEK ust sinirin (install-lock pini) altindadir", async (t) => {
         const repoRoot = resolve(import.meta.dirname, "..", "..");
         let pin: number;
@@ -104,14 +106,14 @@ describe("auto-compaction window policy", () => {
             pin = value;
         }
         catch (error) {
-            // Kanit grameri: kosamayan kontrol sessiz gecis DEGILDIR, sebebiyle atlanir.
+            // Evidence grammar: a check that could not run is NOT a silent pass, it is skipped with its reason.
             t.skip(`config/install-lock.json okunamadi: ${(error as Error).message}`);
             return;
         }
         for (const contract of OPENAI_MODEL_CONTRACTS) {
             strictEqual(contract.autoCompactWindow < pin, true, `pin ${pin} asiliyor: ${contract.id} = ${contract.autoCompactWindow}`);
         }
-        // Ilan pinin USTUNDE olmak zorunda, yoksa bu degisikligin sebebi yok.
+        // The advertisement must be ABOVE the pin, otherwise this change has no reason to exist.
         strictEqual(OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS > pin, true, "ilan pinin ustunde degil: degisiklik etkisiz");
     });
 });
@@ -126,8 +128,9 @@ describe("autoCompactWindowForModel", () => {
         strictEqual(autoCompactWindowForModel("anthropic-openai-gpt-5.6-terra"), OPENAI_AUTO_COMPACT_WINDOW_TOKENS);
     });
 
-    // Astra artik AILE sabitini paylasmiyor: alias da tam kimlik de kendi sayisini vermeli.
-    // Paylasilan sabite geri dusen bir cozumleyici sessizce 220_000 dondururdu.
+    // Astra no longer shares the FAMILY constant: both the alias and the full identity must
+    // return its own number. A resolver falling back to the shared constant would silently
+    // return 220_000.
     it("Astra kendi penceresini cozer, aile sabitini degil", () => {
         strictEqual(autoCompactWindowForModel("astra"), OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS);
         strictEqual(autoCompactWindowForModel("anthropic-openai-gpt-6-astra"), OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS);

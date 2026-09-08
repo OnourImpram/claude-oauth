@@ -21,14 +21,14 @@ export interface ExternalAgentRuntime {
     readonly antigravityBinary: string;
     readonly grokBinary: string;
     /**
-     * Faz 9. Verilirse xai seridi gercek arac dongusu tasir.
+     * Phase 9. When supplied, the xai lane carries a real tool loop.
      *
-     * Google seridine BILEREK verilmiyor: agy'de cagri basina MCP enjeksiyonu
-     * yok, yalnizca kalici `agy mcp add` var, ve o oturum nonce'unu diske
-     * yazardi. Guvenlik sert kurali buna izin vermiyor (kanit defteri §7).
+     * It is DELIBERATELY not supplied to the Google lane: agy has no per-call MCP injection,
+     * only the persistent `agy mcp add`, and that would write the session nonce to disk. The
+     * Security hard rule does not permit it (evidence ledger §7).
      */
     readonly grokSessions?: AgentSessionRegistry;
-    /** A4: kilit ihlali olan yan saglayicilar -- adapter kurulmaz, modelleri dusur. */
+    /** A4: side providers with a lock violation -- no adapter is built, drop their models. */
     readonly disabledProviders?: ReadonlySet<ProviderId>;
 }
 export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePaths, clodexNonce: string, externalRuntime?: ExternalAgentRuntime): Promise<ProviderSet> {
@@ -51,9 +51,9 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
                 closeActions.push(capsule.close);
             }
             else {
-                // Tek kelimelik kod hangi modelin hangi sayida catistigini SOYLEMIYORDU;
-                // yayin sonrasi pencerede dusen sey yeni model degil calisan sol/terra
-                // seridi oldugu icin bu sessizlik arizaya benziyordu (BULGU 1).
+                // The single-word code did NOT SAY which model clashed on which number; because
+                // what falls in the post-release window is not the new model but the working
+                // sol/terra lane, that silence looked like an outage (FINDING 1).
                 readiness.push(openAiCatalogDriftReadiness(required, catalog));
                 await capsule.close();
             }
@@ -73,10 +73,10 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
         else {
             const adapter = new AgentModelAdapter({
                 provider: "xai",
-                // Faz 9: VARSA bu serit gercek arac dongusu tasir; yoksa
-                // asagidaki metin-yalniz kosucu calisir. Google seridine
-                // BILEREK verilmiyor: agy'de cagri basina MCP enjeksiyonu yok
-                // ve mcp add oturum sirrini kalici config'e yazardi (kanit §7).
+                // Phase 9: WHEN PRESENT this lane carries a real tool loop; otherwise the
+                // text-only runner below runs. It is DELIBERATELY not supplied to the Google
+                // lane: agy has no per-call MCP injection, and mcp add would write the session
+                // secret into a persistent config (evidence §7).
                 ...(externalRuntime.grokSessions === undefined
                     ? {}
                     : { sessions: externalRuntime.grokSessions }),
@@ -109,11 +109,11 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
         else {
             const adapter = new AgentModelAdapter({
                 provider: "google",
-                // 2026-09-03: agy KENDI arac dongusune sahiptir (operatorun kalici
-                // mcp_config.json'undaki filesystem/git/memory sunuculari). Bizim MCP
-                // koprumuz enjekte EDILMIYOR -- oturum sirri hicbir yere yazilmiyor.
-                // Bu yuzden onsoz "salt okunur" demeyi birakir ama Anthropic tool_use
-                // bloklari da uretmez: is agy'nin kendi araclariyla yapilir.
+                // 2026-09-03: agy has its OWN tool loop (the filesystem/git/memory servers in
+                // the operator's persistent mcp_config.json). Our MCP bridge is NOT injected --
+                // no session secret is written anywhere. That is why the preamble stops saying
+                // "read-only" but still produces no Anthropic tool_use blocks: the work is done
+                // with agy's own tools.
                 selfDrivenTools: true,
                 readiness: async () => ready("google", "antigravity_oauth_snapshot_verified"),
                 run: async ({ model, prompt, signal }) => {

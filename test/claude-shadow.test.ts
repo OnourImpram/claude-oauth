@@ -9,12 +9,12 @@ import { AGENT_MODEL_CONTRACTS } from "../src/domain/model-contracts.js";
 import { readFile } from "node:fs/promises";
 
 
-// Bu, sistemin yamali binary'yi FIILEN dogruladigi tek yerdir: Clodex'in kendi metin
-// raporuna degil, binary'nin icindeki string'lere bakar. Throw'u aylarca yorum
-// satirindaydi -- yani kapi vardi ama hicbir zaman kapanmiyordu.
+// This is the only place where the system ACTUALLY verifies the patched binary: it looks
+// at the strings inside the binary, not at Clodex's own text report. Its throw sat
+// commented out for months -- that is, the gate existed but never closed.
 //
-// Gercek shadow ve native ikililer bu makinede varsa test onlari da kullanir; yoksa
-// sentetik ikililerle kapinin iki kolu yine kanitlanir.
+// If the real shadow and native binaries are present on this machine the test uses them
+// too; otherwise both arms of the gate are still proven with synthetic binaries.
 
 const SHADOW = join(process.env["LOCALAPPDATA"] ?? "", "Hezarfen", "claude-oauth", "shadow", "claude-2.1.251-8D1229A2", "claude.exe");
 const NATIVE = join(process.env["USERPROFILE"] ?? "", ".local", "bin", "claude.exe");
@@ -47,9 +47,9 @@ describe("SHADOW_MODEL_SURFACE_NEEDLES", () => {
         strictEqual(SHADOW_MODEL_SURFACE_NEEDLES.some((needle) => needle.includes("hezarfen-google-oauth-model-surface")), true);
     });
 
-    // DRIFT KAPISI: sozlesmeye model eklenip picker satiri unutulursa, /model'de
-    // gorunmeyen ama snapshot'ta duran bir model olusur -- ya da tersi. Iki taraf da
-    // burada birbirine baglanir.
+    // DRIFT GATE: if a model is added to the contract and its picker line is forgotten, a
+    // model appears that is invisible in /model but present in the snapshot -- or the
+    // reverse. Both sides are tied together here.
     it("her harici model sozlesmesinin bir picker ve bir resolver needle'i vardir", () => {
         for (const contract of AGENT_MODEL_CONTRACTS) {
             const picker = `{value:${JSON.stringify(contract.alias)},`;
@@ -60,9 +60,9 @@ describe("SHADOW_MODEL_SURFACE_NEEDLES", () => {
     });
 });
 
-// Yerel yama dosyasi ile needle listesi ayni gercegin iki kopyasidir; ayrisirlarsa
-// yamali binary kapiyi gecemez ve sistem hic acilmaz. Bu, o ayrismayi derleme
-// zamaninda yakalar.
+// The local patch file and the needle list are two copies of the same truth; if they
+// diverge, the patched binary cannot pass the gate and the system never comes up at all.
+// This catches that divergence at build time.
 describe("yerel yama <-> needle tutarliligi", () => {
     it("needle'daki her picker satiri yama dosyasinda da tanimlidir", async () => {
         const patchPath = resolve(process.cwd(), "config", "claude-oauth-local-patches.mjs");
@@ -83,18 +83,18 @@ describe("yerel yama <-> needle tutarliligi", () => {
     });
 });
 
-// A capa (anchor) her zaman SESSIZCE bayatlar: yamalayici ciktisi degisir, regex
-// eslesmez, yama hicbir sey enjekte etmez ve `patched-shadow` moduna gecildigi gun
-// 503 gelir. Bu blok o sessizligi kirar: yamayi, clodex'in FIILEN urettigi bicime
-// karsi kosturur.
+// An anchor always goes stale SILENTLY: the patcher's output changes, the regex stops
+// matching, the patch injects nothing, and a 503 arrives the day someone switches to
+// `patched-shadow` mode. This block breaks that silence: it runs the patch against the
+// shape clodex ACTUALLY produces.
 //
-// Bicimler clodex 2.11.1 dist/cli.js'ten OKUNDU (2026-09-05):
+// The shapes were READ from clodex 2.11.1 dist/cli.js (2026-09-05):
 //   PATCH 6 -> `"case" + q(alias) + ":return " + q(alias) + ";"`
 //   PATCH 5 -> `"{value:"+q(alias)+",label:"+q(Cap)+",description:"+q(display)+"}"`,
-//              `,` ile birlestirilip `[...]` icine, ardindan `.forEach(function(_o){...});`
-//   display varsayilani -> `Custom model (clodex:${providerId}:${modelId})`
-// providerId CLODEX_HOME/config.json'dan gelir ve BUGUN "openai-oauth"tur; capa
-// "openai" bekliyordu ve kurulu golgede olculen deger bunu dogruladi
+//              joined with `,` into `[...]`, then `.forEach(function(_o){...});`
+//   display default -> `Custom model (clodex:${providerId}:${modelId})`
+// providerId comes from CLODEX_HOME/config.json and TODAY it is "openai-oauth"; the anchor
+// expected "openai", and the value measured in the installed shadow confirmed this
 // ("clodex:openai:gpt-5.6-sol" x1, "clodex:openai-oauth:..." x0).
 describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
     function clodexPatched(providerId: string, aliases: readonly (readonly [string, string])[]): string {
@@ -130,43 +130,43 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
             .map((needle) => `${needle.slice(0, 48)} x${patched.split(needle).length - 1}`);
     }
 
-    // Bugunku yapilandirma: providerId "openai-oauth".
+    // Today's configuration: providerId "openai-oauth".
     it("providerId openai-oauth ciktisinda her needle TAM BIR KEZ olusur", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [SOL, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
-    // Astra eklendiginde de tutmali: capa OpenAI alias SAYISINA bagli olmamali.
+    // It must hold when Astra is added too: the anchor must not depend on the NUMBER of OpenAI aliases.
     it("ucuncu OpenAI alias'i (astra) eklenince capa hala tutar", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [SOL, TERRA, ASTRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
-    // ...ve SIRAYA da bagli olmamali: favori dosyasindaki sira operatorun elindedir.
+    // ...and it must not depend on ORDER either: the order in the favourites file is the operator's to set.
     it("alias sirasi degisince (astra once) capa hala tutar", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [ASTRA, SOL, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
-    // Geriye donuk: eski providerId ile uretilmis bir ikili de kabul edilir.
+    // Backwards compatible: a binary produced with the old providerId is accepted too.
     it("eski providerId (openai) ciktisinda da tutar", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai", [SOL, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
     });
 
-    // NEGATIF KOL: clodex'in kendi PATCH 5/6'si hic kosmamissa capa YOK demektir ve
-    // yama picker/resolver satirlarini enjekte ETMEMELIDIR. Bu kol olmadan yukaridaki
-    // dortu "yama her seye her seyi yaziyor" ile ayirt edilemez.
+    // NEGATIVE ARM: if clodex's own PATCH 5/6 never ran, the anchor is ABSENT and the patch
+    // MUST NOT inject the picker/resolver lines. Without this arm the four above cannot be
+    // told apart from "the patch writes everything into everything".
     it("capasiz kaynakta picker/resolver satiri ENJEKTE EDILMEZ", async () => {
         const patched = await applyLocalPatch('function r4(t5){return w2.includes(t5)}switch(n){case"best":{return "opus"}default:return n}');
         const leaked = SHADOW_MODEL_SURFACE_NEEDLES.filter((needle) => needle !== MARKER && patched.includes(needle));
         deepStrictEqual(leaked, []);
     });
 
-    // BULGU 3 (2026-09-05): resolver capasi `case"sol":return "sol";` istiyordu, yani
-    // GOOGLE ve xAI seritleri operatorun hangi OpenAI modellerini etkin tuttuguna
-    // baglaniyordu. Prob V5 bunu olctu: sol olmadan dort resolver ignesi birden x0.
-    // Ilgisiz iki serit ayni kaderi paylasmamali.
+    // FINDING 3 (2026-09-05): the resolver anchor demanded `case"sol":return "sol";`, which
+    // tied the GOOGLE and xAI lanes to which OpenAI models the operator happened to keep
+    // enabled. Probe V5 measured it: without sol, all four resolver needles went to x0.
+    // Two unrelated lanes must not share the same fate.
     it("sol CLODEX_HOME'da YOKKEN (astra+terra) capa yine tutar", async () => {
         const patched = await applyLocalPatch(clodexPatched("openai-oauth", [ASTRA, TERRA]));
         deepStrictEqual(missingNeedles(patched), []);
@@ -177,10 +177,10 @@ describe("yerel yama capasi clodex'in FIILEN urettigi bicime tutunur", () => {
         deepStrictEqual(missingNeedles(patched), []);
     });
 
-    // BULGU 4: capa genisletildi ve `replaceExactly` eslesme SAYISINI hic sinamiyordu.
-    // Iki clodex-bicimli picker dizisi tasiyan bir kaynakta dort igne birden x2 oluyor,
-    // ve verifyShadowModelSurface bunu ancak sonradan, sebebini soyleyemeden reddediyor.
-    // Artik yama KENDISI ve ADIYLA duser.
+    // FINDING 4: the anchor was widened and `replaceExactly` never tested the NUMBER of
+    // matches. In a source carrying two clodex-shaped picker arrays all four needles land at
+    // x2, and verifyShadowModelSurface only rejects that afterwards, unable to say why. Now
+    // the patch fails ITSELF, and BY NAME.
     it("IKI picker dizisi varsa yama cift enjeksiyon yapmak yerine REDDEDER", async () => {
         const iki = `${clodexPatched("openai-oauth", [SOL, TERRA])}\n[{value:"x",label:"X",description:"Custom model (clodex:openai-oauth:x)"}].forEach(function(_o){if(!k8.some(function(_i){return _i.value===_o.value}))k8.push(_o)});`;
         await rejects(async () => { await applyLocalPatch(iki); }, /anchor "model-picker" matched 2 times/u);
@@ -193,7 +193,7 @@ describe("verifyShadowModelSurface (sentetik)", () => {
         await verifyShadowModelSurface(path);
     });
 
-    // NEGATIF KOL: yamasiz binary. Kapinin firlayabildiginin kaniti.
+    // NEGATIVE ARM: an unpatched binary. Proof that the gate can throw.
     it("hicbir needle yoksa REDDEDER", async () => {
         const path = await syntheticBinary("bos.bin", "yamasiz bir ikili gibi davranan icerik");
         await rejects(async () => { await verifyShadowModelSurface(path); }, /model-picker proof/u);
@@ -204,7 +204,7 @@ describe("verifyShadowModelSurface (sentetik)", () => {
         await rejects(async () => { await verifyShadowModelSurface(path); }, /model-picker proof/u);
     });
 
-    // Iki kez gecmek de kusurdur: yamanin iki kez uygulanmasi picker'i ikizler.
+    // Occurring twice is a defect as well: applying the patch twice duplicates the picker.
     it("bir needle IKI kez geciyorsa reddeder", async () => {
         const first = SHADOW_MODEL_SURFACE_NEEDLES[0] ?? "";
         const path = await syntheticBinary("ikili.bin", [...SHADOW_MODEL_SURFACE_NEEDLES, first].join("\n"));
@@ -226,11 +226,12 @@ describe("verifyShadowModelSurface (sentetik)", () => {
 });
 
 describe("verifyShadowModelSurface (gercek ikililer)", () => {
-    // Bu kol ORTAMI olcer, kodun sozlesmesini degil: sentetik kollar kapinin iki
-    // yonunu zaten kanitliyor. Kurulu shadow, GECERLI yerel yamadan uretilmisse
-    // needle'lari tasimak ZORUNDADIR ve tasimiyorsa bu gercek bir defekttir. Ama
-    // manifest bayat oldugunu soyluyorsa yeniden yamalama bekliyordur; o durumda
-    // testi kirmizi yakmak alarmin anlamini yok eder -- sebebiyle atlanir.
+    // This arm measures the ENVIRONMENT, not the code's contract: the synthetic arms
+    // already prove both directions of the gate. If the installed shadow was produced from
+    // a VALID local patch it MUST carry the needles, and if it does not, that is a real
+    // defect. But if the manifest says it is stale, it is waiting to be re-patched; turning
+    // the test red in that case destroys the meaning of the alarm -- so it is skipped with
+    // its reason.
     it("kurulu yamali shadow kabul edilir", async (t) => {
         const { access, readFile } = await import("node:fs/promises");
         try { await access(SHADOW); }

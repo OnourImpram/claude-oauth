@@ -5,10 +5,10 @@ import { join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { reportedBuildCommitMatches, reportedVersionMatches, requireInstallChecks, sideProviderInstallDrift, type InstallLock, verifyClodexPackageLock } from "../src/runtime/install-lock.js";
 
-// REGRESYON: verifyClodexPackageLock kosulsuz { status: "ok" } donen bir STUB'di.
-// lock.clodex.integrity ve entrypointSha256 hicbir zaman okunmadi -- ve olculdugunde
-// entrypointSha256'nin diskteki HICBIR dosyaya karsilik gelmedigi ortaya cikti.
-// Olculmeyen bir alan sessizce curur ve bunu kimseye haber vermez.
+// REGRESSION: verifyClodexPackageLock was a STUB that returned { status: "ok" }
+// unconditionally. lock.clodex.integrity and entrypointSha256 were never read -- and once
+// measured, it turned out entrypointSha256 corresponded to NO file on disk. An unmeasured
+// field rots silently, and it tells nobody.
 
 const PACKAGE = "@bman654/clodex";
 let moduleRoot = "";
@@ -66,7 +66,7 @@ describe("verifyClodexPackageLock", () => {
         strictEqual(check.detailCode, "locked_bytes_and_reported_version_match");
     });
 
-    // Asagidaki dordu, stub'in HIC yapmadigi kontrollerdir. Her biri bir negatif kontrol.
+    // The four below are the checks the stub NEVER performed. Each one is a negative control.
     it("paket surumu sapinca drift bildirir", async () => {
         const root = await writeTree({ version: "9.9.9", integrity: lock.clodex.integrity, entrypointBody: "export const cli = 1;\n" });
         const check = await verifyClodexPackageLock(lock, root);
@@ -127,16 +127,16 @@ describe("reportedVersionMatches", () => {
         strictEqual(reportedVersionMatches("2.11.10", "2.11.1"), false);
         strictEqual(reportedVersionMatches("12.11.1", "2.11.1"), false);
         strictEqual(reportedVersionMatches("", "2.11.1"), false);
-        // Yukseltmenin kendi negatif kolu: eski surum artik ESLESMEZ. Kurgu agac
-        // surumle birlikte tasinmazsa kapi "her surumu kabul ediyor" olabilir ve
-        // bunu kimse fark etmez.
+        // The upgrade's own negative arm: the old version no longer MATCHES. If the fixture
+        // tree is not moved along with the version, the gate may be "accepting every
+        // version" and nobody would notice.
         strictEqual(reportedVersionMatches("clodex v2.8.2", "2.11.1"), false);
     });
 });
 
 describe("kurulu agac", () => {
-    // Bu, birim testi degil, kilidin GERCEK agaci tarif ettiginin kanitidir.
-    // entrypointSha256 tam olarak boyle bir kontrol olmadigi icin bayatlamisti.
+    // This is not a unit test but the proof that the lock describes the REAL tree.
+    // entrypointSha256 had gone stale precisely because no such check existed.
     it("depodaki config/install-lock.json gercek node_modules ile tutarlidir", async (t) => {
         const repoRoot = resolve(import.meta.dirname, "..", "..");
         let real: InstallLock;
@@ -153,10 +153,10 @@ describe("kurulu agac", () => {
     });
 });
 
-// Vaka kaydi: kilitteki `sourceCommit` aylarca ZORUNLU ama HIC OKUNMAYAN bir alandi --
-// bicimi dogrulaniyor, degeri hicbir kapiyla karsilastirilmiyordu. Grok kendi build
-// commit'ini `--version` ciktisinda duyurdugu icin alan aslinda olculebilirdi.
-// Ayni surum etiketini tasiyan iki farkli build'i ayiran sey tam olarak budur.
+// Case record: the lock's `sourceCommit` was for months a REQUIRED but NEVER READ field --
+// its format was validated, its value compared against no gate. Since Grok announces its
+// own build commit in `--version` output, the field was in fact measurable. This is exactly
+// what separates two different builds carrying the same version tag.
 describe("reportedBuildCommitMatches", () => {
     const output = "grok 1.0.13 (5e9a58528b76)";
 
@@ -168,7 +168,7 @@ describe("reportedBuildCommitMatches", () => {
         strictEqual(reportedBuildCommitMatches(output, "5e9a58528b76aaaaaaaaaaaaaaaaaaaaaaaaaaaa"), true);
     });
 
-    // NEGATIF KOL: kapinin firlayabildiginin kaniti. Ayni surum, baska build.
+    // NEGATIVE ARM: proof that the gate can throw. Same version, different build.
     it("BASKA bir commit'i reddeder", () => {
         strictEqual(reportedBuildCommitMatches(output, "77cd7eb675ba"), false);
     });
@@ -182,8 +182,9 @@ describe("reportedBuildCommitMatches", () => {
     });
 });
 
-// A4 (2026-09-02): yan saglayici civisi ana yolu kapatmaz. Ayni gun uc kez yasanan
-// olayin birim kaniti: antigravity surukledi -> eskiden adapter_unavailable, claude yok.
+// A4 (2026-09-02): a side provider's pin does not shut down the main path. The unit
+// evidence for an event that happened three times in one day: antigravity drifted -> it
+// used to mean adapter_unavailable, no claude.
 describe("sideProviderInstallDrift", () => {
     const check = (component: "node" | "claude" | "claude-shadow" | "clodex" | "grok" | "gemini" | "antigravity", status: "ok" | "missing" | "drift", detailCode = "x") =>
         ({ component, expectedVersion: "1", status, detailCode });
@@ -201,19 +202,19 @@ describe("sideProviderInstallDrift", () => {
         deepStrictEqual(sideProviderInstallDrift([check("grok", "ok"), check("antigravity", "ok")], ["grok", "antigravity"]), []);
     });
 
-    // NEGATIF KOL: ana yol bileseni yan saglayici DEGILDIR -- burada yumusamaz,
-    // requireInstallChecks hala firlatir. Iki kapinin ayrimi tam olarak budur.
+    // NEGATIVE ARM: a main-path component is NOT a side provider -- it is not softened
+    // here, requireInstallChecks still throws. That is exactly what separates the two gates.
     it("ana yol bilesenini (claude/clodex) asla yumusatmaz", () => {
         deepStrictEqual(sideProviderInstallDrift([check("claude", "drift"), check("clodex", "missing")], ["claude", "clodex"]), []);
         throws(() => requireInstallChecks([check("claude", "drift")], ["claude"]), /Pinned installation verification failed: claude/u);
     });
 });
 
-// VAKA KAYDI (2026-09-05): kilitteki `localPatchSha256` ile DEPODAKI yerel yama
-// dosyasini karsilastiran hicbir kontrol yoktu. Yamayi duzeltip kilidi guncellemeyi
-// unutmak `npm run check`ten YESIL geciyordu; sapma ancak calisan kurulumda 503 olarak
-// goruluyordu. 06-Altyapi/scripts/civi-surukleme-kontrolu.py RELEASE'i olcer, depoyu
-// degil -- yani bu bosluk baska hicbir kapinin kapsaminda degildi.
+// CASE RECORD (2026-09-05): no check compared the lock's `localPatchSha256` against the
+// local patch file IN THE REPOSITORY. Fixing the patch and forgetting to update the lock
+// passed `npm run check` GREEN; the divergence only showed up as a 503 on a running
+// installation. 06-Altyapi/scripts/civi-surukleme-kontrolu.py measures the RELEASE, not the
+// repository -- so this gap fell within no other gate's scope.
 describe("depo kilidi <-> depo yerel yamasi", () => {
     it("install-lock.json localPatchSha256 depodaki yama dosyasinin ozetidir", async () => {
         const { createHash } = await import("node:crypto");
@@ -222,7 +223,7 @@ describe("depo kilidi <-> depo yerel yamasi", () => {
         const bytes = await readFile(join(repoRoot, real.clodex.localPatch));
         const digest = createHash("sha256").update(bytes).digest("hex").toUpperCase();
         strictEqual(digest, real.clodex.localPatchSha256.toUpperCase(), "kilit ile yama dosyasi ayrismis");
-        // POZITIF KONTROL: enstruman fiilen ayirt ediyor mu? Bos cikti kanit degildir.
+        // POSITIVE CONTROL: does the instrument actually discriminate? Empty output is not evidence.
         const mutated = createHash("sha256").update(Buffer.concat([bytes, Buffer.from("\n")])).digest("hex").toUpperCase();
         strictEqual(mutated === real.clodex.localPatchSha256.toUpperCase(), false, "ozet degisiklige duyarsiz");
     });

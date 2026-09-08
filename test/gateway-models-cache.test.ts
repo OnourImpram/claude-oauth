@@ -14,8 +14,9 @@ import {
     writeGatewayModelsCache,
 } from "../src/runtime/gateway-models-cache.js";
 
-// Fixture: 2026-09-02'de diskte OLCULEN gercek onbellek -- kesif ne yaziyorsa o.
-// baseUrl olu bir efemeral port; bu, operatorun picker'inin bos oldugu andaki dosya.
+// Fixture: the real cache MEASURED on disk on 2026-09-02 -- exactly what discovery wrote.
+// baseUrl is a dead ephemeral port; this is the file as it stood at the moment the
+// operator's picker was empty.
 const OLCULEN_BAYAT_ONBELLEK = {
     baseUrl: "http://127.0.0.1:51654",
     fetchedAt: 1788293828770,
@@ -26,16 +27,17 @@ const OLCULEN_BAYAT_ONBELLEK = {
     ],
 };
 
-// discoveryPayload() bicimi: registry.ts:66-83 ile ayni alanlar.
+// discoveryPayload() shape: the same fields as registry.ts:66-83.
 const KESIF_YUKU = {
     data: [
         { type: "model", id: "anthropic-openai-gpt-5.6-sol", display_name: "GPT-5.6 Sol via ChatGPT OAuth", context_window: 872_000, max_input_tokens: 872_000, max_output_tokens: 128_000 },
-        // Astra 2026-09-05'ten beri ILAN EDILEN sayiyi tasir (1_000_000), Sol olculen
-        // sayiyi (872_000). Kurgu gercek kesif ciktisini taklit eder; bu iki sayinin
-        // farkli olmasi kasitlidir ve o farkin olcusu contract-derivation.test.ts'tedir.
+        // Since 2026-09-05 Astra carries the ADVERTISED number (1_000_000), Sol the
+        // measured one (872_000). The fixture imitates real discovery output; the two
+        // numbers differing is deliberate, and the measure of that difference lives in
+        // contract-derivation.test.ts.
         { type: "model", id: "anthropic-openai-gpt-6-astra", display_name: "GPT-6 Astra via ChatGPT OAuth", context_window: 1_000_000, max_input_tokens: 1_000_000, max_output_tokens: 128_000 },
         { type: "model", id: "anthropic-xai-grok-4.6", display_name: "Grok 4.6 via xAI OAuth, read-only agent", context_window: 500_000, max_input_tokens: 500_000 },
-        // Kusurlu satirlar ATLANIR, dosyayi bozmaz: kesif de bunlari yazmazdi.
+        // Malformed rows are DROPPED and do not corrupt the file: discovery would not have written them either.
         { type: "model", id: 42, display_name: "bozuk id" },
         { type: "model", id: "eksik-ad" },
         "dizge",
@@ -56,13 +58,14 @@ describe("gateway-models-cache", () => {
     });
 
     afterEach(async () => {
-        // ENSTRUMAN KUSURU, denek kusuru degil (olculdu 2026-09-05, bu kosumda): tam
-        // takim paralel kostugunda bu temizlik Windows'ta ~4/19 kosumda
-        // "ENOTEMPTY: directory not empty, rmdir ...\cache" ile duserek `npm run check`i
-        // KIRMIZI yakiyordu; ayni dosya tek basina 12/12 temiz kostu. Yani yesil/kirmizi
-        // ayrimi kodun degil, silme aninda dosya tanitiminin serbest kalip kalmadigina
-        // bagliydi -- ve boyle bir kapiyi kimse ciddiye almaz, bypass bir tesvik kusurudur.
-        // maxRetries/retryDelay Node'un ENOTEMPTY/EBUSY icin belgelenmis kolu.
+        // AN INSTRUMENT DEFECT, not a subject defect (measured 2026-09-05, in this run):
+        // when the full suite ran in parallel this cleanup failed on Windows in ~4/19 runs
+        // with "ENOTEMPTY: directory not empty, rmdir ...\cache" and turned `npm run check`
+        // RED; the same file on its own ran 12/12 clean. So the green/red distinction
+        // depended not on the code but on whether the file handle happened to be released
+        // at the moment of deletion -- and nobody takes a gate like that seriously, so a
+        // bypass becomes an incentive defect. maxRetries/retryDelay is Node's documented
+        // arm for ENOTEMPTY/EBUSY.
         await rm(dizin, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
@@ -113,7 +116,7 @@ describe("gateway-models-cache", () => {
     it("A1/A3: writes only when the router holds the pinned port", () => {
         assert.equal(shouldWriteGatewayModelsCache(8791, 8791), true, "pinned session writes");
         assert.equal(shouldWriteGatewayModelsCache(9000, 9000), true, "HEZARFEN_ROUTER_PORT override is the pin");
-        // NEGATIF KOL -- olculen ariza: efemeral port (51654) sabit oturumun onbellegini ezmez.
+        // NEGATIVE ARM -- the measured fault: an ephemeral port (51654) does not overwrite the pinned session's cache.
         assert.equal(shouldWriteGatewayModelsCache(51654, 8791), false, "ephemeral session skips");
     });
 

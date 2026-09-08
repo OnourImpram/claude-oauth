@@ -1,5 +1,5 @@
-// Faz 9 / Yol 4 -- ACP oturumlarini Claude Code'un ardisik istekleri boyunca
-// canli tutan defter.
+// Phase 9 / Path 4 -- the registry that keeps ACP sessions alive across Claude
+// Code's successive requests.
 //
 // THE PROBLEM THIS SOLVES
 // Anthropic's Messages API is stateless: every turn arrives with the whole
@@ -45,7 +45,7 @@ export interface StartAgentOptions {
     readonly mcpUrl: string;
     /** Headers the agent must send with it -- the router session nonce. */
     readonly mcpHeaders: Readonly<Record<string, string>>;
-    /** Yukari akis model adi; starter saglayiciya bunu gecirir. */
+    /** Upstream model name; the starter passes this on to the provider. */
     readonly model: string;
     readonly sessionKey: string;
 }
@@ -91,16 +91,16 @@ export interface SessionRegistryOptions {
     /** Read lazily for the same reason; the session nonce is minted later. */
     readonly mcpHeaders?: () => Readonly<Record<string, string>>;
     /**
-     * Park edilmis bir cagrinin olum saati. VARSAYILAN: yok (0).
+     * Time of death for a parked call. DEFAULT: none (0).
      *
-     * Koprunun kendi 600 sn'lik varsayilani, insan hizindaki bir izin istemi
-     * ya da uzun bir araca gore KISAYDI; ustelik zaman asimi Claude Code'un
-     * gec gelen tool_result'ini eslesmeyen sayaca yaziyordu. Yetki artik
-     * router'in istek zaman asiminda ve sweep'te: iki farkli olay iki farkli
-     * sayaca yazilir (bkz. timedOutResultCount).
+     * The bridge's own 600 s default was SHORT relative to a human-speed permission
+     * prompt or a long-running tool; worse, the timeout wrote Claude Code's
+     * late-arriving tool_result into the unmatched counter. Authority now lies with
+     * the router's request timeout and the sweep: two different events are written to
+     * two different counters (see timedOutResultCount).
      */
     readonly callTimeoutMs?: number;
-    /** Es zamanli canli oturum tavani. Her oturum bir saglayici sureci demektir. */
+    /** Ceiling on concurrent live sessions. Each session means one provider process. */
     readonly maxLiveSessions?: number;
     readonly startAgent: AgentStarter;
 }
@@ -267,7 +267,7 @@ export class AgentSessionRegistry {
     readonly #mcpHeaders: () => Readonly<Record<string, string>>;
     readonly #callTimeoutMs: number;
     readonly #maxLiveSessions: number;
-    /** Router kendi zaman asimiyla dusurdugu cagrilar. AYRI sayilir. */
+    /** Calls the router itself dropped on its own timeout. Counted SEPARATELY. */
     #timedOutResults = 0;
     readonly #timedOutCalls = new Set<string>();
     readonly #startAgent: AgentStarter;
@@ -294,9 +294,9 @@ export class AgentSessionRegistry {
      */
     get unmatchedResultCount(): number {
         let total = this.#orphanResults;
-        // Router kendi zaman asimiyla dusurdugu cagrilari BU sayaca yazmaz:
-        // 'is kayboldu' ile 'biz vazgectik' ayni sayida cokerse kapi neyi
-        // olctugunu soyleyemez.
+        // Calls the router dropped on its own timeout are NOT written to THIS counter:
+        // if 'work was lost' and 'we gave up' collapse into the same number, the gate
+        // cannot say what it measures.
         for (const session of this.#sessions.values()) {
             total += session.bridge.unmatchedResultCount;
         }
@@ -304,11 +304,11 @@ export class AgentSessionRegistry {
     }
 
     /**
-     * Router kendi zaman asimiyla dusurup sonra cevabi gelen cagrilar.
+     * Calls the router dropped on its own timeout and whose answer arrived afterwards.
      *
-     * Her zaman sifir donen bir sayac, olmayan bir sayactan daha kotudur:
-     * yesil gorunur ve hicbir sey olcmez. Bu yuzden koprulerden TOPLANIR ve
-     * emekli olan oturumun katkisi devralinir.
+     * A counter that always returns zero is worse than a counter that does not exist:
+     * it looks green and measures nothing. That is why it is SUMMED across the bridges
+     * and a retired session's contribution is carried over.
      */
     get timedOutResultCount(): number {
         let total = this.#timedOutResults;
@@ -346,13 +346,13 @@ export class AgentSessionRegistry {
         signal?: AbortSignal,
     ): Promise<BeginResult> {
         this.sweep();
-        // Her canli oturum bir saglayici SURECI demektir. Tavan olmadan
-        // es zamanli istekler makineyi doldurur; adaptorun kendi #queue
-        // serilestirmesi bu yolda calismiyor (arac yolu #invoke'u atlar).
-        // Bir kullanici duz bir turla yeni bir konusma acinca eski oturum
-        // ADRESSIZ kalir: kimligi tool_use.id oldugu icin ona bir daha kimse
-        // ulasamaz, ama sureci yasar. Tavana varinca en eski BOSTA oturum geri
-        // alinir -- kullaniciyi 503'e carpmak yerine kaynagi geri kazanmak.
+        // Each live session means one provider PROCESS. Without a ceiling, concurrent
+        // requests fill the machine; the adapter's own #queue serialisation does not
+        // apply on this path (the tool path bypasses #invoke).
+        // When a user opens a new conversation with a plain turn, the old session is left
+        // UNADDRESSABLE: because its identity is the tool_use.id, nobody can reach it
+        // again, yet its process lives on. On hitting the ceiling the oldest IDLE session
+        // is reclaimed -- recovering the resource rather than hitting the user with a 503.
         while (this.#sessions.size >= this.#maxLiveSessions) {
             let enEski: [string, AgentSession] | undefined;
             for (const giris of this.#sessions) {
@@ -360,8 +360,8 @@ export class AgentSessionRegistry {
                 if (enEski === undefined || giris[1].touchedAt < enEski[1].touchedAt) enEski = giris;
             }
             if (enEski === undefined) {
-                // Hepsi tur ortasinda: geri alinacak bir sey yok, ve sessizce
-                // bir tane daha acmak makineyi doldurur.
+                // All of them are mid-turn: there is nothing to reclaim, and silently
+                // opening one more fills the machine.
                 throw new RouterError(
                     "adapter_unavailable",
                     `Too many agent turns in flight (${this.#sessions.size}). ONARIM: wait for a turn to finish or cancel one; each live session holds a provider process.`,
@@ -470,10 +470,10 @@ export class AgentSessionRegistry {
         turn: Promise<TurnOutcome>,
         signal?: AbortSignal,
     ): Promise<TurnOutcome> {
-        // BULGU 1. Bu baglanti olmadan router'in 300 sn istek zaman asimi ve
-        // iki client-disconnect abort'u BU ROTADA OLU kalir: kosan bir ACP
-        // turunu bitirecek tek sey ajanin kendiliginden bitmesidir. Ustelik
-        // #running bir oturum sweep edilmez, yani takilan oturum olumsuzdur.
+        // FINDING 1. Without this wiring the router's 300 s request timeout and the two
+        // client-disconnect aborts stay DEAD ON THIS ROUTE: the only thing that would end
+        // a running ACP turn is the agent finishing on its own. On top of that a #running
+        // session is never swept, so a stuck session is immortal.
         const iptal = (): void => session.cancel("client request aborted");
         if (signal !== undefined) {
             if (signal.aborted) iptal();
