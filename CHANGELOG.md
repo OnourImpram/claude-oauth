@@ -7,6 +7,16 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: B06 discovery input capacity (2026-09-08)
+
+- **Repaired 2026-09-08.** Discovery separates the presentation `context_window` from
+  `max_input_tokens`, using the lower of the advertisement and verified snapshot capacity
+  for input. Astra retains its 1,000,000 presentation value and uses the unchanged 872,000
+  install-lock pin for input: accepted capacity unproven, advertisement capped at the pin.
+- Tests cover every routed contract, read the OpenAI pin from `config/install-lock.json`,
+  and verify that a smaller snapshot capacity lowers the input advertisement. Live
+  near-limit transport acceptance and output-budget probes were NOT_RUN; no pin changed.
+
 ### Fixed: B04 checked-file replacement race (2026-09-08)
 
 - **Repaired 2026-09-08 for the checked-file replacement race.** Existing workspace files

@@ -13,23 +13,11 @@ export function claudeClientDiscoveryId(model: ModelRecord): string {
     return reviewedLongContext || reviewedAgentLongContext ? `${model.id}[1m]` : model.id;
 }
 /**
- * The window Claude Code is TOLD about -- the single surface that reaches it, since
- * gateway-models.json carries only {id, display_name} and the launcher takes the
- * auto-compaction threshold from the contract, not from here.
- *
- * WHY the override lives at this projection and NOT in the snapshot (2026-09-05, Astra).
- * clodex 2.11.1 seeds Astra with maxContextWindow 872_000 -- the GPT-5.6 family's ceiling
- * copied onto a model whose own card says 1,050,000 -- and the pin in
- * config/install-lock.json verifies that measured number. Writing 1_000_000 into the
- * snapshot instead would have advertised the same thing while destroying the evidence:
- * isVerifiedOpenAiSnapshotRoute and openAiSnapshotRouteDrift compare the SNAPSHOT number
- * against the LIVE one, so a snapshot carrying a policy constant matches itself forever and
- * a live catalogue falling 872_000 -> 272_000 (the "standard" context stop, measured on the
- * 5.6 lane on 2026-09-01) would pass verification. Here the measured number stays measured,
- * the detector keeps its anchor, and only the announcement moves.
- *
- * Returns model.contextWindow unchanged for every row without a documented override, and
- * never invents a window for a row that has none.
+ * Presentation value for discovery's context_window and modelDetail's advertisement.
+ * This override does not establish accepted input capacity. max_input_tokens is bounded
+ * separately by model.contextWindow, which refresh verifies against the transport pin.
+ * The snapshot remains unchanged so live catalogue drift can still be detected.
+ * Rows without a documented override retain their snapshot value.
  */
 export function advertisedContextWindow(model: ModelRecord): number | undefined {
     if (model.contextWindow === undefined)
@@ -135,9 +123,9 @@ export class ModelRegistry {
                 type: "model",
                 id: clientId,
                 display_name: model.displayName,
-                ...(advertised === undefined
+                ...(advertised === undefined || model.contextWindow === undefined
                     ? {}
-                    : { context_window: advertised, max_input_tokens: advertised }),
+                    : { context_window: advertised, max_input_tokens: Math.min(advertised, model.contextWindow) }),
                 ...(model.maximumOutputTokens === undefined
                     ? {}
                     : { max_output_tokens: model.maximumOutputTokens }),

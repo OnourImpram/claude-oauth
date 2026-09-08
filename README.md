@@ -172,7 +172,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | B03 | High | An xAI continuation request can lose both the session id and the new user instruction. |
 | ~~B04~~ | High, residual scope | **Repaired 2026-09-08 for the checked-file replacement race.** Writes use a non-truncating open, validate the handle identity, and write through that handle; new files use exclusive creation, with deterministic Windows symlink/junction tests proving outside target contents stay unchanged. Arbitrary ancestor replacement remains a limitation requiring platform-specific filesystem support; see `SECURITY.md`. |
 | B05 | High | This tree contains no launcher shim, so the native/router separation cannot be verified from the repository. |
-| B06 | High | The long-context advertisement is written into `max_input_tokens`, a protocol capacity contract, above the pinned snapshot value. A client obeying the advertised limit may build a request the transport does not accept. Unproven either way. |
+| ~~B06~~ | ~~High~~ | **Repaired 2026-09-08.** `max_input_tokens` uses the lower of the advertised window and snapshot transport capacity, tested for every routed model against its pin; Astra's `context_window` remains a presentation value of 1,000,000 while input is capped at the unchanged 872,000 pin: accepted capacity unproven, advertisement capped at the pin. |
 | ~~G01~~ | ~~High~~ | **Repaired 2026-09-08.** The Google lane now carries the same tool loop the xAI lane has. The objection that kept it away was that `agy mcp add` writes the session nonce into the operator's persistent config; the lane instead runs inside a **call-scoped configuration home** (`USERPROFILE` redirected, identity files hard-linked, never copied), so the operator's own `mcp_config.json` is never opened for writing. Live receipt: the router logged `agent_tool_call_parked`, Claude Code executed the MCP tool 213 ms later, one `tool_use` block crossed the stream, and the model returned a string it could not otherwise know. NOT claimed: a multi-step loop, or the `Agent` sub-loop. |
 | G02 | High | A non-empty `.mcp.json` in the project root, Claude Code's standard project MCP file, makes the xAI lane refuse to start (503). Fail-closed, but it is a denial of the lane in any repository that has one. |
 | ~~G03~~ | ~~High~~ | **Repaired 2026-09-08.** A session parked on a tool call set `running = false` and so looked idle; at the cap the oldest such session was cancelled mid-loop and the returning `tool_result` found no session. A first repair used a 60 s age window; an independent wall-clock measurement then showed a legitimate 61 s permission wait being sacrificed, so age was dropped as the discriminator. Now a parked session is never evicted for capacity: at the cap the request receives an explicit 503. The cost is stated in the source: an abandoned parked session holds capacity until the idle timeout or the provider's own timeout. Both registries also close and wait on shutdown (previously only the xAI one did; four Google processes and homes were measured surviving `close()`). |
@@ -186,6 +186,12 @@ pre-release README that hides them is worthless. Ids are stable across this file
 B01's measured Google native-write bypass is closed. The live check covers direct routing with
 `gemini-3.8-flash-high` on Windows; it does not establish permission inheritance through `Agent`
 child sessions or live enforcement of every denied action category.
+
+In model discovery, `context_window` is the model's advertised presentation window.
+`max_input_tokens` is the protocol input capacity and never uses a presentation override to
+exceed the verified snapshot value. OpenAI refresh accepts a snapshot capacity only when it
+matches `config/install-lock.json`. The pin is a conservative transport bound, not proof of
+live acceptance; near-limit input and output-budget probes were NOT_RUN in this local run.
 
 ## Requirements
 

@@ -9,7 +9,7 @@ import {
     OPENAI_CONTEXT_WINDOW_TOKENS,
     OPENAI_MODEL_CONTRACTS,
 } from "../src/domain/model-contracts.js";
-import { withVerifiedOpenAiModels } from "../src/domain/model-refresh.js";
+import { withVerifiedGoogleModels, withVerifiedGrokModel, withVerifiedOpenAiModels } from "../src/domain/model-refresh.js";
 import { ModelRegistry, advertisedContextWindow, claudeClientDiscoveryId, modelDetail } from "../src/domain/registry.js";
 import { antigravityAllowedModels } from "../src/antigravity/headless-bridge.js";
 import { claudeOAuthAgentArguments } from "../src/supervisor/launcher.js";
@@ -181,12 +181,38 @@ function astraRow(over: {
 
 
 describe("the window advertised to Claude Code is derived from the contract", () => {
-    it("Astra advertises 1_000_000 -- context_window and max_input_tokens together", () => {
+    it("B06 Astra keeps the context advertisement separate from its pinned input capacity", () => {
         const line = discoveryRows(verifiedSnapshot).find((entry) => String(entry["id"]).startsWith("anthropic-openai-gpt-6-astra"));
         ok(line !== undefined, "Astra discovery row is missing");
         strictEqual(line["context_window"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
-        strictEqual(line["max_input_tokens"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
+        strictEqual(line["max_input_tokens"], LIVE_WINDOW);
         strictEqual(OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS, 1_000_000);
+    });
+
+    it("B06 every routed model advertises max_input_tokens at or below its snapshot pin", async () => {
+        const lock = JSON.parse(await readFile(resolve("config/install-lock.json"), "utf8")) as { claudeShadow: { openAiContextWindow: number } };
+        const pin = lock.claudeShadow.openAiContextWindow;
+        ok(Number.isSafeInteger(pin) && pin > 0);
+        const openAi = withVerifiedOpenAiModels(emptyBaseline, liveCatalog(pin), pin);
+        const google = withVerifiedGoogleModels(openAi, AGENT_MODEL_CONTRACTS.filter((model) => model.provider === "google").map((model) => model.upstreamModel));
+        const snapshot = withVerifiedGrokModel(google, AGENT_MODEL_CONTRACTS.filter((model) => model.provider === "xai").map((model) => ({ id: model.upstreamModel, contextWindow: model.contextWindow })));
+        const rows = discoveryRows(snapshot);
+        strictEqual(rows.length, ALL_EXTERNAL_IDS.length, "every routed contract must be covered");
+        for (const model of snapshot.models) {
+            const row = rows.find((entry) => entry["id"] === claudeClientDiscoveryId(model));
+            ok(row !== undefined, `missing discovery row: ${model.id}`);
+            const input = row["max_input_tokens"];
+            ok(typeof input === "number" && input > 0, `missing capacity: ${model.id}`);
+            ok(model.contextWindow !== undefined && input <= model.contextWindow, `input capacity exceeds snapshot pin: ${model.id}`);
+            if (model.provider === "openai") ok(input <= pin, `input capacity exceeds install-lock pin: ${model.id}`);
+        }
+    });
+
+    it("B06 input capacity follows a smaller snapshot window even with an Astra advertisement", () => {
+        const snapshot = { ...emptyBaseline, models: [astraRow({ contextWindow: 272_000 })] };
+        const row = discoveryRows(snapshot)[0];
+        strictEqual(row?.["context_window"], OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS);
+        strictEqual(row?.["max_input_tokens"], 272_000);
     });
 
     // EVIDENCE GRAMMAR: the advertisement is a POLICY number, not a measurement. The

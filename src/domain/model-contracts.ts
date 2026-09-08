@@ -43,7 +43,9 @@ export const OPENAI_AUTO_COMPACT_WINDOW_TOKENS = 220_000;
 // NOT what any provider snapshot measured. The two numbers are deliberately different and
 // live in different places: the snapshot keeps the measured live number (872_000 today) so
 // openAiSnapshotRouteDrift can still see a live catalogue move; this constant is a policy
-// projection applied at the discovery surface only (src/domain/registry.ts).
+// projection applied to context_window only (src/domain/registry.ts). It must never raise
+// max_input_tokens above the snapshot's pinned transport capacity. Accepted capacity above
+// that pin is unproven; a model-card advertisement does not establish OAuth acceptance.
 //
 // 1_000_000 rather than the model card's own 1,050,000, and the reason is NOT the picker id.
 //
@@ -152,10 +154,8 @@ export interface OpenAiModelContract {
     readonly maximumOutputTokens: typeof OPENAI_MAXIMUM_OUTPUT_TOKENS;
     readonly autoCompactWindow: number;
     /**
-     * What Claude Code is TOLD this model's window is, when that must differ from the
-     * number the live catalogue reports. Absent means "advertise the measured number",
-     * which is the honest default and stays the default for every row that has no
-     * documented reason to diverge.
+     * Presentation-only context_window override. max_input_tokens uses the lower of this
+     * value and the verified snapshot contextWindow. Absent means use the snapshot value.
      *
      * It is read ONLY by the discovery projection (src/domain/registry.ts). Verification
      * -- withVerifiedOpenAiModels, isVerifiedOpenAiSnapshotRoute, openAiSnapshotRouteDrift,
@@ -195,15 +195,9 @@ export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
     // contextWindow here is the ceiling (openAiCatalogEntry checks live <= ceiling), not
     // an equality: Astra's own maxContextWindow is 872_000.
     //
-    // 2026-09-05: Astra STOPS sharing the 5.6 family's 220_000 auto-compaction window, and
-    // it advertises 1_000_000 instead of the 872_000 clodex seeds. Both moves rest on the
-    // two sources quoted in contextWindowSource; without them 872_000/220_000 would be
-    // right. clodex's 872_000 is a DATA defect, not a model limit -- it is the 5.6 family's
-    // ceiling copied onto a model whose own card says 1,050,000 -- and clodex clamps every
-    // request for a larger window back to it (resolveContextStop: raw = min(requested,
-    // maxContextWindow)), so `clodex models --context astra=1000000` cannot fix it from the
-    // outside. Advertising is the only lever this repo holds, and it is a lever on what
-    // Claude Code BUDGETS, never on what the upstream will accept.
+    // Astra's context_window presentation and compaction policy remain independent of
+    // max_input_tokens. The historical sources below explain that policy; they do not
+    // prove the capacity accepted by this OAuth transport. Discovery caps input at the pin.
     {
         alias: "astra",
         id: "anthropic-openai-gpt-6-astra",
