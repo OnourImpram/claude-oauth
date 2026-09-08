@@ -116,6 +116,15 @@ export async function createEphemeralConfigHome(options: ConfigHomeOptions): Pro
             await linkIdentityFile(join(source, ".gemini", name), join(gemini, name));
         }
         await writeFile(join(gemini, "config", "mcp_config.json"), `${JSON.stringify(serverMap(options), undefined, 2)}\n`, "utf8");
+        if (options.endpoint !== undefined) {
+            const settingsDirectory = join(gemini, "antigravity-cli");
+            await mkdir(settingsDirectory, { recursive: true });
+            // Measured with agy 1.1.27 on 2026-09-08: headless permissions use
+            // mcp(server/tool), not a colon. This grants only our MCP server;
+            // agy's implicit workspace file permissions are a separate policy.
+            const settings = { permissions: { allow: [`mcp(${options.serverName ?? DEFAULT_TOOL_SERVER_NAME}/*)`] } };
+            await writeFile(join(settingsDirectory, "settings.json"), `${JSON.stringify(settings)}\n`, "utf8");
+        }
         const owner: OwnerRecord = { pid: options.pid ?? process.pid, createdAt: (options.now ?? Date.now)() };
         await writeFile(join(path, OWNER_FILE), `${JSON.stringify(owner)}\n`, "utf8");
     }

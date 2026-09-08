@@ -279,21 +279,19 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
         });
         strictEqual(error.code, "provider_tool_permission_denied");
         ok(error.message.includes("FIX:"), "an actionable code shipped without its remedy");
-        ok(error.message.includes("--mode plan --sandbox"), "the remedy does not name this lane's flags");
+        ok(error.message.includes("--sandbox"), "the remedy does not name this lane's flags");
+        ok(!error.message.includes("--mode"), "the remedy must not prescribe a dead flag");
     });
 
-    it("on an edit-enabled lane the remedy names THAT lane, not the plan-mode one", async () => {
-        // The red team's counter-example: provider-set.ts passes allowEdits: true, and
-        // the message still claimed "--mode plan --sandbox" -- a remedy describing a
-        // command that was never run.
+    it("on a legacy edit-enabled lane the remedy names the effective bypass flag", async () => {
         const error = await bridgeFailure({
             exitCode: 0,
             stdout: success(""),
             stderr: "tool call denied: permission could not be granted",
         }, true);
         strictEqual(error.code, "provider_tool_permission_denied");
-        ok(error.message.includes("--mode accept-edits"), "the remedy describes a command this call never ran");
-        ok(!error.message.includes("--mode plan"), "the remedy names a lane that was not used");
+        ok(error.message.includes("--dangerously-skip-permissions"), "the remedy describes a command this call never ran");
+        ok(!error.message.includes("--mode"), "the remedy names a flag that was not used");
     });
 
     it("negative arm: an empty response WITHOUT that evidence is not called a permission denial", async () => {
@@ -382,11 +380,7 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
         strictEqual(error.code, "provider_tool_permission_denied");
     });
 
-    it("allowEdits decides the child's actual permission flags -- and nothing else did", async () => {
-        // Found by the mutation control, not by reading: replacing
-        // `options.allowEdits === true` in the processArguments call with `false`
-        // killed no test at all. The flag that decides whether the child may edit
-        // files and skip permission prompts was measured by nothing.
+    it("B01 (b): endpoint-free delegation is sandboxed without dead mode flags; legacy edit opt-in is preserved", async () => {
         const seen: string[][] = [];
         for (const allowEdits of [false, true]) {
             const home = mkdtempSync(join(tmpdir(), "agy-detail-args-"));
@@ -410,12 +404,12 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
             }
         }
         const [planned, editing] = seen;
-        ok(planned?.includes("plan"), "the delegation lane must stay in plan mode");
+        ok(!planned?.includes("--mode"), "mode is ineffective with slash commands disabled");
         ok(planned?.includes("--sandbox"), "the delegation lane must stay sandboxed");
-        ok(!planned?.includes("--dangerously-skip-permissions"), "plan mode must not skip permissions");
-        ok(editing?.includes("accept-edits"), "an edit-enabled lane must reach accept-edits mode");
+        ok(!planned?.includes("--dangerously-skip-permissions"), "delegation must not skip permissions");
+        ok(!editing?.includes("--mode"), "mode is ineffective with slash commands disabled");
         ok(editing?.includes("--dangerously-skip-permissions"), "an edit-enabled lane must carry its own flag");
-        ok(!editing?.includes("--sandbox"), "accept-edits and --sandbox must not be sent together");
+        ok(!editing?.includes("--sandbox"), "the legacy edit opt-in must retain its behavior");
     });
 
     it("negative arm: a non-empty response still succeeds", async () => {

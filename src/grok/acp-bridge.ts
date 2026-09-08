@@ -9,7 +9,7 @@ import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security
 import { spawnFailureGuard } from "../runtime/child-process.js";
 import { ensurePrivateDirectory } from "../runtime/paths.js";
 import { selectTextLines } from "../runtime/text-lines.js";
-import { readBoundedWorkspaceText, writeBoundedWorkspaceText } from "../security/workspace-read.js";
+import { readBoundedWorkspaceText } from "../security/workspace-read.js";
 import {
     GROK_46_MODEL_ID,
     GROK_AUTO_COMPACT_THRESHOLD_PERCENT,
@@ -37,9 +37,8 @@ export interface GrokProcessEnvironmentOptions {
     readonly cwd: string;
     readonly environment?: NodeJS.ProcessEnv;
     /**
-     * 2026-09-03: is this an INTERACTIVE session selected through `/model`?
-     * If true, grok runs with full authority (the permission arm allows, writing is on).
-     * false/undefined -> the one-shot DELEGATION path, which stays read-only.
+     * Retained for callers that identify interactive sessions. Both session and
+     * delegation processes reject local tool permissions; this flag grants no authority.
      */
     readonly interactive?: boolean;
 }
@@ -56,8 +55,6 @@ interface TomlToken {
 }
 type RequestPermissionParams = acp.ClientRequestParamsByMethod[typeof acp.methods.client.session.requestPermission];
 type RequestPermissionResponse = acp.ClientRequestResponsesByMethod[typeof acp.methods.client.session.requestPermission];
-type WriteTextFileParams = acp.ClientRequestParamsByMethod[typeof acp.methods.client.fs.writeTextFile];
-type WriteTextFileResponse = acp.ClientRequestResponsesByMethod[typeof acp.methods.client.fs.writeTextFile];
 type ReadTextFileParams = acp.ClientRequestParamsByMethod[typeof acp.methods.client.fs.readTextFile];
 type ReadTextFileResponse = acp.ClientRequestResponsesByMethod[typeof acp.methods.client.fs.readTextFile];
 type SessionUpdateParams = acp.ClientNotificationParamsByMethod[typeof acp.methods.client.session.update];
@@ -360,13 +357,13 @@ async function assertSafeGrokConfig(home: string, cwd: string): Promise<void> {
         current = parent;
     }
 }
-function grokEnvironment(home: string, source: NodeJS.ProcessEnv, interactive = false): NodeJS.ProcessEnv {
+function grokEnvironment(home: string, source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const environment = sanitizedWorkerEnvironment("xai", source);
     environment["GROK_HOME"] = home;
     environment["GROK_DISABLE_API_KEY_AUTH"] = "1";
     environment["GROK_OAUTH_ENABLED"] = "1";
     environment["GROK_DEFAULT_MODEL"] = GROK_46_MODEL_ID;
-    environment["GROK_DEFAULT_SELECTED_PERMISSION"] = interactive ? "allow" : "reject";
+    environment["GROK_DEFAULT_SELECTED_PERMISSION"] = "reject";
     environment["GROK_FOLDER_TRUST"] = "1";
     environment["GROK_MEMORY"] = "0";
     environment["GROK_SUBAGENTS"] = "0";
@@ -383,7 +380,7 @@ export async function prepareGrokProcessEnvironment(options: GrokProcessEnvironm
     assertNoApiKeySelectors(source);
     await ensurePrivateDirectory(options.home);
     await assertSafeGrokConfig(options.home, options.cwd);
-    return grokEnvironment(options.home, source, options.interactive === true);
+    return grokEnvironment(options.home, source);
 }
 function spawnGrok(options: { readonly binary: string; readonly cwd: string }, environment: NodeJS.ProcessEnv, model?: string): ChildProcess {
     const argumentsList = [
@@ -537,15 +534,6 @@ class ReadOnlyGrokClient {
             this.#chunks.push(params.update.content.text);
         }
     }
-    async writeTextFile(params: WriteTextFileParams): Promise<WriteTextFileResponse> {
-        await writeBoundedWorkspaceText({
-            workspace: this.#workspace,
-            requestedPath: params.path,
-            content: params.content,
-            maximumBytes: maximumReadableFileBytes,
-        });
-        return null as unknown as WriteTextFileResponse;
-    }
     async readTextFile(params: ReadTextFileParams): Promise<ReadTextFileResponse> {
         const text = await readBoundedWorkspaceText({
             workspace: this.#workspace,
@@ -635,7 +623,7 @@ export async function runGrokAcp(options: GrokAcpOptions): Promise<GrokAcpResult
 export interface GrokAcpSessionOptions extends GrokAcpOptions {
     /** MCP servers. In Phase 9 there is a single element: the tool bridge on the router. */
     readonly mcpServers?: readonly unknown[];
-    /** Tool names published by the bridge; the permission arm recognises these. */
+    /** Published MCP tool names; only a fully qualified matching MCP request can be allowed. */
     readonly bridgedToolNames?: readonly string[];
 }
 
@@ -646,24 +634,26 @@ export interface GrokAcpSession {
     cancel(reason: string): void;
 }
 
-/**
- * Is this a permission request for a tool published by the bridge?
- *
- * [UNVERIFIED] Whether the ACP agent runs its OWN permission flow for an MCP tool call,
- * and if it does, which field of the request carries the tool name, will be MEASURED IN A
- * LIVE RUN. Until then this arm is FAIL-CLOSED: if it cannot recognise the name it
- * refuses. A permission gate opened on the wrong side would also let loose the agent's
- * own write tools.
- */
-function namesBridgedTool(params: unknown, bridged: readonly string[]): boolean {
-    if (bridged.length === 0) return false;
-    const serializedParams = JSON.stringify(params ?? {});
-    return bridged.some((name) => serializedParams.includes(`"${name}"`));
+function namesBridgedTool(params: RequestPermissionParams, options: GrokAcpSessionOptions): boolean {
+    // MEASURED 2026-09-08: Grok requests ACP permission for MCP through UseTool.
+    // This xAI extension is not defined by ACP; unknown shapes remain denied.
+    // A title or tool name occurring elsewhere in the input is not an MCP identity.
+    const toolCall = params.toolCall;
+    const descriptor = toolCall._meta?.["x.ai/tool"];
+    const input = toolCall.rawInput;
+    if (toolCall.kind !== "other" || !isRecord(descriptor) ||
+        descriptor["version"] !== 1 || descriptor["namespace"] !== "grok_build" ||
+        descriptor["name"] !== "use_tool" || descriptor["kind"] !== "use_tool" ||
+        !isRecord(input) || input["variant"] !== "UseTool" || typeof input["tool_name"] !== "string") {
+        return false;
+    }
+    return (options.mcpServers ?? []).some((server) =>
+        isRecord(server) && server["type"] === "http" && typeof server["name"] === "string" &&
+        (options.bridgedToolNames ?? []).some((name) => input["tool_name"] === `${server["name"]}__${name}`));
 }
 
 export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSession {
     const implementation = new ReadOnlyGrokClient(options.cwd);
-    const bridged = options.bridgedToolNames ?? [];
     // FINDING 2 (adversarial review). cancel() can be called BEFORE the child is SPAWNED;
     // in the old shape it then did nothing and the IIFE would still start the child --
     // a process that cannot be killed, and a router that does not shut down.
@@ -676,7 +666,7 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
             throw new RouterError("invalid_request", "Grok task must not be empty.", 400);
         }
         if (cancelled) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled before start.", 504);
-        const environment = await prepareGrokProcessEnvironment({ ...options, interactive: true });
+        const environment = await prepareGrokProcessEnvironment(options);
         child = spawnGrok(options, environment, options.model);
         const spawnFailure = spawnFailureGuard(child);
         // Race: cancel() may have arrived between the spawn and this line.
@@ -689,28 +679,28 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
         try {
             await acp
                 .client({ name: "hezarfen-claude-oauth" })
+                // Allow only the measured MCP invocation envelope, for one call.
+                // Claude Code still decides the actual tool effect after it parks.
+                // Source: https://agentclientprotocol.com/protocol/tool-calls#requesting-permission
                 .onRequest(acp.methods.client.session.requestPermission, (context) => {
-                    // 2026-09-03: in an interactive session grok is a fully working model.
-                    // The bridge no longer REFUSES by default; if an allow option exists it
-                    // selects it. The bridge is NOT a permission layer -- the real boundary is
-                    // Claude Code's own permission system (see the bridged tool arm kept below).
-                    void bridged;
-                    const allowed = context.params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always");
-                    if (allowed !== undefined) {
-                        return Promise.resolve({ outcome: { outcome: "selected" as const, optionId: allowed.optionId } });
+                    if (namesBridgedTool(context.params, options)) {
+                        const allowed = context.params.options.find((option) => option.kind === "allow_once");
+                        if (allowed !== undefined) {
+                            return Promise.resolve({ outcome: { outcome: "selected" as const, optionId: allowed.optionId } });
+                        }
                     }
                     return implementation.requestPermission(context.params);
                 })
                 .onRequest(acp.methods.client.fs.readTextFile, (context) => implementation.readTextFile(context.params))
-                .onRequest(acp.methods.client.fs.writeTextFile, (context) => implementation.writeTextFile(context.params))
+                // No write handler: unsolicited fs/write_text_file receives -32601,
+                // including calls that arrive after a rejected permission request.
                 .onNotification(acp.methods.client.session.update, (context) => implementation.sessionUpdate(context.params))
                 .connectWith(childStream(child), async (context) => {
                     await context.request(acp.methods.agent.initialize, {
                         protocolVersion: acp.PROTOCOL_VERSION,
-                        // 2026-09-03: the interactive session has full authority. Write permission
-                        // is opened here; the boundary is Claude Code's OWN permission layer, not
-                        // this bridge.
-                        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+                        // The capability and absent handler enforce the same boundary.
+                        // Source: https://agentclientprotocol.com/protocol/v1/file-system#checking-support
+                        clientCapabilities: { fs: { readTextFile: true, writeTextFile: false } },
                     });
                     initialized = true;
                     const session = await context.request(acp.methods.agent.session.new, {
