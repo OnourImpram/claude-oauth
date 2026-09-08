@@ -181,7 +181,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | N03 | High | Generated `*-delege` agents carry `tools: []` and `maxTurns: 1`; a user definition that widens them is rejected. |
 | N04 | High | A changed tool catalogue on a continuation request does not reach the live MCP session. |
 | ~~N05~~ | ~~High~~ | **Repaired 2026-09-08.** The capsule runs a hash-pinned patched copy of Clodex and receives its session nonce only through the child environment. Measured with an anonymous scratch home, missing/wrong/correct `x-api-key`: catalog and health **401/401/200**, malformed JSON messages **401/401/400**. Empty nonce, missing patch anchors and patched hash drift prevent startup. |
-| N06 | Medium | On POSIX, a helper that ignores SIGTERM keeps the timeout waiting; there is no escalation to SIGKILL. Unmeasured on Linux. |
+| ~~N06~~ | ~~Medium~~ | **Repaired 2026-09-08.** Captured helpers receive SIGTERM, then SIGKILL after configurable `terminationGraceMs` (default 100 ms), and reject with a timeout even without `exit`; Windows tests cover the deadline and missing-exit case, while the meaningful SIGTERM-resistant Linux arm is NOT_RUN locally (Windows host). |
 
 B01's measured Google native-write bypass is closed. The live check covers direct routing with
 `gemini-3.8-flash-high` on Windows; it does not establish permission inheritance through `Agent`

@@ -5,6 +5,17 @@ All notable changes to this project are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Defect ids (B*, G*, N*, A*, S*) are the
 repository's own and are stable across the README, `SECURITY.md` and this file.
 
+## [Unreleased]
+
+### Fixed: N06 bounded helper timeout (2026-09-08)
+
+- **Repaired 2026-09-08.** `runCaptured` escalates SIGTERM to SIGKILL after
+  `terminationGraceMs` (default 100 ms), rejects with `upstream_timeout` even without an
+  `exit` event, and releases timeout pipes and the child process reference.
+- Windows tests cover normal output, a SIGTERM-handler child, and a kill failure with no
+  exit event. The handler test passes trivially on Windows because kill is terminal there.
+  The meaningful Linux arm is NOT_RUN locally because this run uses a Windows host.
+
 ## [0.1.0], pre-release, unreleased
 
 This is the first version made readable outside the maintainer's machine. It is **not a

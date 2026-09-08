@@ -10,6 +10,8 @@ export interface ProcessOptions {
     readonly cwd: string;
     readonly environment: NodeJS.ProcessEnv;
     readonly timeoutMs?: number;
+    /** Grace after SIGTERM before SIGKILL and unconditional timeout rejection. Defaults to 100 ms. */
+    readonly terminationGraceMs?: number;
     readonly maximumOutputBytes?: number;
 }
 function needsShell(command: string): boolean {
@@ -69,20 +71,36 @@ export async function runCaptured(command: string, args: readonly string[], opti
     child.stdout?.on("data", (chunk: Buffer) => collect(stdout, chunk));
     child.stderr?.on("data", (chunk: Buffer) => collect(stderr, chunk));
     let timedOut = false;
-    const timeout = setTimeout(() => {
-        timedOut = true;
-        child.kill();
-    }, options.timeoutMs ?? 30_000);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    const timeoutError = new RouterError("upstream_timeout", `${basename(command)} exceeded the process timeout.`, 504);
     try {
         const exitCode = await new Promise<number>((resolveExit, rejectExit) => {
-            child.once("error", rejectExit);
+            // Retain an error listener for a late kill failure after the deadline has settled.
+            child.on("error", (error) => {
+                if (!timedOut) rejectExit(error);
+            });
             child.once("exit", (code) => resolveExit(code ?? 1));
+            const terminate = (signal: NodeJS.Signals): void => {
+                try { child.kill(signal); }
+                catch { /* A failed signal must not cancel escalation or deadline settlement. */ }
+            };
+            timeout = setTimeout(() => {
+                timedOut = true;
+                escalation = setTimeout(() => {
+                    terminate("SIGKILL");
+                    rejectExit(timeoutError);
+                }, options.terminationGraceMs ?? 100);
+                // Windows terminates on SIGTERM, so exit clears the grace timer there.
+                // Source: https://nodejs.org/download/release/v24.14.0/docs/api/child_process.html#subprocesskillsignal
+                terminate("SIGTERM");
+            }, options.timeoutMs ?? 30_000);
         });
         if (outputBytes > maximumOutputBytes) {
             throw new RouterError("upstream_protocol_error", `${basename(command)} exceeded the safe output limit.`, 502);
         }
         if (timedOut) {
-            throw new RouterError("upstream_timeout", `${basename(command)} exceeded the process timeout.`, 504);
+            throw timeoutError;
         }
         return {
             exitCode,
@@ -92,5 +110,11 @@ export async function runCaptured(command: string, args: readonly string[], opti
     }
     finally {
         clearTimeout(timeout);
+        clearTimeout(escalation);
+        if (timedOut) {
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+            child.unref();
+        }
     }
 }
