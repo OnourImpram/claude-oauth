@@ -1,0 +1,87 @@
+name: Security finding (non-exploitable)
+description: A gate blind spot, a hardening gap, or a boundary that is weaker than it claims — where nothing is exploitable yet.
+title: "security: "
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **If this is exploitable — a real write outside the workspace, a reachable port, a
+        credential that actually travels — do not open an issue. Email onour@onourimpram.com
+        as described in `SECURITY.md`.**
+
+        This template is for the other class: a scanner that cannot see a shape it should, a
+        redaction that misses a class, a check that passes without being able to fail, a
+        boundary that is described more strongly than it is enforced. Those are the findings
+        this repository is built to collect.
+
+        **Never include a secret value, real or synthetic.** A value is not synthetic because it
+        sits in a test. `file:line + kind` is enough.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      placeholder: "387aca2"
+    validations:
+      required: true
+  - type: dropdown
+    id: class
+    attributes:
+      label: Finding class
+      options:
+        - Gate blind spot (lint / secret-scan / fidelity / release-id cannot see something it should)
+        - Redaction gap (a diagnostic channel could carry a class of value)
+        - Boundary weaker than described (permission, workspace, nonce, environment)
+        - Provenance (third-party content treated as instruction)
+        - Documentation overstates a guarantee
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Location
+      description: File and line(s). Values never.
+      placeholder: "scripts/secret-scan.mjs:30"
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: The shape that gets through (or the claim that is not enforced)
+      description: Describe the input class — "a 20-character opaque token behind a quoted JSON field name", "a POSIX path with mixed case and digits" — not an instance of it.
+    validations:
+      required: true
+  - type: textarea
+    id: consequence
+    attributes:
+      label: What it lets happen
+      description: Concretely, what does a defect of this shape allow, and under what conditions? If the answer is "nothing today, but the gate could not catch it if it did", say that — it is a valid finding here.
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Evidence class
+      options:
+        - Ran the gate or the code with a synthetic input and observed it (value not reported)
+        - Read the source and traced the control flow, did not run it
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: negative
+    attributes:
+      label: Proposed negative control
+      description: The smallest test or `--ozdenetim` arm that would go red on this shape. A finding that comes with its measure is a finding that stays fixed.
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirm
+      options:
+        - label: This issue contains no secret value, real or synthetic, and no account or machine identifier.
+          required: true
+        - label: I checked SECURITY.md and this is not exploitable as described.
+          required: true

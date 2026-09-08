@@ -1,0 +1,86 @@
+name: Bug report
+description: Something behaves differently from what the source or the README says it does.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Before filing, check the README's *Known gaps* table — B01–B06, G01, N01, N05
+        and the others are already known and listed by id. A report that adds **reproduction
+        evidence** to a known id is welcome; a report that only restates one is not needed.
+
+        **Do not paste credentials, tokens, account identifiers or machine-specific paths.**
+        Report a leak by location and type, never by value. If what you found is exploitable,
+        stop here and follow `SECURITY.md` instead.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The commit you observed this on (`git rev-parse --short HEAD`).
+      placeholder: "387aca2"
+    validations:
+      required: true
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Lane
+      options:
+        - Google (Antigravity, `agy`)
+        - xAI (`grok`)
+        - OpenAI (`codex` / Clodex capsule)
+        - Router / supervisor / CLI
+        - Gates and scripts (lint, secret-scan, fidelity-diff, release-id)
+        - Documentation or site
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Concrete input
+      description: The exact command, request body shape, or fixture that produces the effect. If it is a request body, describe its shape (roles, block types, order) rather than pasting content.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened
+      description: Error code, exit code, the diagnostic text (values redacted), and what the process tree looked like if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and why
+      description: Point at the README sentence, the source comment or the test that says it should behave that way.
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Evidence class
+      description: Say how you know. Both are welcome; they weigh differently.
+      options:
+        - I ran it and observed the effect
+        - I read the source and traced the control flow, but did not run it
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and Node version
+      placeholder: "Windows 11 / Node v24.14.0"
+    validations:
+      required: true
+  - type: textarea
+    id: gate
+    attributes:
+      label: Gate output
+      description: If you ran `npm run check`, paste the summary lines only (tests / pass / fail / skipped, lint FINDINGS, secret-scan FINDINGS). If you did not run it, write NOT_RUN and why.
+      placeholder: |
+        ℹ tests 384 / pass 383 / fail 0 / skipped 1
+        lint FINDINGS 0 · secret-scan FINDINGS 0
+    validations:
+      required: true
