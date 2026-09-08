@@ -650,7 +650,7 @@ export async function prepareEffectiveInstallation(root: string, environment: No
                 nativeVersion: baseLock.claude.version,
                 nativeSha256,
                 shadowSha256: nativeSha256,
-                manifestPath: "(native-gateway: shadow yok)",
+                manifestPath: "(native-gateway: no shadow)",
             },
             releaseIdentity,
             clientMode,

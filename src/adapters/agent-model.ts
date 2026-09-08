@@ -91,18 +91,18 @@ function anthropicTools(value: unknown): readonly AnthropicToolDefinition[] | un
 export function extractToolResults(messages: readonly unknown[]): readonly ToolResultDelivery[] {
     const last = messages.at(-1);
     if (!isRecord(last) || last["role"] !== "user" || !Array.isArray(last["content"])) return [];
-    const cikti: ToolResultDelivery[] = [];
+    const output: ToolResultDelivery[] = [];
     for (const block of last["content"]) {
         if (!isRecord(block) || block["type"] !== "tool_result") continue;
         const id = block["tool_use_id"];
         if (typeof id !== "string" || id === "") continue;
-        cikti.push({
+        output.push({
             toolUseId: id,
             content: toolResultText(block["content"]),
             isError: block["is_error"] === true,
         });
     }
-    return cikti;
+    return output;
 }
 function textBlocks(value: unknown, location: string): string[] {
     if (typeof value === "string")
@@ -602,7 +602,7 @@ export class AgentModelAdapter implements ProviderAdapter {
         const inputTokenUpperBound = results.length > 0
             ? Math.max(1, request.body.length)
             : compilePrompt(request, true).inputTokenUpperBound;
-        const calis = async (): Promise<TurnOutcome> => {
+        const runTurn = async (): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a
             // running ACP turn would be the agent finishing on its own.
@@ -614,8 +614,8 @@ export class AgentModelAdapter implements ProviderAdapter {
                 request.signal,
             )).outcome;
         };
-        if (request.envelope.stream === true) return this.#streamWithTools(request, inputTokenUpperBound, calis);
-        const outcome = await calis();
+        if (request.envelope.stream === true) return this.#streamWithTools(request, inputTokenUpperBound, runTurn);
+        const outcome = await runTurn();
         const usage = localUsage(inputTokenUpperBound, outcome.text);
         const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
         const payload = outcome.kind === "tool_use"
@@ -627,7 +627,7 @@ export class AgentModelAdapter implements ProviderAdapter {
             body: readableBytes(Buffer.from(JSON.stringify(payload), "utf8")),
         };
     }
-    #streamWithTools(request: AdapterRequest, inputTokenUpperBound: number, calis: () => Promise<TurnOutcome>): AdapterResponse {
+    #streamWithTools(request: AdapterRequest, inputTokenUpperBound: number, runTurn: () => Promise<TurnOutcome>): AdapterResponse {
         let streamOpen = true;
         let ping: NodeJS.Timeout | undefined;
         const stop = (): void => {
@@ -648,7 +648,7 @@ export class AgentModelAdapter implements ProviderAdapter {
                         stop();
                     }
                 }, this.#pingIntervalMs);
-                void calis()
+                void runTurn()
                     .then((outcome) => {
                         if (!streamOpen) return;
                         const usage = localUsage(inputTokenUpperBound, outcome.text);
