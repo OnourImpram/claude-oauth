@@ -32,6 +32,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { RouterError } from "../domain/errors.js";
+import { ensurePrivateDirectory } from "../runtime/paths.js";
 
 /** Where the routed agent must reach the router's MCP endpoint, and with what. */
 export interface AgentToolEndpoint {
@@ -95,8 +96,12 @@ interface OwnerRecord {
  */
 export async function createEphemeralConfigHome(options: ConfigHomeOptions): Promise<EphemeralConfigHome> {
     const source = options.sourceHome ?? homedir();
-    await mkdir(options.root, { recursive: true });
+    // 0o700, not a plain mkdir. The nonce spends the call inside this tree; an independent
+    // review of this design was right that "it is under TEMP" is not an access control.
+    // On Windows the mode is advisory, which is why the home is also short-lived and swept.
+    await ensurePrivateDirectory(options.root);
     const path = await mkdtemp(join(options.root, "call-"));
+    await ensurePrivateDirectory(path);
     let created = true;
     const dispose = async (): Promise<void> => {
         if (!created)

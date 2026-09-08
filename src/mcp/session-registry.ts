@@ -78,6 +78,15 @@ type TurnEvent =
 export interface SessionRegistryOptions {
     /** How long a session may sit without a turn before it is swept. */
     readonly idleTimeoutMs?: number;
+    /**
+     * How long a session that is BLOCKED ON A TOOL is protected from capacity reclaim.
+     *
+     * Not the same clock as idleTimeoutMs: that one retires abandoned sessions, this one
+     * decides which of several live-looking sessions may be sacrificed when the ceiling is
+     * reached. Inside the window a parked call means a tool loop in flight; outside it, the
+     * session is unaddressable and its process is a leak (FINDINGS 3+6).
+     */
+    readonly reclaimGraceMs?: number;
     /** Injected so tests do not depend on wall-clock time. */
     readonly now?: () => number;
     /**
@@ -106,6 +115,10 @@ export interface SessionRegistryOptions {
 }
 
 const defaultIdleTimeoutMs = 30 * 60 * 1000;
+// A tool call answered by a human permission prompt can take minutes; a conversation
+// abandoned in favour of a new one does not come back at all. Sixty seconds separates
+// them without inventing precision the measurement does not have.
+const defaultReclaimGraceMs = 60 * 1000;
 
 class AgentSession {
     readonly key: string;
@@ -262,6 +275,7 @@ export class AgentSessionRegistry {
     #calls = new Map<string, string>();
     #orphanResults = 0;
     readonly #idleTimeoutMs: number;
+    readonly #reclaimGraceMs: number;
     readonly #now: () => number;
     readonly #mcpBaseUrl: string | (() => string);
     readonly #mcpHeaders: () => Readonly<Record<string, string>>;
@@ -274,6 +288,7 @@ export class AgentSessionRegistry {
 
     constructor(options: SessionRegistryOptions) {
         this.#idleTimeoutMs = options.idleTimeoutMs ?? defaultIdleTimeoutMs;
+        this.#reclaimGraceMs = options.reclaimGraceMs ?? defaultReclaimGraceMs;
         this.#now = options.now ?? Date.now;
         this.#mcpBaseUrl = options.mcpBaseUrl;
         this.#mcpHeaders = options.mcpHeaders ?? (() => ({}));
@@ -356,10 +371,22 @@ export class AgentSessionRegistry {
         // UNADDRESSABLE: because its identity is the tool_use.id, nobody can reach it
         // again, yet its process lives on. On hitting the ceiling the oldest IDLE session
         // is reclaimed -- recovering the resource rather than hitting the user with a 503.
+        const now = this.#now();
         while (this.#sessions.size >= this.#maxLiveSessions) {
             let oldest: [string, AgentSession] | undefined;
             for (const entry of this.#sessions) {
                 if (entry[1].running) continue;
+                // 2026-09-08, found by an independent review of the G01 design. `running` is
+                // set to FALSE the moment a call is parked, so a session waiting for Claude
+                // Code to answer a tool call was indistinguishable from an abandoned one --
+                // and could be cancelled mid-loop by an unrelated new session.
+                //
+                // The guard is NOT "never reclaim a parked session": FINDINGS 3+6 exist
+                // precisely because an unaddressable session is a PARKED one, and refusing to
+                // reclaim those brings back the process leak they closed. The discriminator
+                // that separates the two is AGE. Inside the grace window a parked call means
+                // a live loop; outside it, nobody is coming back for it.
+                if (entry[1].bridge.pendingCount > 0 && now - entry[1].touchedAt < this.#reclaimGraceMs) continue;
                 if (oldest === undefined || entry[1].touchedAt < oldest[1].touchedAt) oldest = entry;
             }
             if (oldest === undefined) {
