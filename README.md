@@ -76,6 +76,15 @@ Permission inheritance through an `Agent` child session was measured live on the
 reached Claude Code's `Agent` tool through the bridge. The child's tool loop on a routed model is
 what the same measurement exercised when Claude Code picked the routed Gemini as the child model.
 
+The method behind this habit has its own project. [autofusion](https://github.com/OnourImpram/autofusion)
+freezes the artifact, sends it to reviewers that cannot see each other, grounds checkable findings
+with the verification commands the repository already trusts, and writes a metadata-only receipt
+that keeps unresolved disagreement visible. autofusion provides the method; this repository
+provides the plumbing, the models reachable through the sessions you already hold. If you work
+intensely with AI, the recommendation from both projects is the same: keep one model for routine
+work, and run fusion on the decisions that matter, where a missed issue is costly or hard to
+reverse. Site: <https://onourimpram.github.io/autofusion/>.
+
 ### The harness surface, not a chat box
 
 Claude Code's value is in the loop: tools, subagents, skills, MCP servers, permission prompts. A
