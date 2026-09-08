@@ -429,7 +429,7 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
             registry,
             receipts: new ReceiptStore(paths.receipts),
             preferredPort: preferredLoopbackPort(environment),
-            mcpBridge: (sessionKey) => grokSessions.bridgeFor(sessionKey),
+            mcpBridge: (sessionKey) => grokSessions.bridgeFor(sessionKey) ?? googleSessions.bridgeFor(sessionKey),
         });
         // The endpoint behind the gate becomes addressable only NOW.
         routerBaseUrl = router.baseUrl;

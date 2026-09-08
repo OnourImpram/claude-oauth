@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto";
 
 import { RouterError } from "../domain/errors.js";
 import { McpToolBridge, type McpToolDescriptor, type ParkedToolCall } from "./tool-bridge.js";
+import { writeSafeLog } from "../runtime/log.js";
 
 /** A running provider agent, seen from the registry's side. */
 export interface AgentRunHandle {
@@ -409,6 +410,20 @@ export class AgentSessionRegistry {
                 // Code the moment the turn resolves, and the tool_result can
                 // come back before this line would otherwise have run.
                 this.#calls.set(call.id, sessionKey);
+                // THE MEASURE FOR "the provider reached Claude Code's tool surface".
+                //
+                // Without it the claim can only be inferred from the model's own answer,
+                // and on 2026-09-08 that inference was wrong twice: a routed Google model
+                // returned the right string using agy's OWN tools, which says nothing about
+                // this bridge. A parked call is the one event that cannot happen any other
+                // way. The tool NAME is logged, never its input.
+                writeSafeLog({
+                    event: "agent_tool_call_parked",
+                    level: "info",
+                    route: "mcp",
+                    code: call.name,
+                    remedy: "No action needed: this is the provider agent reaching Claude Code's tool surface. Its ABSENCE while a routed model claims to have used a tool means the model used its own, and the lane is not connected.",
+                });
                 session.parkedToolCall(call);
             },
             this.#now(),

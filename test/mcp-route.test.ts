@@ -37,9 +37,11 @@ const snapshot: ModelSnapshot = {
 
 const nonce = "m".repeat(43);
 const LIVE_SESSION_KEY = "liveSession";
+const SECONDARY_SESSION_KEY = "secondarySession";
 let directory = "";
 let router: RunningRouter | undefined;
 let bridge: McpToolBridge | undefined;
+let secondaryBridge: McpToolBridge | undefined;
 const parkedCalls: ParkedToolCall[] = [];
 
 before(async () => {
@@ -48,12 +50,16 @@ before(async () => {
         onToolCall: (call) => parkedCalls.push(call),
         callTimeoutMs: 0,
     });
+    secondaryBridge = new McpToolBridge({
+        onToolCall: () => undefined,
+        callTimeoutMs: 0,
+    });
     bridge.setTools(deriveMcpTools([{ name: "Read", description: "read a file" }]));
     router = await startRouterServer({
         nonce,
         registry: new ModelRegistry(snapshot, new Map()),
         receipts: new ReceiptStore(join(directory, "receipts.jsonl")),
-        mcpBridge: (sessionKey) => (sessionKey === LIVE_SESSION_KEY ? bridge : undefined),
+        mcpBridge: (sessionKey) => (sessionKey === LIVE_SESSION_KEY ? bridge : sessionKey === SECONDARY_SESSION_KEY ? secondaryBridge : undefined),
     });
 });
 
@@ -172,6 +178,14 @@ describe("session addressing on the route", () => {
         );
         strictEqual(status, 409);
         ok(String((json?.["error"] as { message: string }).message).includes("FIX:"));
+    });
+
+    it("resolves session from secondary bridge when primary has no match", async () => {
+        const { status } = await sendMcp(
+            { jsonrpc: "2.0", id: 35, method: "ping" },
+            { sessionKey: SECONDARY_SESSION_KEY },
+        );
+        strictEqual(status, 200);
     });
 
     it("a tool call arriving over HTTP parks instead of executing", async () => {
