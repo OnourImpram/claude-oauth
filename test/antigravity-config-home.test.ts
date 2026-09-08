@@ -1,8 +1,11 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { createEphemeralConfigHome, sweepStaleConfigHomes, LINKED_IDENTITY_FILES, DEFAULT_TOOL_SERVER_NAME } from "../src/antigravity/config-home.js";
 import { runAntigravityHeadless } from "../src/antigravity/headless-bridge.js";
@@ -41,6 +44,32 @@ async function serverEntry(home: string): Promise<Record<string, { headers?: Rec
 }
 
 describe("antigravity call-scoped configuration home", () => {
+    for (const [mode, description] of [
+        ["dispose", "a locked dispose can be called again after unlock and warns safely"],
+        ["sweep", "a locked orphan is kept and warned while an unlocked orphan is removed"],
+        ["retry-dispose", "dispose retries a transient Windows file lock within one call"],
+        ["retry-sweep", "sweep retries a transient Windows file lock within one call"],
+    ] as const) {
+        it(`F2: ${description}`, { skip: process.platform !== "win32", timeout: 60_000 }, async () => {
+            const root = await scratch();
+            try {
+                const environment: NodeJS.ProcessEnv = { ...process.env, LOCALAPPDATA: root };
+                delete environment["NODE_TEST_CONTEXT"];
+                const fixture = fileURLToPath(new URL("./fixtures/config-home-lock.js", import.meta.url));
+                const result = await promisify(execFile)(process.execPath, [fixture, mode], {
+                    env: environment, windowsHide: true, timeout: 55_000,
+                });
+                strictEqual(result.stdout.trim(), "cleanup verified");
+                strictEqual(result.stderr, "");
+            }
+            finally {
+                const contained = relative(resolve(tmpdir()), resolve(root));
+                ok(contained !== "" && !contained.startsWith("..") && !isAbsolute(contained), "cleanup stays inside the scratch root");
+                await rm(root, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+            }
+        });
+    }
+
     for (const serverName of [undefined, "custom-claude-bridge"]) {
         it(`B01 (c): permits the configured MCP server and denies native mutations (${serverName ?? "default"})`, async () => {
             const root = await scratch();

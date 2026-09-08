@@ -1,9 +1,29 @@
 import { strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { runCaptured } from "../src/runtime/child-process.js";
+
+for (const mode of ["cancel", "abort", "active"] as const) {
+    it(`Grok session preparation lifecycle: ${mode}`, async () => {
+        const root = await mkdtemp(join(tmpdir(), "grok-preparation-"));
+        try {
+            await mkdir(join(root, ".git"));
+            const child = spawnSync(process.execPath, ["--experimental-test-module-mocks",
+                fileURLToPath(new URL("./fixtures/grok-session-cancel.js", import.meta.url)), mode], {
+                cwd: root, env: { ...process.env, LOCALAPPDATA: root }, encoding: "utf8",
+                windowsHide: true, timeout: 10_000,
+            });
+            strictEqual(child.error === undefined, true, "fixture must finish within its timeout");
+            strictEqual(child.status, 0, "Grok preparation cancellation fixture failed");
+        } finally {
+            await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+        }
+    });
+}
 
 for (const mode of ["one-shot", "session"] as const) {
     it(`a missing Grok binary returns adapter_unavailable in ${mode} mode without crashing`, async () => {

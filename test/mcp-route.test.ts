@@ -7,8 +7,10 @@ import type { ModelSnapshot } from "../src/domain/contracts.js";
 import { ModelRegistry } from "../src/domain/registry.js";
 import { ReceiptStore } from "../src/runtime/receipt-store.js";
 import { startRouterServer, type RunningRouter } from "../src/router/server.js";
-import { SESSION_HEADER } from "../src/security/nonce.js";
-import { McpToolBridge, deriveMcpTools, type ParkedToolCall } from "../src/mcp/tool-bridge.js";
+import { createSessionNonce, SESSION_HEADER } from "../src/security/nonce.js";
+import { type McpToolBridge, deriveMcpTools } from "../src/mcp/tool-bridge.js";
+import { AgentSessionRegistry } from "../src/mcp/session-registry.js";
+import { routerSessionLifecycle } from "../src/supervisor/launcher.js";
 
 // Phase 9 / Path 4 -- the MCP endpoint served on the router's OWN loopback server.
 //
@@ -35,36 +37,47 @@ const snapshot: ModelSnapshot = {
     ],
 };
 
-const nonce = "m".repeat(43);
-const LIVE_SESSION_KEY = "liveSession";
-const SECONDARY_SESSION_KEY = "secondarySession";
+const nonce = createSessionNonce();
+let LIVE_SESSION_KEY = "";
+let SECONDARY_SESSION_KEY = "";
 let directory = "";
 let router: RunningRouter | undefined;
 let bridge: McpToolBridge | undefined;
-let secondaryBridge: McpToolBridge | undefined;
-const parkedCalls: ParkedToolCall[] = [];
+let grokSessions: AgentSessionRegistry;
+let googleSessions: AgentSessionRegistry;
+let initialToolUseId = "";
 
 before(async () => {
     directory = await mkdtemp(join(tmpdir(), "router-mcp-"));
-    bridge = new McpToolBridge({
-        onToolCall: (call) => parkedCalls.push(call),
-        callTimeoutMs: 0,
+    const createRegistry = (): AgentSessionRegistry => new AgentSessionRegistry({
+        mcpBaseUrl: "http://127.0.0.1:1",
+        startAgent: ({ bridge: current }) => {
+            let finish = (): void => undefined;
+            const done = new Promise<void>((resolve) => { finish = resolve; });
+            void current.handle({ jsonrpc: "2.0", id: 0, method: "tools/call", params: { name: "Read" } });
+            return { done, cancel: finish, text: () => "" };
+        },
     });
-    secondaryBridge = new McpToolBridge({
-        onToolCall: () => undefined,
-        callTimeoutMs: 0,
-    });
-    bridge.setTools(deriveMcpTools([{ name: "Read", description: "read a file" }]));
+    grokSessions = createRegistry();
+    googleSessions = createRegistry();
+    const tools = deriveMcpTools([{ name: "Read", description: "read a file" }]);
+    const primary = await grokSessions.begin("primary", tools);
+    const secondary = await googleSessions.begin("secondary", tools);
+    if (primary.outcome.kind !== "tool_use") throw new Error("Expected a parked session");
+    initialToolUseId = primary.outcome.call.id;
+    LIVE_SESSION_KEY = primary.sessionKey;
+    SECONDARY_SESSION_KEY = secondary.sessionKey;
+    bridge = grokSessions.bridgeFor(LIVE_SESSION_KEY);
     router = await startRouterServer({
         nonce,
         registry: new ModelRegistry(snapshot, new Map()),
         receipts: new ReceiptStore(join(directory, "receipts.jsonl")),
-        mcpBridge: (sessionKey) => (sessionKey === LIVE_SESSION_KEY ? bridge : sessionKey === SECONDARY_SESSION_KEY ? secondaryBridge : undefined),
+        mcpBridge: routerSessionLifecycle(grokSessions, googleSessions).mcpBridge,
     });
 });
 
 after(async () => {
-    bridge?.cancelAll("test teardown");
+    await routerSessionLifecycle(grokSessions, googleSessions).close();
     await router?.close();
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
@@ -172,6 +185,8 @@ describe("MCP protocol over HTTP", () => {
 
 describe("session addressing on the route", () => {
     it("an unknown session key gets a named error, not a bare 404", async () => {
+        strictEqual(grokSessions.bridgeFor("unknownSession"), undefined);
+        strictEqual(googleSessions.bridgeFor("unknownSession"), undefined);
         const { status, json } = await sendMcp(
             { jsonrpc: "2.0", id: 30, method: "ping" },
             { sessionKey: "unknownSession" },
@@ -181,6 +196,8 @@ describe("session addressing on the route", () => {
     });
 
     it("resolves session from secondary bridge when primary has no match", async () => {
+        strictEqual(grokSessions.bridgeFor(SECONDARY_SESSION_KEY), undefined);
+        ok(googleSessions.bridgeFor(SECONDARY_SESSION_KEY));
         const { status } = await sendMcp(
             { jsonrpc: "2.0", id: 35, method: "ping" },
             { sessionKey: SECONDARY_SESSION_KEY },
@@ -189,7 +206,7 @@ describe("session addressing on the route", () => {
     });
 
     it("a tool call arriving over HTTP parks instead of executing", async () => {
-        parkedCalls.length = 0;
+        const turn = grokSessions.resume([{ toolUseId: initialToolUseId, content: "fixture ready", isError: false }]);
         const pending = sendMcp({
             jsonrpc: "2.0",
             id: 40,
@@ -198,9 +215,9 @@ describe("session addressing on the route", () => {
         });
         // The call must NOT resolve on its own: the tool runs on the Claude Code
         // side. Proving that means answering it here, from the other end.
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        strictEqual(parkedCalls.length, 1);
-        const call = parkedCalls[0] as ParkedToolCall;
+        const parked = await turn;
+        if (parked.outcome.kind !== "tool_use") throw new Error("Expected HTTP call to park");
+        const call = parked.outcome.call;
         deepStrictEqual(call.input, { path: "a.txt" });
         strictEqual(bridge?.deliverToolResult(call.id, "file body", false), true);
         const { status, json } = await pending;

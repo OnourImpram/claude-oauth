@@ -665,15 +665,12 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
         if (options.task.trim() === "") {
             throw new RouterError("invalid_request", "Grok task must not be empty.", 400);
         }
-        if (cancelled) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled before start.", 504);
+        if (cancelled || options.signal?.aborted) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled before start.", 504);
         const environment = await prepareGrokProcessEnvironment(options);
+        // Preparation awaits filesystem work; cancellation during it must not spawn a child.
+        if (cancelled || options.signal?.aborted) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled during start.", 504);
         child = spawnGrok(options, environment, options.model);
         const spawnFailure = spawnFailureGuard(child);
-        // Race: cancel() may have arrived between the spawn and this line.
-        if (cancelled) {
-            child.kill();
-            throw new RouterError("upstream_timeout", "Grok ACP session was cancelled during start.", 504);
-        }
         detach = attachAbort(child, options.signal);
         let initialized = false;
         try {
