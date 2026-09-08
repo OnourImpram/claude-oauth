@@ -26,6 +26,24 @@ import type { ClaudeClientMode } from "../runtime/install-lock.js";
 import { preferredLoopbackPort } from "../runtime/loopback-port.js";
 import { gatewayModelsCachePath, projectDiscoveryPayload, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
 import { writeSafeLog } from "../runtime/log.js";
+import type { McpToolBridge } from "../mcp/tool-bridge.js";
+
+/** Shared production wiring for the two provider registries and their shutdown. */
+export function routerSessionLifecycle(grokSessions: AgentSessionRegistry, googleSessions: AgentSessionRegistry): {
+    mcpBridge(sessionKey: string): McpToolBridge | undefined;
+    close(): Promise<void>;
+} {
+    return {
+        mcpBridge: (sessionKey) => grokSessions.bridgeFor(sessionKey) ?? googleSessions.bridgeFor(sessionKey),
+        close: async () => {
+            await Promise.all([
+                grokSessions.closeAllAndWait("router shutdown"),
+                googleSessions.closeAllAndWait("router shutdown"),
+            ]);
+        },
+    };
+}
+
 export interface ClaudeOAuthLaunchOptions {
     readonly args: readonly string[];
     readonly cwd: string;
@@ -420,6 +438,7 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         googleSessions,
         disabledProviders,
     });
+    const sessions = routerSessionLifecycle(grokSessions, googleSessions);
     try {
         const sessionNonce = createSessionNonce();
         const registry = new ModelRegistry(providerSet.snapshot, providerSet.adapters);
@@ -429,7 +448,7 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
             registry,
             receipts: new ReceiptStore(paths.receipts),
             preferredPort: preferredLoopbackPort(environment),
-            mcpBridge: (sessionKey) => grokSessions.bridgeFor(sessionKey) ?? googleSessions.bridgeFor(sessionKey),
+            mcpBridge: sessions.mcpBridge,
         });
         // The endpoint behind the gate becomes addressable only NOW.
         routerBaseUrl = router.baseUrl;
@@ -480,14 +499,14 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         }
         finally {
             await ipc?.close().catch(() => undefined);
-            // Abandoned ACP processes are a process-tree leak; on shutdown the parked calls are
-            // released as well.
-            grokSessions.closeAll("router shutdown");
+            await sessions.close();
             await router.close().catch(() => undefined);
             await removeSupervisorState(paths.state).catch(() => undefined);
         }
     }
     finally {
+        // Also covers startup failures before the router's inner cleanup is installed.
+        await sessions.close();
         await providerSet.close().catch(() => undefined);
     }
 }

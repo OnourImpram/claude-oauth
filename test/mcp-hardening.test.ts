@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AdapterRequest, ModelRecord } from "../src/domain/contracts.js";
 import { AgentModelAdapter } from "../src/adapters/agent-model.js";
@@ -113,14 +113,9 @@ describe("FINDING 1 -- the abort signal ends the turn", () => {
     });
 });
 
-describe("FINDINGS 3 + 6 -- unaddressable sessions are reclaimed, with a cap", () => {
-    // Because identity is tool_use.id, a new conversation opened with a plain turn leaves
-    // the old session UNADDRESSABLE: nobody can reach it, yet its process lives on.
-    it("at the cap the oldest IDLE session is reclaimed; the request does not receive 503", async () => {
+describe("FINDINGS 3 + 6 -- capacity protects parked calls regardless of age", () => {
+    it("at the cap even a ten-minute parked call receives 503 protection and can resume", async () => {
         const agents: FakeAgent[] = [];
-        // The clock is injected so "oldest" means GENUINELY OLD. Without it this arm passed
-        // on sessions milliseconds apart -- and would have kept passing while the registry
-        // cancelled a tool loop that was still in flight (2026-09-08).
         let clock = 0;
         const registry = createRegistry(
             () => {
@@ -131,43 +126,55 @@ describe("FINDINGS 3 + 6 -- unaddressable sessions are reclaimed, with a cap", (
             (a) => a.callTool(),
             { maxLiveSessions: 2, now: () => clock },
         );
-        await registry.begin("one", TOOLS);
-        await registry.begin("two", TOOLS);
-        strictEqual(registry.liveSessionCount, 2);
-        clock = 10 * 60 * 1000;
-        await registry.begin("three", TOOLS);
-        strictEqual(registry.liveSessionCount, 2);
-        strictEqual(agents[0]?.cancellationReason, "reclaimed: oldest idle session");
-        registry.closeAll("test teardown");
+        try {
+            const first = await registry.begin("one", TOOLS);
+            await registry.begin("two", TOOLS);
+            strictEqual(first.outcome.kind, "tool_use");
+            if (first.outcome.kind !== "tool_use") throw new Error("Expected a parked call");
+            for (clock of [5_000, 60_000, 61_000, 10 * 60 * 1000]) {
+                await rejects(registry.begin("three", TOOLS), (error: unknown) =>
+                    error instanceof RouterError && error.status === 503 && error.code === "adapter_unavailable");
+                strictEqual(registry.liveSessionCount, 2);
+                strictEqual(agents.length, 2, "refusing capacity must not spawn a replacement");
+                strictEqual(agents[0]?.cancellationReason, undefined);
+            }
+            const resumed = registry.resume([{ toolUseId: first.outcome.call.id, content: "done", isError: false }]);
+            agents[0]?.finish();
+            strictEqual((await resumed).outcome.kind, "end_turn");
+            strictEqual(registry.unmatchedResultCount, 0);
+        } finally {
+            await registry.closeAllAndWait("test teardown");
+        }
     });
 
-    // The other half of the same rule. parkedToolCall() sets running=false, so without a
-    // grace window a session waiting for Claude Code to answer looked exactly like an
-    // abandoned one -- and an unrelated new session could cancel it mid-loop.
-    it("a session parked on a tool INSIDE the grace window is not reclaimed", async () => {
+    // A nonparked idle session is reachable: the optional MCP call timeout has replied,
+    // but the provider process has not exited or asked for another tool yet.
+    it("at the cap an idle session whose tool timed out is reclaimed", async () => {
         const agents: FakeAgent[] = [];
-        let clock = 0;
+        let parkedResponse: Promise<unknown> | undefined;
         const registry = createRegistry(
             () => {
                 const a = new FakeAgent();
                 agents.push(a);
                 return a;
             },
-            (a) => a.callTool(),
-            { maxLiveSessions: 1, now: () => clock },
+            (a) => {
+                parkedResponse = a.bridge?.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "Read" } });
+            },
+            { maxLiveSessions: 1, callTimeoutMs: 5 },
         );
-        await registry.begin("one", TOOLS);
-        clock = 5_000;
-        let status = 0;
         try {
+            const first = await registry.begin("one", TOOLS);
+            await parkedResponse;
+            strictEqual(registry.bridgeFor(first.sessionKey)?.pendingCount, 0);
             await registry.begin("two", TOOLS);
-        } catch (error) {
-            status = (error as RouterError).status;
+            strictEqual(registry.liveSessionCount, 1);
+            strictEqual(agents.length, 2);
+            strictEqual(agents[0]?.cancellationReason, "reclaimed: oldest idle session");
+        } finally {
+            await registry.closeAllAndWait("test teardown");
+            await parkedResponse;
         }
-        strictEqual(status, 503, "the ceiling is reported instead of sacrificing a live loop");
-        strictEqual(registry.liveSessionCount, 1);
-        strictEqual(agents[0]?.cancellationReason, undefined);
-        registry.closeAll("test teardown");
     });
 
     // If they are all mid-turn there is nothing to reclaim; silently opening one more

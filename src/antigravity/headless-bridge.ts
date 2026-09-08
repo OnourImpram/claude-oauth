@@ -306,6 +306,8 @@ function processInput(prompt: string): string {
     return `${JSON.stringify({ event: "user", message: { content: prompt } })}\n`;
 }
 export async function runAntigravityProcess(request: HeadlessProcessRequest): Promise<HeadlessProcessOutput> {
+    if (request.signal?.aborted)
+        throw new RouterError("upstream_timeout", "Antigravity request was cancelled.", 504);
     return await new Promise((resolveResult, rejectResult) => {
         const child = spawn(request.command, request.arguments, {
             cwd: request.cwd,
@@ -318,6 +320,7 @@ export async function runAntigravityProcess(request: HeadlessProcessRequest): Pr
         const stderr: Buffer[] = [];
         let outputBytes = 0;
         let settled = false;
+        let failure: RouterError | undefined;
         const settle = (action: () => void): void => {
             if (settled)
                 return;
@@ -326,33 +329,47 @@ export async function runAntigravityProcess(request: HeadlessProcessRequest): Pr
             request.signal?.removeEventListener("abort", onAbort);
             action();
         };
-        const fail = (error: RouterError): void => settle(() => rejectResult(error));
+        const fail = (error: RouterError, terminate = true): void => {
+            if (settled || failure !== undefined)
+                return;
+            failure = error;
+            clearTimeout(timeout);
+            request.signal?.removeEventListener("abort", onAbort);
+            if (terminate && child.exitCode === null && child.signalCode === null)
+                child.kill();
+        };
         const collect = (target: Buffer[], chunk: Buffer): void => {
+            if (settled || failure !== undefined)
+                return;
             outputBytes += chunk.byteLength;
             if (outputBytes > request.maximumOutputBytes) {
-                child.kill();
                 fail(new RouterError("upstream_protocol_error", "Antigravity exceeded the safe output limit.", 502));
                 return;
             }
             target.push(chunk);
         };
         const onAbort = (): void => {
-            child.kill();
             fail(new RouterError("upstream_timeout", "Antigravity request was cancelled.", 504));
         };
         const timeout = setTimeout(() => {
-            child.kill();
             fail(new RouterError("upstream_timeout", "Antigravity exceeded the process timeout.", 504));
         }, request.timeoutMs);
         child.stdout?.on("data", (chunk: Buffer) => collect(stdout, chunk));
         child.stderr?.on("data", (chunk: Buffer) => collect(stderr, chunk));
         child.stdin?.once("error", () => {
-            child.kill();
             fail(new RouterError("adapter_unavailable", "Antigravity stdin transport failed.", 503));
         });
-        child.once("error", () => fail(new RouterError("adapter_unavailable", "Antigravity could not be started.", 503)));
+        child.once("error", () => fail(new RouterError("adapter_unavailable", "Antigravity could not be started.", 503), false));
+        // close follows process exit AND stdio closure, including after a spawn error.
+        // Waiting here prevents the caller's finally from deleting a live child's home.
+        // https://nodejs.org/download/release/v24.14.0/docs/api/child_process.html#event-close
         child.once("close", (code) => {
-            settle(() => resolveResult({ exitCode: code ?? 1, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") }));
+            settle(() => {
+                if (failure !== undefined)
+                    rejectResult(failure);
+                else
+                    resolveResult({ exitCode: code ?? 1, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
+            });
         });
         child.stdin?.end(request.input, "utf8");
         if (request.signal?.aborted)

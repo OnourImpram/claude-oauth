@@ -32,6 +32,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { RouterError } from "../domain/errors.js";
+import { writeSafeLog } from "../runtime/log.js";
 import { ensurePrivateDirectory } from "../runtime/paths.js";
 
 /** Where the routed agent must reach the router's MCP endpoint, and with what. */
@@ -57,7 +58,7 @@ export interface ConfigHomeOptions {
 export interface EphemeralConfigHome {
     /** Value USERPROFILE/HOME must take for the child process. */
     readonly path: string;
-    /** Removes the home. Safe to call twice; never throws. */
+    /** Best-effort removal; a failed attempt can be retried. Safe to call twice; never throws. */
     dispose(): Promise<void>;
 }
 
@@ -121,8 +122,15 @@ export async function createEphemeralConfigHome(options: ConfigHomeOptions): Pro
     const dispose = async (): Promise<void> => {
         if (!created)
             return;
-        created = false;
-        await rm(path, { recursive: true, force: true }).catch(() => undefined);
+        try {
+            // Recursive rm retries transient EBUSY/EPERM failures with linear backoff.
+            // https://nodejs.org/download/release/v24.14.0/docs/api/fs.html#fspromisesrmpath-options
+            await rm(path, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+            created = false;
+        }
+        catch {
+            writeSafeLog({ event: "antigravity_config_home_cleanup_failed", level: "warn" });
+        }
     };
     try {
         const gemini = join(path, ".gemini");
@@ -240,8 +248,14 @@ export async function sweepStaleConfigHomes(options: SweepOptions): Promise<Swee
             kept.push(path);
             continue;
         }
-        await rm(path, { recursive: true, force: true }).catch(() => undefined);
-        removed.push(path);
+        try {
+            await rm(path, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+            removed.push(path);
+        }
+        catch {
+            kept.push(path);
+            writeSafeLog({ event: "antigravity_config_home_cleanup_failed", level: "warn" });
+        }
     }
     return { removed, kept };
 }
