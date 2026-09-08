@@ -3,7 +3,8 @@ import type { AdapterRequest, AdapterResponse, ModelRecord, ProviderAdapter, Pro
 import { RouterError } from "../domain/errors.js";
 import { numericUsage } from "../domain/validation.js";
 import type { AgentSessionRegistry, ToolResultDelivery, TurnOutcome } from "../mcp/session-registry.js";
-import { deriveMcpTools, type AnthropicToolDefinition, type ParkedToolCall } from "../mcp/tool-bridge.js";
+import { deriveMcpTools, type AnthropicToolDefinition, type McpToolResultContent, type ParkedToolCall } from "../mcp/tool-bridge.js";
+import { writeSafeLog } from "../runtime/log.js";
 type AgentModelProvider = "google" | "xai";
 export interface AgentModelRunRequest {
     readonly model: ModelRecord;
@@ -45,8 +46,20 @@ function unsupported(message: string): never {
     throw new RouterError("unsupported_feature", message, 422);
 }
 
-// Phase 9. The content of a tool_result block is either plain text or an array of blocks.
-// Both are reduced to text: the bridge hands text to the MCP side.
+function blockSummary(block: Record<string, unknown>): { type: string; mediaType: string; bytes?: number; text: string } {
+    const type = typeof block["type"] === "string" && /^[a-z_]{1,48}$/u.test(block["type"]) ? block["type"] : "unknown";
+    const source = isRecord(block["source"]) ? block["source"] : block;
+    const media = source["media_type"] ?? source["mimeType"];
+    const mediaType = typeof media === "string" && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/iu.test(media) ? media : "unknown";
+    const data = source["data"];
+    const bytes = typeof data === "string"
+        ? (source["type"] === "base64" || source === block ? Buffer.from(data, "base64").length : Buffer.byteLength(data, "utf8"))
+        : source["type"] === "url" ? undefined : Buffer.byteLength(JSON.stringify(block), "utf8");
+    return { type, mediaType, ...(bytes === undefined ? {} : { bytes }),
+        text: `[${type}: media_type=${mediaType}, bytes=${bytes ?? "unknown (URL source)"}]` };
+}
+
+// Text compilation keeps a payload-free description; live MCP results also carry images.
 function toolResultText(value: unknown): string {
     if (typeof value === "string") return value;
     if (!Array.isArray(value)) return "";
@@ -55,8 +68,33 @@ function toolResultText(value: unknown): string {
         if (isRecord(block) && block["type"] === "text" && typeof block["text"] === "string") {
             parts.push(block["text"]);
         }
+        else {
+            parts.push(blockSummary(isRecord(block) ? block : {}).text);
+        }
     }
     return parts.join("\n\n");
+}
+function toolResultBlocks(value: unknown): readonly McpToolResultContent[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const parts: McpToolResultContent[] = [];
+    for (const block of value) {
+        if (isRecord(block) && block["type"] === "text" && typeof block["text"] === "string") {
+            parts.push({ type: "text", text: block["text"] });
+            continue;
+        }
+        const record = isRecord(block) ? block : {};
+        const summary = blockSummary(record);
+        parts.push({ type: "text", text: summary.text });
+        writeSafeLog({ event: "agent_tool_result_content", level: "info", route: "mcp",
+            contentBlockType: summary.type, contentMediaType: summary.mediaType,
+            ...(summary.bytes === undefined ? {} : { contentBytes: summary.bytes }) });
+        const source = record["source"];
+        if (record["type"] === "image" && isRecord(source) && source["type"] === "base64" &&
+            typeof source["data"] === "string" && summary.mediaType.startsWith("image/")) {
+            parts.push({ type: "image", data: source["data"], mimeType: summary.mediaType });
+        }
+    }
+    return parts;
 }
 /**
  * Phase 9. Validates Claude Code tool definitions before handing them to the BRIDGE.
@@ -96,10 +134,12 @@ export function extractToolResults(messages: readonly unknown[]): readonly ToolR
         if (!isRecord(block) || block["type"] !== "tool_result") continue;
         const id = block["tool_use_id"];
         if (typeof id !== "string" || id === "") continue;
+        const contentBlocks = toolResultBlocks(block["content"]);
         output.push({
             toolUseId: id,
             content: toolResultText(block["content"]),
             isError: block["is_error"] === true,
+            ...(contentBlocks === undefined ? {} : { contentBlocks }),
         });
     }
     return output;

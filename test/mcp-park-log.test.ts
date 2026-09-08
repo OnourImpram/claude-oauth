@@ -59,6 +59,11 @@ for (const mode of ["plain", "node-test"] as const) {
             strictEqual(parked[0]?.["route"], "mcp");
             strictEqual(parked[0]?.["level"], "info");
             strictEqual(parked[0]?.["code"], "Read");
+            const media = entries.filter((entry) => entry["event"] === "agent_tool_result_content");
+            strictEqual(media.length, 1, "N01: the production log records the arriving screenshot metadata");
+            strictEqual(media[0]?.["contentBlockType"], "image");
+            strictEqual(media[0]?.["contentMediaType"], "image/png");
+            strictEqual(media[0]?.["contentBytes"], 36);
         }
         finally {
             await rm(scratch, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

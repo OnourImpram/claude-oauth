@@ -26,7 +26,7 @@
 import { randomUUID } from "node:crypto";
 
 import { RouterError } from "../domain/errors.js";
-import { McpToolBridge, type McpToolDescriptor, type ParkedToolCall } from "./tool-bridge.js";
+import { McpToolBridge, type McpToolDescriptor, type McpToolResultContent, type ParkedToolCall } from "./tool-bridge.js";
 import { writeSafeLog } from "../runtime/log.js";
 
 /** A running provider agent, seen from the registry's side. */
@@ -255,6 +255,7 @@ export interface ToolResultDelivery {
     readonly toolUseId: string;
     readonly content: string;
     readonly isError: boolean;
+    readonly contentBlocks?: readonly McpToolResultContent[];
 }
 
 export class AgentSessionRegistry {
@@ -476,7 +477,7 @@ export class AgentSessionRegistry {
                 continue;
             }
             this.#calls.delete(result.toolUseId);
-            if (session.bridge.deliverToolResult(result.toolUseId, result.content, result.isError)) {
+            if (session.bridge.deliverToolResult(result.toolUseId, result.content, result.isError, result.contentBlocks)) {
                 delivered += 1;
             }
         }
