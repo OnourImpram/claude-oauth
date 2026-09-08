@@ -6,6 +6,11 @@ export const ROUTER_ERROR_CODES = [
     "model_not_available",
     "unsupported_feature",
     "provider_rate_limited",
+    // The child could not obtain permission for a tool and stopped. Distinct from
+    // entitlement (the account lacks the model), auth (a login is missing) and rate
+    // limiting (quota): here the account, login and quota are all fine and the run
+    // still produced nothing. A condition without a name gets the wrong remedy.
+    "provider_tool_permission_denied",
     "upstream_protocol_error",
     "adapter_unavailable",
     "upstream_timeout",

@@ -353,6 +353,117 @@ export async function runAntigravityProcess(request: HeadlessProcessRequest): Pr
             request.signal?.addEventListener("abort", onAbort, { once: true });
     });
 }
+// A child failure is only actionable if the child's own explanation survives the
+// throw. Measured 2026-09-07: the child said, on stderr, exactly why it produced
+// nothing ("a tool required the \"command\" permission that headless mode cannot
+// prompt for, so it was auto-denied"), while the router reported only "Antigravity
+// did not complete the request." The diagnosis was collected and then discarded.
+//
+// A red-team pass over the first version of this fix (2026-09-07, report
+// tasks/router-karar-20260907/astra-red-team.md) broke three of its claims, and the
+// repairs below are its findings, not this file's own optimism:
+//   - the explanation survived on TWO throw paths and was still dropped on a dozen
+//     others, including the one where the child wrote its reason into the terminal
+//     event's `error` field rather than to stderr;
+//   - the redaction let a Bearer value, a query-string token, an AWS key id, a
+//     multi-word field value and any non-ASCII run through;
+//   - the "bytes" counter counted UTF-16 units and could cut a surrogate pair in half.
+//
+// stderr is untrusted text from a child whose environment carries credentials, so it
+// is redacted before it travels: a diagnostic channel must never become a leak. The
+// redaction deliberately over-reaches on named fields (it takes the rest of the
+// line) — a diagnostic that hides one word too many is recoverable, one that leaks
+// is not.
+const childDetailLimit = 600;
+
+const secretFieldNames = "api[_-]?key|apikey|key|token|secret|client_secret|access_token|refresh_token|password|passwd|pwd|authorization|auth";
+
+function redactChildDetail(text: string): string {
+    return text
+        // Provider-prefixed credentials. The left lookbehind keeps ordinary words
+        // ("task-management-system" would otherwise match the sk- rule) out of it.
+        .replace(/(?<![A-Za-z0-9])(?:sk|pk|ghp|gho|ghu|ghs|ghr|xai|key|api)[-_][A-Za-z0-9_-]{8,}/giu, "[REDACTED]")
+        .replace(/(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])/gu, "[REDACTED]")
+        .replace(/(?<![A-Za-z0-9])AIza[A-Za-z0-9_-]{10,}/gu, "[REDACTED]")
+        .replace(/(?<![A-Za-z0-9])ya29\.[A-Za-z0-9._-]{10,}/gu, "[REDACTED]")
+        // The VALUE after a scheme word, not the scheme word itself. The first
+        // version redacted "Bearer" and left the token standing.
+        .replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/giu, "$1 [REDACTED]")
+        // A JWT in full: the header and payload carry claims, so redacting only the
+        // signature (as the first version did) still leaks the contents.
+        .replace(/(?<![A-Za-z0-9._-])[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{6,}(?![A-Za-z0-9._-])/gu, "[REDACTED]")
+        // A named field in bare, quoted, JSON or query-string form. The value runs to
+        // the end of the line so a multi-word or space-broken secret cannot survive
+        // in fragments; \S+ let the tail through.
+        .replace(new RegExp(`("?\\b(?:${secretFieldNames})"?\\s*[:=]\\s*)[^\\n]*`, "giu"), "$1[REDACTED]")
+        // Long opaque runs, letters of any script — the ASCII-only class missed a
+        // 40-character non-ASCII value entirely.
+        .replace(/(?<![\p{L}\p{N}_-])[\p{L}\p{N}_-]{32,}(?![\p{L}\p{N}_-])/gu, "[REDACTED]");
+}
+
+// The limit is in BYTES and is measured in bytes; the first version sliced UTF-16
+// units, reported them as "bytes", and could leave a lone surrogate at the cut.
+function boundedExcerpt(text: string): string {
+    const totalBytes = Buffer.byteLength(text, "utf8");
+    if (totalBytes <= childDetailLimit)
+        return text;
+    let usedBytes = 0;
+    let kept = "";
+    for (const character of text) {
+        const size = Buffer.byteLength(character, "utf8");
+        if (usedBytes + size > childDetailLimit)
+            break;
+        usedBytes += size;
+        kept += character;
+    }
+    return `${kept}...[${totalBytes - usedBytes} more bytes]`;
+}
+
+// Both channels the child can explain itself through. Measured: with a terminal
+// event carrying `error: "disk full: ..."` and an empty stderr, the first version
+// said "child wrote nothing to stderr" while the child had written plenty.
+function childDetail(output: { readonly exitCode: number | null; readonly stderr: string }, reported?: string): string {
+    const channels: string[] = [];
+    const stderr = redactChildDetail(output.stderr.trim());
+    if (stderr !== "")
+        channels.push(`stderr: ${boundedExcerpt(stderr)}`);
+    const terminal = reported === undefined ? "" : redactChildDetail(reported.trim());
+    if (terminal !== "")
+        channels.push(`terminal error: ${boundedExcerpt(terminal)}`);
+    const exit = output.exitCode === null ? "exit unknown" : `exit ${output.exitCode}`;
+    return channels.length === 0
+        ? `${exit}, child wrote no diagnostic on stderr or in its terminal event`
+        : `${exit}: ${channels.join(" | ")}`;
+}
+
+function withChildDetail(error: RouterError, output: HeadlessProcessOutput, reported?: string): RouterError {
+    return new RouterError(error.code, `${error.message} ${childDetail(output, reported)}`, error.status);
+}
+
+// The child names this condition itself. Measured 2026-09-07, agy stderr:
+// "no output produced -- a tool required the \"command\" permission that headless
+// mode cannot prompt for, so it was auto-denied". The first version matched a bare
+// mention of a permission setting, so an INFO line naming permissions.allow and a
+// usage line for --dangerously-skip-permissions were both classified as denials,
+// while "execution rejected: approval unavailable" (verb before noun) was missed.
+// A denial now needs a permission word AND a denial verb, in either order, and an
+// explicit negation disqualifies it.
+const permissionWords = "permissions?|approval|authori[sz]ation";
+const denialWords = "denied|rejected|refused|not permitted|cannot prompt|could not prompt|auto-?denied";
+const permissionDenialSignature = new RegExp(
+    `(?:${permissionWords})[\\s\\S]{0,80}?(?:${denialWords})`
+    + `|(?:${denialWords})[\\s\\S]{0,80}?(?:${permissionWords})`
+    + `|auto-?denied`,
+    "iu",
+);
+const permissionDenialNegation = /\b(?:not|never|n't)\s+(?:auto-?)?(?:denied|rejected|refused)\b|^\s*usage:|--help\b/imu;
+
+function looksLikePermissionDenial(...channels: readonly (string | undefined)[]): boolean {
+    return channels.some((channel) => channel !== undefined
+        && permissionDenialSignature.test(channel)
+        && !permissionDenialNegation.test(channel));
+}
+
 export async function runAntigravityHeadless(options: AntigravityHeadlessOptions): Promise<AntigravityHeadlessResult> {
     if (!isAllowedModel(options.model)) {
         throw new RouterError("model_not_available", `Antigravity model ${JSON.stringify(options.model)} is not in this router's reviewed contract set. ONARIM: add it to AGENT_MODEL_CONTRACTS -- this is a LOCAL policy refusal, not an upstream one.`, 404);
@@ -396,14 +507,48 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         throw new RouterError("adapter_unavailable", "Antigravity could not complete the process request.", 503);
     }
     if (output.exitCode !== 0 && output.stdout.trim() === "" && /(?:auth(?:entication|orization)?|login|sign[ -]?in|oauth)/iu.test(output.stderr)) {
-        throw new RouterError("provider_auth_required", "Antigravity OAuth login is required.", 401);
+        throw new RouterError("provider_auth_required", `Antigravity OAuth login is required. ${childDetail(output)}`, 401);
     }
-    const parsed = parseResponse(output.stdout);
+    // parseResponse throws on every malformed-stream shape, and each of those throws
+    // used to leave the child's explanation behind. The parse failure keeps its own
+    // code and status; only the diagnosis is added.
+    let parsed: TerminalResult;
+    try {
+        parsed = parseResponse(output.stdout);
+    }
+    catch (error) {
+        throw error instanceof RouterError ? withChildDetail(error, output) : error;
+    }
     if (output.exitCode !== 0 || !["success", "ok"].includes(parsed.status.toLowerCase())) {
         const classified = output.exitCode === 0 ? undefined : classifiedProviderResultFailure(parsed);
         if (classified !== undefined)
-            throw classified;
-        throw new RouterError("upstream_protocol_error", "Antigravity did not complete the request.", 502);
+            throw withChildDetail(classified, output, parsed.error);
+        throw new RouterError(
+            "upstream_protocol_error",
+            `Antigravity did not complete the request. ${childDetail(output, parsed.error)}`,
+            502,
+        );
+    }
+    // A terminal SUCCESS carrying an empty response is not a success: the caller
+    // receives nothing and is told nothing. Before this branch existed the empty
+    // case returned as success and the whole delegation lane looked healthy while
+    // delivering nothing.
+    if (parsed.response.trim() === "") {
+        const permissionDenied = looksLikePermissionDenial(output.stderr, parsed.error);
+        // The remedy names the arguments this call ACTUALLY used. The first version
+        // hardcoded "--mode plan --sandbox" while provider-set.ts passes
+        // allowEdits: true, so on that lane the message described a command that was
+        // never run -- a remedy that misdescribes the run teaches distrust.
+        const lane = options.allowEdits === true
+            ? `"--mode accept-edits --dangerously-skip-permissions"`
+            : `"--mode plan --sandbox"`;
+        throw new RouterError(
+            permissionDenied ? "provider_tool_permission_denied" : "upstream_protocol_error",
+            permissionDenied
+                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. ONARIM: this call ran agy with ${lane} (see processArguments), and a tool needing a permission is auto-denied there, which stops the run. Add an allow-rule for the tool the child names below under permissions.allow in the agy settings, or run the task on a lane that grants that tool. ${childDetail(output, parsed.error)}`
+                : `Antigravity reported success with an empty response. ${childDetail(output, parsed.error)}`,
+            502,
+        );
     }
     return parsed.usage === undefined
         ? { response: parsed.response, model: options.model }
