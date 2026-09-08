@@ -353,6 +353,45 @@ export async function runAntigravityProcess(request: HeadlessProcessRequest): Pr
             request.signal?.addEventListener("abort", onAbort, { once: true });
     });
 }
+// A child failure is only actionable if the child's own explanation survives the
+// throw. Measured 2026-09-07: the child said, on stderr, exactly why it produced
+// nothing ("a tool required the \"command\" permission that headless mode cannot
+// prompt for, so it was auto-denied"), while the router reported only "Antigravity
+// did not complete the request." The diagnosis was collected and then discarded at
+// the last step.
+//
+// stderr is untrusted text from a child whose environment carries credentials, so
+// it is bounded and redacted before it travels: a secret must never leave through
+// a diagnostic channel.
+const childDetailLimit = 600;
+
+function redactChildDetail(text: string): string {
+    return text
+        .replace(/\b(?:sk|pk|ghp|gho|ghu|ghs|ghr|xai|key)-[A-Za-z0-9_-]{8,}/giu, "[REDACTED]")
+        .replace(/\b[A-Za-z0-9_-]{32,}\b/gu, "[REDACTED]")
+        .replace(/("?(?:api[_-]?key|token|secret|password|authorization)"?\s*[:=]\s*)\S+/giu,
+                 "$1[REDACTED]");
+}
+
+// The child names this condition itself. Measured 2026-09-07, agy stderr:
+// "no output produced -- a tool required the \"command\" permission that headless
+// mode cannot prompt for, so it was auto-denied". Only when that signature is
+// present is the cause reported as a permission denial; an empty response with no
+// such evidence stays a protocol error, because a cause that was not measured must
+// not be written into the error code.
+const permissionDenialSignature =
+    /(?:permission[^\n]{0,40}(?:denied|auto-denied|cannot prompt)|auto-denied|--dangerously-skip-permissions|permissions\.allow)/iu;
+
+function childDetail(output: HeadlessProcessOutput): string {
+    const stderr = redactChildDetail(output.stderr.trim());
+    const excerpt = stderr.length > childDetailLimit
+        ? `${stderr.slice(0, childDetailLimit)}...[${stderr.length - childDetailLimit} more bytes]`
+        : stderr;
+    return excerpt === ""
+        ? `exit ${output.exitCode}, child wrote nothing to stderr`
+        : `exit ${output.exitCode}: ${excerpt}`;
+}
+
 export async function runAntigravityHeadless(options: AntigravityHeadlessOptions): Promise<AntigravityHeadlessResult> {
     if (!isAllowedModel(options.model)) {
         throw new RouterError("model_not_available", `Antigravity model ${JSON.stringify(options.model)} is not in this router's reviewed contract set. ONARIM: add it to AGENT_MODEL_CONTRACTS -- this is a LOCAL policy refusal, not an upstream one.`, 404);
@@ -403,7 +442,25 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         const classified = output.exitCode === 0 ? undefined : classifiedProviderResultFailure(parsed);
         if (classified !== undefined)
             throw classified;
-        throw new RouterError("upstream_protocol_error", "Antigravity did not complete the request.", 502);
+        throw new RouterError(
+            "upstream_protocol_error",
+            `Antigravity did not complete the request. ${childDetail(output)}`,
+            502,
+        );
+    }
+    // A terminal SUCCESS carrying an empty response is not a success: the caller
+    // receives nothing and is told nothing. Before this branch existed the empty
+    // case returned as success and the whole delegation lane looked healthy while
+    // delivering nothing.
+    if (parsed.response.trim() === "") {
+        const permissionDenied = permissionDenialSignature.test(output.stderr);
+        throw new RouterError(
+            permissionDenied ? "provider_tool_permission_denied" : "upstream_protocol_error",
+            permissionDenied
+                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. ONARIM: add an allow-rule under permissions.allow for the tool the child names below, or re-run the lane with edits enabled. ${childDetail(output)}`
+                : `Antigravity reported success with an empty response. ${childDetail(output)}`,
+            502,
+        );
     }
     return parsed.usage === undefined
         ? { response: parsed.response, model: options.model }
