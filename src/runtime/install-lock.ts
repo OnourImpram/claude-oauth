@@ -25,6 +25,7 @@ export interface InstallLock {
         readonly version: string;
         readonly integrity: string;
         readonly entrypointSha256: string;
+        readonly capsuleEntrypointSha256: string;
         readonly localPatch: "config/claude-oauth-local-patches.mjs";
         readonly localPatchSha256: string;
     };
@@ -123,6 +124,9 @@ function parseInstallLock(value: unknown): InstallLock {
     const clodexEntrypointSha256 = requiredString(clodex, "entrypointSha256").toUpperCase();
     if (!/^[A-F0-9]{64}$/u.test(clodexEntrypointSha256))
         throw new Error("Clodex entrypoint SHA-256 is invalid");
+    const capsuleEntrypointSha256 = requiredString(clodex, "capsuleEntrypointSha256").toUpperCase();
+    if (!/^[A-F0-9]{64}$/u.test(capsuleEntrypointSha256))
+        throw new Error("Clodex capsule entrypoint SHA-256 is invalid");
     const localPatch = requiredString(clodex, "localPatch");
     if (localPatch !== "config/claude-oauth-local-patches.mjs")
         throw new Error("Clodex local patch path is invalid");
@@ -153,6 +157,7 @@ function parseInstallLock(value: unknown): InstallLock {
             version: requiredString(clodex, "version"),
             integrity: requiredString(clodex, "integrity"),
             entrypointSha256: clodexEntrypointSha256,
+            capsuleEntrypointSha256,
             localPatch,
             localPatchSha256,
         },

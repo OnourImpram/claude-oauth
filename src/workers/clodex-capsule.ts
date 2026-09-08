@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HttpTransport, ProviderModelRecord, ProviderReadiness } from "../domain/contracts.js";
 import { RouterError } from "../domain/errors.js";
 import { parseProviderModelEntries } from "../domain/model-catalog.js";
 import { spawnFailureGuard } from "../runtime/child-process.js";
+import { prepareClodexCapsuleEntrypoint } from "../runtime/clodex-capsule-entrypoint.js";
+import { CLODEX_TRANSPORT_NONCE_ENV } from "../runtime/clodex-capsule-patch.js";
 import { FixedOriginFetchTransport } from "../ports/fetch-transport.js";
 import { sanitizedWorkerEnvironment } from "../security/environment.js";
 import { readBoundedJson } from "../runtime/http-body.js";
@@ -12,8 +14,6 @@ import { allocateLoopbackPort } from "../runtime/loopback-port.js";
 import { ensurePrivateDirectory } from "../runtime/paths.js";
 export interface ClodexCapsuleOptions {
     readonly home: string;
-    readonly binary?: string;
-    readonly binaryArguments?: readonly string[];
 }
 export interface RunningClodexCapsule {
     readonly origin: URL;
@@ -26,24 +26,19 @@ const startupTimeoutMs = 20_000;
 function moduleRoot(): string {
     return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 }
-function defaultBinary(): string {
-    return process.execPath;
-}
-function defaultArguments(): readonly string[] {
-    return [join(moduleRoot(), "node_modules", "@bman654", "clodex", "dist", "cli.js")];
-}
 function delay(milliseconds: number): Promise<void> {
     return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 export async function startClodexCapsule(options: ClodexCapsuleOptions, transportNonce: string): Promise<RunningClodexCapsule> {
     await ensurePrivateDirectory(options.home);
     const port = await allocateLoopbackPort();
-    const binary = options.binary ?? defaultBinary();
     const environment = sanitizedWorkerEnvironment("openai");
     environment["CLODEX_HOME"] = options.home;
     environment["CLODEX_NO_DISCOVERY"] = "1";
-    const child = spawn(binary, [
-        ...(options.binaryArguments ?? defaultArguments()),
+    environment[CLODEX_TRANSPORT_NONCE_ENV] = transportNonce;
+    const entrypoint = await prepareClodexCapsuleEntrypoint(moduleRoot());
+    const child = spawn(process.execPath, [
+        entrypoint.path,
         "server",
         "--endpoint",
         "--quick",
@@ -68,10 +63,11 @@ export async function startClodexCapsule(options: ClodexCapsuleOptions, transpor
     const origin = new URL(`http://127.0.0.1:${port}`);
     const transport = new FixedOriginFetchTransport(origin);
     try {
-        await waitForHealth(child, transport);
+        await waitForHealth(child, transport, transportNonce);
     }
     catch (error) {
-        child.kill();
+        await closeChild(child);
+        await entrypoint.close();
         const failure = spawnFailure();
         if (failure !== undefined) {
             throw new RouterError("adapter_unavailable", `Clodex could not be started from its pinned path (${failure.code ?? "spawn failed"}). FIX: reinstall the pinned Clodex package, then re-run claude-oauth doctor.`, 503, { cause: failure });
@@ -95,7 +91,7 @@ export async function startClodexCapsule(options: ClodexCapsuleOptions, transpor
                 const response = await transport.send({
                     path: "/health",
                     method: "GET",
-                    headers: new Headers(),
+                    headers: new Headers({ "x-api-key": transportNonce }),
                     signal: AbortSignal.timeout(2_000),
                 });
                 return {
@@ -117,10 +113,13 @@ export async function startClodexCapsule(options: ClodexCapsuleOptions, transpor
             }
         },
         catalog: async () => await readCatalog(transport, transportNonce),
-        close: async () => await closeChild(child),
+        close: async () => {
+            await closeChild(child);
+            await entrypoint.close();
+        },
     };
 }
-async function waitForHealth(child: ChildProcess, transport: HttpTransport): Promise<void> {
+async function waitForHealth(child: ChildProcess, transport: HttpTransport, transportNonce: string): Promise<void> {
     const deadline = Date.now() + startupTimeoutMs;
     while (Date.now() < deadline) {
         if (child.exitCode !== null) {
@@ -130,15 +129,16 @@ async function waitForHealth(child: ChildProcess, transport: HttpTransport): Pro
             const response = await transport.send({
                 path: "/health",
                 method: "GET",
-                headers: new Headers(),
+                headers: new Headers({ "x-api-key": transportNonce }),
                 signal: AbortSignal.timeout(1_000),
             });
             if (response.ok)
                 return;
         }
         catch {
-            await delay(200);
+            // Retry until the child becomes ready or the startup deadline expires.
         }
+        await delay(200);
     }
     throw new RouterError("adapter_unavailable", "The pinned Clodex capsule did not become ready.", 503);
 }
