@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import fs, { mkdtemp, mkdtempDisposable, mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -18,9 +19,107 @@ describe("writeBoundedWorkspaceText", () => {
 
     it("overwrites an existing file", async () => {
         const root = await workspace();
-        await writeFile(join(root, "a.txt"), "old", "utf8");
+        await writeFile(join(root, "a.txt"), "old content with a longer tail", "utf8");
         await writeBoundedWorkspaceText({ workspace: root, requestedPath: "a.txt", content: "new", maximumBytes: 1024 });
         strictEqual(await readFile(join(root, "a.txt"), "utf8"), "new");
+    });
+
+    it("B04 rejects a file replaced by an outside symlink after the path check", async (t) => {
+        await using scratch = await mkdtempDisposable(join(tmpdir(), "workspace-race-"));
+        const root = join(scratch.path, "inside");
+        await mkdir(root);
+        const target = join(root, "a.txt");
+        const outside = join(scratch.path, "outside.txt");
+        await writeFile(target, "original");
+        await writeFile(outside, "untouched");
+        const replacement = join(root, "replacement");
+        await symlink(outside, replacement, "file");
+        const originalRealpath = fs.realpath;
+        let swapped = false;
+        t.mock.method(fs, "realpath", async (...args: Parameters<typeof fs.realpath>) => {
+            const checked = await originalRealpath(...args);
+            if (String(args[0]) === target && !swapped) {
+                swapped = true;
+                await rename(target, join(root, "saved.txt"));
+                await rename(replacement, target);
+            }
+            return checked;
+        });
+        syncBuiltinESMExports();
+        try {
+            const result = await writeBoundedWorkspaceText({ workspace: root, requestedPath: target, content: "OVERWRITTEN", maximumBytes: 1024 }).then(() => undefined, (error: unknown) => error);
+            strictEqual(swapped, true, "race injection must execute");
+            strictEqual(await readFile(outside, "utf8"), "untouched", "outside target was modified");
+            ok(result instanceof Error, "replacement must fail closed");
+        }
+        finally {
+            t.mock.restoreAll();
+            syncBuiltinESMExports();
+        }
+    });
+
+    it("B04 rejects an existing file redirected by a parent junction after the path check", async (t) => {
+        await using scratch = await mkdtempDisposable(join(tmpdir(), "workspace-parent-race-"));
+        const root = join(scratch.path, "inside");
+        const parent = join(root, "notes");
+        const outside = join(scratch.path, "outside");
+        await mkdir(parent, { recursive: true });
+        await mkdir(outside);
+        const target = join(parent, "a.txt");
+        await writeFile(target, "original");
+        await writeFile(join(outside, "a.txt"), "untouched");
+        const originalRealpath = fs.realpath;
+        let swapped = false;
+        t.mock.method(fs, "realpath", async (...args: Parameters<typeof fs.realpath>) => {
+            const checked = await originalRealpath(...args);
+            if (String(args[0]) === target && !swapped) {
+                swapped = true;
+                await rename(parent, join(root, "saved"));
+                await symlink(outside, parent, "junction");
+            }
+            return checked;
+        });
+        syncBuiltinESMExports();
+        try {
+            const result = await writeBoundedWorkspaceText({ workspace: root, requestedPath: target, content: "OVERWRITTEN", maximumBytes: 1024 }).then(() => undefined, (error: unknown) => error);
+            strictEqual(swapped, true);
+            strictEqual(await readFile(join(outside, "a.txt"), "utf8"), "untouched");
+            ok(result instanceof Error);
+        }
+        finally {
+            t.mock.restoreAll();
+            syncBuiltinESMExports();
+        }
+    });
+
+    it("B04 refuses an outside symlink inserted at a new target before creation", async (t) => {
+        await using scratch = await mkdtempDisposable(join(tmpdir(), "workspace-create-race-"));
+        const root = join(scratch.path, "inside");
+        await mkdir(root);
+        const target = join(root, "new.txt");
+        const outside = join(scratch.path, "outside.txt");
+        await writeFile(outside, "untouched");
+        const originalMkdir = fs.mkdir;
+        let swapped = false;
+        t.mock.method(fs, "mkdir", async (...args: Parameters<typeof fs.mkdir>) => {
+            const result = await originalMkdir(...args);
+            if (!swapped) {
+                swapped = true;
+                await symlink(outside, target, "file");
+            }
+            return result;
+        });
+        syncBuiltinESMExports();
+        try {
+            const result = await writeBoundedWorkspaceText({ workspace: root, requestedPath: target, content: "OVERWRITTEN", maximumBytes: 1024 }).then(() => undefined, (error: unknown) => error);
+            strictEqual(swapped, true);
+            strictEqual(await readFile(outside, "utf8"), "untouched");
+            ok(result instanceof Error);
+        }
+        finally {
+            t.mock.restoreAll();
+            syncBuiltinESMExports();
+        }
     });
 
     it("rejects a path that ESCAPES the workspace", async () => {

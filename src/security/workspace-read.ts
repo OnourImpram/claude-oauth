@@ -1,5 +1,5 @@
-import { lstat, mkdir, open, realpath, writeFile } from "node:fs/promises";
-import type { Stats } from "node:fs";
+import { lstat, mkdir, open, realpath } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { RouterError } from "../domain/errors.js";
 export interface WorkspaceTextWriteOptions {
@@ -252,8 +252,8 @@ export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptio
     try {
         existing = await lstat(requested);
     }
-    catch {
-        existing = undefined;
+    catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
     if (existing !== undefined) {
@@ -261,14 +261,28 @@ export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptio
             throw new RouterError("unsupported_feature", "ACP requested a write outside the bounded text-file policy.", 422);
         }
         ensureInside(await realpath(requested));
-        await writeFile(requested, options.content, { encoding: "utf8" });
+        // Do not truncate until the opened file's identity matches the inspected file.
+        // O_NOFOLLOW rejects final symlinks on POSIX. Windows uses the same fstat check,
+        // which also catches an ancestor redirected to another file before open.
+        // Source: https://nodejs.org/download/release/v24.14.0/docs/api/fs.html#file-system-flags
+        const handle = await open(requested, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
+        try {
+            const opened = await handle.stat();
+            if (!sameFile(existing, opened) || opened.nlink !== 1) {
+                throw new RouterError("unsupported_feature", "ACP workspace file changed during inspection.", 422);
+            }
+            await handle.truncate(0);
+            await handle.writeFile(options.content, { encoding: "utf8" });
+        }
+        finally {
+            await handle.close();
+        }
         return;
     }
 
     // The target does not exist: resolve the DEEPEST EXISTING ancestor, verify that it is inside,
-    // and only then create the remaining directories. Also refuse if there is a symbolic
-    // link/junction anywhere in the ancestor chain -- this closes the TOCTOU window between the
-    // check and the write.
+    // and only then create the remaining directories. These path checks reject static
+    // escapes; they do not lock ancestor directories against concurrent replacement.
     let ancestor = dirname(requested);
     const missing: string[] = [];
     for (;;) {
@@ -295,5 +309,18 @@ export async function writeBoundedWorkspaceText(options: WorkspaceTextWriteOptio
     const target = resolve(realAncestor, relative(ancestor, requested));
     ensureInside(target);
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, options.content, { encoding: "utf8" });
+    // Exclusive creation refuses a file or symlink inserted since lstat reported ENOENT.
+    const handle = await open(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+    try {
+        const opened = await handle.stat();
+        ensureInside(await realpath(target));
+        const linked = await lstat(target);
+        if (!sameFile(linked, opened) || opened.nlink !== 1) {
+            throw new RouterError("unsupported_feature", "ACP workspace file changed during inspection.", 422);
+        }
+        await handle.writeFile(options.content, { encoding: "utf8" });
+    }
+    finally {
+        await handle.close();
+    }
 }

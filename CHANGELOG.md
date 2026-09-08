@@ -7,6 +7,22 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: B04 checked-file replacement race (2026-09-08)
+
+- **Repaired 2026-09-08 for the checked-file replacement race.** Existing workspace files
+  open without truncation, use `O_NOFOLLOW` where available, compare the opened handle's
+  file identity and link count with the inspection, and truncate/write through that handle.
+  New targets use exclusive creation and handle validation before writing content.
+- Deterministic Windows tests replace a checked file with an outside symlink, redirect an
+  existing parent through a junction, and insert a symlink before new-file creation. All
+  reject and preserve outside contents. The overwrite control verifies shorter content
+  removes the old tail.
+- Full ancestor-directory confinement cannot be repaired within this tree's portable Node
+  API and no-architecture-change scope. Repeated ancestor replacement can bypass path-based
+  containment; new-file rejection can leave an outside empty file or directory. Both the
+  outside overwrite and empty-file residue were reproduced in disposable Windows directories. The helper
+  currently has no production caller. See `SECURITY.md` for this residual scope.
+
 ### Fixed: N06 bounded helper timeout (2026-09-08)
 
 - **Repaired 2026-09-08.** `runCaptured` escalates SIGTERM to SIGKILL after

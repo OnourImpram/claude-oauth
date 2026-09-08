@@ -11,8 +11,24 @@ about. Security-relevant defects and their repair status are listed here first:
 | **B01** | Critical | The parent Claude Code session's permission boundary is **not applied** to the Google and xAI subagents. The Google lane forces write/bypass flags on; the xAI lane accepts the first permission option and serves its own file-write handler. `executionMode: "agent-readonly"` therefore misdescribes the effective authority. A routed model can write to disk where the parent session would have asked. | `src/supervisor/provider-set.ts`, `src/antigravity/headless-bridge.ts`, `src/grok/acp-bridge.ts` |
 | **N05** | Repaired | **Repaired 2026-09-08.** A repository-owned patched copy of pinned Clodex requires the session nonce, supplied only in the child environment, for every HTTP route including `/health`. Anonymous scratch-home measurements for missing/wrong/correct `x-api-key`: catalog and health **401/401/200**, malformed JSON messages **401/401/400**. Missing or empty nonce, missing/ambiguous patch anchors and patched-copy hash drift fail closed before startup. The original entrypoint hash gate remains strict; `clodex.capsuleEntrypointSha256` separately pins the patched bytes. | `src/workers/clodex-capsule.ts`, `src/runtime/clodex-capsule-entrypoint.ts`, `src/runtime/clodex-capsule-patch.ts` |
 
-Related open items with a security dimension: **B04** (the workspace write check does not write
-the file it checked, path race), **G02** (a non-empty `.mcp.json` in the project makes the xAI
+**~~B04~~: Repaired 2026-09-08 for the checked-file replacement race.** Existing files open
+without truncation, reject final symlinks where `O_NOFOLLOW` is available, and compare the
+opened file's identity and link count before writing through that same handle. Windows uses
+the handle identity check. New files use exclusive creation. Deterministic Windows tests
+replace a checked file with an outside symlink, redirect an existing parent via junction,
+and insert a new-target symlink; each rejects without changing outside target contents.
+
+**B04 residual scope, full ancestor confinement cannot be repaired from this tree within the
+no-architecture-change constraint.** Portable Node filesystem calls do not provide the
+platform-specific directory-handle operations needed to bind containment to the opened file.
+Scratch-directory measurement confirms a repeated outside/inside/outside ancestor replacement across
+`lstat`/`realpath`/`open` that can preserve the initial outside inode's identity. New-file
+`mkdir` or `open` can also create an outside directory or empty file before later containment
+validation rejects. Both broader schedules were reproduced on Windows after the narrow fix;
+the helper must not be treated as a sandbox against arbitrary concurrent
+ancestor changes. A source search in this run found no production caller of the helper.
+
+Related open items with a security dimension: **G02** (a non-empty `.mcp.json` in the project makes the xAI
 lane refuse to start; fail-closed, but it is a denial of the lane), and the fact that **B05**, the
 launcher shim that separates `claude` from `claude-oauth` is not in this tree, means the
 native-separation claim cannot be verified from this repository yet. The full list is in the
