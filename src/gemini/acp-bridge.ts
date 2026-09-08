@@ -6,6 +6,7 @@ import { RouterError } from "../domain/errors.js";
 import { sanitizedWorkerEnvironment } from "../security/environment.js";
 import { spawnFailureGuard } from "../runtime/child-process.js";
 import { ensureGeminiOAuthConfiguration } from "../runtime/provider-config.js";
+import { selectTextLines } from "../runtime/text-lines.js";
 import { readBoundedWorkspaceText } from "../security/workspace-read.js";
 export interface GeminiAcpOptions {
     readonly cwd: string;
@@ -46,12 +47,13 @@ class ReadOnlyGeminiClient {
         }
     }
     async readTextFile(params: ReadTextFileParams): Promise<ReadTextFileResponse> {
+        const text = await readBoundedWorkspaceText({
+            workspace: this.#workspace,
+            requestedPath: params.path,
+            maximumBytes: maximumReadableFileBytes,
+        });
         return {
-            content: await readBoundedWorkspaceText({
-                workspace: this.#workspace,
-                requestedPath: params.path,
-                maximumBytes: maximumReadableFileBytes,
-            }),
+            content: selectTextLines(text, params.line, params.limit),
         };
     }
     resultText(): string {
@@ -96,7 +98,11 @@ function spawnGemini(options: GeminiAcpOptions, systemSettings: string): ChildPr
 export async function runGeminiAcp(options: GeminiAcpOptions): Promise<GeminiAcpResult> {
     if (options.task.trim() === "")
         throw new RouterError("invalid_request", "Gemini task must not be empty.", 400);
+    if (options.signal?.aborted)
+        throw new RouterError("upstream_timeout", "Gemini ACP task was cancelled.", 504);
     const systemSettings = await ensureGeminiOAuthConfiguration(options.home);
+    if (options.signal?.aborted)
+        throw new RouterError("upstream_timeout", "Gemini ACP task was cancelled.", 504);
     const child = spawnGemini(options, systemSettings);
     const spawnFailure = spawnFailureGuard(child);
     if (child.stdin === null || child.stdout === null) {
@@ -240,14 +246,14 @@ export function startGeminiAcpSession(options: GeminiAcpSessionOptions): GeminiA
         if (options.task.trim() === "") {
             throw new RouterError("invalid_request", "Gemini task must not be empty.", 400);
         }
-        if (iptalEdildi) throw new RouterError("upstream_timeout", "Gemini ACP session was cancelled before start.", 504);
+        if (iptalEdildi || options.signal?.aborted)
+            throw new RouterError("upstream_timeout", "Gemini ACP session was cancelled before start.", 504);
         const systemSettings = await ensureGeminiOAuthConfiguration(options.home);
-        child = spawnGemini(options, systemSettings);
-        // Race: cancel() may have arrived between the spawn and this line.
-        if (iptalEdildi) {
-            child.kill();
+        // Preparation yields: cancel() or the caller's signal may have fired while it ran.
+        if (iptalEdildi || options.signal?.aborted) {
             throw new RouterError("upstream_timeout", "Gemini ACP session was cancelled during start.", 504);
         }
+        child = spawnGemini(options, systemSettings);
         const spawnFailure = spawnFailureGuard(child);
         if (child.stdin === null || child.stdout === null) {
             child.kill();

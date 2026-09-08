@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-oauth — other models inside Claude Code, native path untouched</title>
+<meta name="description" content="A router that runs Google, xAI and OpenAI models inside Claude Code over their own OAuth sessions, without replacing the native Claude path. Pre-release; open defects listed.">
+<style>
+:root {
+  color-scheme: light dark;
+
+  --ground: #f6f7f8;
+  --panel: #ffffff;
+  --ink: #14181c;
+  --ink-soft: #4d5763;
+  --ink-faint: #7b8794;
+  --rule: #dfe3e7;
+  --rule-soft: #ebeef1;
+
+  --native: #1b4dd1;
+  --router: #b4560c;
+  --ok: #196b4a;
+  --open: #a3341f;
+
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --measure: 68ch;
+  --pad: clamp(1.25rem, 4vw, 3rem);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #101316;
+    --panel: #171b1f;
+    --ink: #e8ecef;
+    --ink-soft: #aab4bd;
+    --ink-faint: #7d8892;
+    --rule: #2a3138;
+    --rule-soft: #21272c;
+
+    --native: #7ba1ff;
+    --router: #f0a35a;
+    --ok: #5fc294;
+    --open: #ef8b74;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #101316;
+  --panel: #171b1f;
+  --ink: #e8ecef;
+  --ink-soft: #aab4bd;
+  --ink-faint: #7d8892;
+  --rule: #2a3138;
+  --rule-soft: #21272c;
+
+  --native: #7ba1ff;
+  --router: #f0a35a;
+  --ok: #5fc294;
+  --open: #ef8b74;
+}
+
+:root[data-theme="light"] {
+  --ground: #f6f7f8;
+  --panel: #ffffff;
+  --ink: #14181c;
+  --ink-soft: #4d5763;
+  --ink-faint: #7b8794;
+  --rule: #dfe3e7;
+  --rule-soft: #ebeef1;
+
+  --native: #1b4dd1;
+  --router: #b4560c;
+  --ok: #196b4a;
+  --open: #a3341f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 78ch;
+  margin: 0 auto;
+  padding: var(--pad);
+}
+
+a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+a:hover { text-decoration-color: currentColor; }
+a:focus-visible { outline: 2px solid var(--native); outline-offset: 3px; border-radius: 2px; }
+
+.eyebrow {
+  font: 500 0.72rem/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+h1 {
+  font: 600 clamp(2rem, 6vw, 3.1rem)/1.05 var(--mono);
+  letter-spacing: -0.02em;
+  margin: 0.6rem 0 0;
+  text-wrap: balance;
+}
+
+.lede {
+  max-width: var(--measure);
+  font-size: clamp(1.05rem, 2.4vw, 1.28rem);
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 1.1rem 0 0;
+  text-wrap: pretty;
+}
+
+.lede b { font-weight: 600; }
+
+h2 {
+  font: 600 1.32rem/1.25 var(--sans);
+  letter-spacing: -0.01em;
+  margin: 0 0 0.75rem;
+  text-wrap: balance;
+}
+
+h3 {
+  font: 600 0.98rem/1.3 var(--sans);
+  margin: 1.6rem 0 0.4rem;
+}
+
+p { max-width: var(--measure); margin: 0 0 0.9rem; }
+p:last-child { margin-bottom: 0; }
+
+section { margin-top: 3.4rem; }
+
+.status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-top: 1.6rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--open);
+  background: var(--panel);
+  font: 400 0.86rem/1.45 var(--sans);
+  color: var(--ink-soft);
+}
+.status strong { color: var(--ink); font-weight: 600; }
+
+/* --- the signature: two paths, one boundary --- */
+.paths {
+  margin: 1.4rem 0 0;
+  padding: clamp(1rem, 3vw, 1.6rem);
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  overflow-x: auto;
+}
+
+.paths table {
+  border-collapse: collapse;
+  font: 400 0.85rem/1.9 var(--mono);
+  white-space: nowrap;
+}
+
+.paths td { padding: 0.05rem 0; vertical-align: baseline; }
+.paths .cmd { padding-right: 0.9rem; font-weight: 600; }
+.paths .line { color: var(--ink-faint); padding-right: 0.7rem; }
+.paths .dest { color: var(--ink-soft); }
+.paths .native .cmd, .paths .native .dest { color: var(--native); }
+.paths .router .cmd { color: var(--router); }
+.paths .note {
+  font: 400 0.75rem/1.5 var(--sans);
+  color: var(--ink-faint);
+  white-space: normal;
+  padding-top: 0.5rem;
+}
+.paths .gap td { height: 0.9rem; }
+
+.rule-label {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed var(--rule);
+  font: 400 0.8rem/1.55 var(--sans);
+  color: var(--ink-soft);
+  max-width: var(--measure);
+}
+
+/* --- tables --- */
+.tablewrap { overflow-x: auto; margin: 1rem 0 0; }
+
+table.data {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 34rem;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+table.data th {
+  text-align: left;
+  font: 500 0.72rem/1.3 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 0 0.9rem 0.55rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+table.data td {
+  padding: 0.55rem 0.9rem 0.55rem 0;
+  border-bottom: 1px solid var(--rule-soft);
+  vertical-align: top;
+}
+
+table.data td:last-child, table.data th:last-child { padding-right: 0; }
+table.data code { font: 400 0.85em/1.4 var(--mono); color: var(--ink-soft); }
+
+.tag {
+  font: 500 0.68rem/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.tag.pass { color: var(--ok); }
+.tag.fail { color: var(--open); }
+
+.id { font: 500 0.8rem/1.4 var(--mono); color: var(--ink-faint); }
+
+ul { max-width: var(--measure); padding-left: 1.1rem; margin: 0 0 0.9rem; }
+li { margin-bottom: 0.45rem; }
+li::marker { color: var(--ink-faint); }
+
+.quiet { color: var(--ink-soft); }
+.small { font-size: 0.88rem; }
+
+code.inline {
+  font: 400 0.88em/1.4 var(--mono);
+  background: var(--rule-soft);
+  padding: 0.08em 0.34em;
+  border-radius: 2px;
+}
+
+footer {
+  margin-top: 4.5rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+}
+footer p { max-width: var(--measure); }
+
+@media (prefers-reduced-motion: no-preference) {
+  a { transition: text-decoration-color 120ms ease; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <p class="eyebrow">Onour Impram Ventures · Apache-2.0</p>
+  <h1>claude-oauth</h1>
+
+  <p class="lede">
+    Run Google, xAI and OpenAI models <b>inside Claude Code</b>, each over its own OAuth session —
+    <b>without replacing the native Claude path</b>. <code class="inline">claude</code> stays native.
+    <code class="inline">claude-oauth</code> opens the router.
+  </p>
+
+  <p class="status">
+    <strong>Pre-release.</strong>
+    <span>Not ready to use, and not pretending otherwise. The open defects are listed below, by id.</span>
+  </p>
+
+  <section aria-labelledby="paths-h">
+    <h2 id="paths-h">Two commands, two paths</h2>
+    <p>
+      A router usually replaces something. This one adds a second entry point and leaves the first
+      one alone. Which binary you type decides which world you are in — there is no mode to
+      remember and nothing to switch back.
+    </p>
+
+    <div class="paths">
+      <table>
+        <tbody>
+          <tr class="native">
+            <td class="cmd">claude</td>
+            <td class="line">──────────────▶</td>
+            <td class="dest">api.anthropic.com</td>
+          </tr>
+          <tr><td></td><td></td><td class="note">Native. No proxy, no patch, no interception. Byte-for-byte the session you had before installing.</td></tr>
+          <tr class="gap"><td colspan="3"></td></tr>
+          <tr class="router">
+            <td class="cmd">claude-oauth</td>
+            <td class="line">──────┬───────▶</td>
+            <td class="dest">agy &nbsp;&nbsp;→ Google</td>
+          </tr>
+          <tr class="router">
+            <td></td>
+            <td class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├───────▶</td>
+            <td class="dest">grok &nbsp;→ xAI</td>
+          </tr>
+          <tr class="router">
+            <td></td>
+            <td class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└───────▶</td>
+            <td class="dest">codex → OpenAI</td>
+          </tr>
+          <tr><td></td><td></td><td class="note">Each lane drives that provider's own official CLI, under your own account and your own plan.</td></tr>
+        </tbody>
+      </table>
+      <p class="rule-label">
+        The boundary between those two blocks is the whole project. Everything below is about
+        keeping it there and proving it is there.
+      </p>
+    </div>
+  </section>
+
+  <section aria-labelledby="why-h">
+    <h2 id="why-h">Why a chat box is not enough</h2>
+    <p>
+      Claude Code is an agent harness, not a chat window. Its value is the loop: tools, subagents,
+      skills, MCP servers, permission prompts, file edits that you approve. A router that only
+      forwards text turns that harness back into a chat box with extra steps.
+    </p>
+    <p>
+      So the target here is the harder one. <b>Every model reachable through the router should be
+      able to use the same Claude Code surface</b> — the <code class="inline">Agent</code> tool,
+      skills, MCP servers such as Playwright, file editing under the same permission rules that
+      govern a native session. Anything less is a downgrade wearing the harness's clothes.
+    </p>
+    <p class="quiet small">
+      That target is not met yet. Three of the open defects below are exactly this gap, and they
+      are named rather than glossed.
+    </p>
+  </section>
+
+  <section aria-labelledby="who-h">
+    <h2 id="who-h">Who this is for</h2>
+    <ul>
+      <li><b>Developers</b> — switch models mid-workflow, run several in parallel, cross-check one
+        against another, inside the tool you already have open.</li>
+      <li><b>Students</b> — bring a provider's free or student tier (Google's student Gemini offer,
+        for instance, subject to Google's own terms) into Claude Code, so the harness itself is
+        learnable without a paid plan.</li>
+    </ul>
+    <p>
+      The point is to grow the harness's adoption, not to route around anyone. The native path stays
+      untouched and stays the recommended one. Nothing here proxies, wraps or intercepts Anthropic's
+      endpoint, and nothing here is a way to get more of anything than your own accounts already
+      grant.
+    </p>
+  </section>
+
+  <section aria-labelledby="not-h">
+    <h2 id="not-h">What it does not do</h2>
+    <ul>
+      <li><b>It does not touch the native path.</b> After installation,
+        <code class="inline">claude</code> talks to <code class="inline">api.anthropic.com</code>
+        exactly as it did before.</li>
+      <li><b>It does not bypass anyone's authentication.</b> Every lane launches that provider's own
+        shipped CLI and lets it do its own OAuth, as you.</li>
+      <li><b>It does not grant entitlements.</b> If your plan does not include a model, the router
+        cannot conjure it. Quota exhaustion surfaces as quota exhaustion.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="claim-h">
+    <h2 id="claim-h">The one claim, and its measurement</h2>
+    <p>
+      "Installing this does not degrade native Claude Code" is a claim, so it gets a measurement
+      instead of a paragraph. Measured on the maintainer's machine, 2026-09-07:
+    </p>
+
+    <div class="tablewrap">
+      <table class="data">
+        <thead>
+          <tr><th>Arm</th><th>Check</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Environment</td>
+            <td><code>ANTHROPIC_BASE_URL</code> in a normal <code>claude</code> session</td>
+            <td><span class="tag pass">absent</span></td>
+          </tr>
+          <tr>
+            <td>Process tree</td>
+            <td>ancestry of the <code>claude</code> process</td>
+            <td><span class="tag pass">no router process</span></td>
+          </tr>
+          <tr>
+            <td>Positive</td>
+            <td><code>claude remote-control --help</code> in a clean environment</td>
+            <td><span class="tag pass">accepted</span></td>
+          </tr>
+          <tr>
+            <td>Negative</td>
+            <td>the same command with a router-style base URL</td>
+            <td><span class="tag fail">refused, exit 1</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:1.1rem">
+      The negative arm is the point. A check that cannot fail measures nothing, so the passing arms
+      only mean something because the last row shows the instrument firing.
+    </p>
+    <p>
+      <b>Scope, stated plainly:</b> that was one machine, and the negative arm used a synthetic base
+      URL rather than a live router window. <b>This repository does not yet ship the launcher shim
+      or a test that reproduces either arm</b>, so you cannot verify the claim from the source tree
+      alone today. Until it does, treat it as the maintainer's measurement, not as a
+      repository-verified guarantee. Closing that gap is a release blocker, listed below as B05.
+    </p>
+  </section>
+
+  <section aria-labelledby="gaps-h">
+    <h2 id="gaps-h">Open defects</h2>
+    <p>
+      Found by review and by independent adversarial passes. They are on the front page because a
+      pre-release page that hides them is worth less than no page.
+    </p>
+
+    <div class="tablewrap">
+      <table class="data">
+        <thead>
+          <tr><th>Id</th><th>Severity</th><th>What is wrong</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="id">B01</td>
+            <td><span class="tag fail">critical</span></td>
+            <td>The parent session's permission boundary is not applied to Google and xAI subagents.
+              Write and bypass flags are set unconditionally, so <code>executionMode:
+              "agent-readonly"</code> misdescribes the effective authority.</td>
+          </tr>
+          <tr>
+            <td class="id">B02</td>
+            <td><span class="tag fail">high</span></td>
+            <td>A <code>role:"system"</code> message that arrives after the last user message is
+              dropped silently while compiling the request. Measured loss: ~77.5k characters — the
+              skill catalogue, the agent catalogue, MCP instructions, the output style. No error, no
+              warning, no detector. This is why routed models cannot see skills or
+              <code>Agent</code>.</td>
+          </tr>
+          <tr>
+            <td class="id">B03</td>
+            <td><span class="tag fail">medium</span></td>
+            <td>An xAI continuation request can lose both the session identity and the new user
+              instruction.</td>
+          </tr>
+          <tr>
+            <td class="id">B04</td>
+            <td><span class="tag fail">medium</span></td>
+            <td>The workspace write check does not write the file it checks, leaving a path race
+              open.</td>
+          </tr>
+          <tr>
+            <td class="id">B05</td>
+            <td><span class="tag fail">high</span></td>
+            <td>The launcher shim is not in this repository, so the native-separation claim above
+              cannot be reproduced from this tree.</td>
+          </tr>
+          <tr>
+            <td class="id">B06</td>
+            <td><span class="tag fail">low</span></td>
+            <td>The long-context announcement is also written into
+              <code>max_input_tokens</code>, where the pinned snapshot is smaller.</td>
+          </tr>
+          <tr>
+            <td class="id">G01</td>
+            <td><span class="tag fail">high</span></td>
+            <td>The Google lane is not structurally connected to the Claude Code tool surface at
+              all: MCP sessions are handed to the xAI adapter only. Even with B02 fixed, Google
+              would not drive the harness's tool loop.</td>
+          </tr>
+          <tr>
+            <td class="id">N01</td>
+            <td><span class="tag fail">high</span></td>
+            <td>Image blocks inside a tool result are reduced to an empty string, so a Playwright
+              screenshot returns as a successful, empty tool result.</td>
+          </tr>
+          <tr>
+            <td class="id">N05</td>
+            <td><span class="tag fail">high</span></td>
+            <td>The OpenAI capsule's own loopback port does not enforce the transport nonce, so a
+              local process could reach it without going through the router.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="quiet small" style="margin-top:1.1rem">
+      Ids are the repository's own. The full list, including the ones judged lower severity and the
+      ones already repaired, lives with the source.
+    </p>
+  </section>
+
+  <section aria-labelledby="how-h">
+    <h2 id="how-h">How it is built</h2>
+    <p>
+      TypeScript on Node 24, no runtime dependencies in the router itself, and a check that has to
+      stay green: lint, type-check, tests, secret scan. The tests are the part worth mentioning —
+      not their count, but the discipline: a gate is not trusted until it has been shown to fail.
+    </p>
+    <ul>
+      <li><b>Negative controls.</b> Each gate ships an arm that deliberately breaks it. A green run
+        whose instrument has never fired is a green name, not a green measurement.</li>
+      <li><b>Diagnostics that survive.</b> When a lane fails, the child process's own explanation is
+        carried into the error — bounded and redacted, because a diagnostic channel must never
+        become a leak.</li>
+      <li><b>Named causes only.</b> An error code states a cause that was actually observed. Where
+        the evidence is missing, the generic code stays, rather than a confident guess that sends
+        the reader to the wrong fix.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="stand-h">
+    <h2 id="stand-h">Where this stands with Anthropic</h2>
+    <p>
+      This project exists because Claude Code is worth learning. Every hour someone spends inside
+      the harness — even driving another provider's model through it — is an hour spent learning
+      Anthropic's tool, its permission model and its agent loop. The native path is untouched and is
+      the one the documentation recommends.
+    </p>
+    <p>
+      There is no circumvention claim here, and none is wanted: no proxying of Anthropic's endpoint,
+      no shared or resold access, no entitlement that your own provider accounts do not already
+      give you. If any part of this project ever reads otherwise, that part is a defect and should
+      be reported as one.
+    </p>
+  </section>
+
+  <footer>
+    <p>
+      <b>claude-oauth</b> · Copyright 2026 Onour Impram Ventures · Apache-2.0.
+      Not affiliated with, endorsed by, or sponsored by Anthropic, Google, OpenAI or xAI. Product
+      names are the marks of their respective owners; this project drives those vendors' own CLIs
+      and grants no rights to them.
+    </p>
+    <p>
+      The repository is private during pre-release. This page is published so the claims and the
+      open defects can be read before the code is.
+    </p>
+  </footer>
+
+</main>
+</body>
+</html>

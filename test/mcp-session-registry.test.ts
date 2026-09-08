@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
     AgentSessionRegistry,
@@ -270,6 +270,98 @@ describe("the §7.3 gate -- unmatched results", () => {
 });
 
 describe("failure states are explicit, never hangs", () => {
+    it("an already aborted begin does not start an agent or reclaim an existing session", async () => {
+        const agent = new SahteAjan();
+        let starts = 0;
+        const registry = defter(agent, (a) => {
+            starts += 1;
+            void a.aracCagir("Read");
+        }, { maxLiveSessions: 1 });
+        try {
+            const first = await registry.begin("p", ARACLAR);
+            const cancelled = new AbortController();
+            cancelled.abort();
+            await rejects(registry.begin("cancelled", ARACLAR, "m", cancelled.signal), { status: 504 });
+            strictEqual(starts, 1);
+            strictEqual(registry.liveSessionCount, 1);
+            strictEqual(registry.bridgeFor(first.sessionKey), agent.bridge);
+            strictEqual(agent.iptalSebebi, undefined);
+        } finally {
+            registry.closeAll("test teardown");
+        }
+    });
+
+    it("an already aborted resume does not deliver a tool result and can be retried", async () => {
+        const agent = new SahteAjan();
+        const registry = defter(agent, (a) => void a.aracCagir("Read"));
+        try {
+            const first = await registry.begin("p", ARACLAR);
+            ok(first.outcome.kind === "tool_use");
+            const results = [{ toolUseId: first.outcome.call.id, content: "result", isError: false }];
+            const cancelled = new AbortController();
+            cancelled.abort();
+            await rejects(registry.resume(results, cancelled.signal), { status: 504 });
+            strictEqual(agent.bridge?.pendingCount, 1);
+            strictEqual(registry.liveSessionCount, 1);
+            strictEqual(agent.iptalSebebi, undefined);
+            const retry = registry.resume(results);
+            agent.bitti();
+            strictEqual((await retry).outcome.kind, "end_turn");
+            strictEqual(registry.unmatchedResultCount, 0);
+        } finally {
+            registry.closeAll("test teardown");
+        }
+    });
+
+    it("a synchronous starter failure releases parked calls and removes its session", async () => {
+        let bridge: McpToolBridge | undefined;
+        let call: Promise<Record<string, unknown> | undefined> | undefined;
+        let key = "";
+        const failure = new Error("starter failed");
+        const registry = new AgentSessionRegistry({
+            mcpBaseUrl: "http://127.0.0.1:65000",
+            startAgent: (options) => {
+                bridge = options.bridge;
+                key = options.sessionKey;
+                call = bridge.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "Read" } });
+                throw failure;
+            },
+        });
+        try {
+            await rejects(registry.begin("p", ARACLAR), (error: unknown) => error === failure);
+            strictEqual(registry.liveSessionCount, 0);
+            strictEqual(registry.bridgeFor(key), undefined);
+            strictEqual(bridge?.pendingCount, 0);
+            const answer = await call;
+            strictEqual((answer?.["error"] as { code: number }).code, -32001);
+        } finally {
+            registry.closeAll("test teardown");
+        }
+    });
+
+    it("failed lazy configuration leaves no session and can be retried", async () => {
+        let base = "";
+        let starts = 0;
+        const registry = new AgentSessionRegistry({
+            mcpBaseUrl: () => base,
+            startAgent: () => {
+                starts += 1;
+                return { done: Promise.resolve(), text: () => "done", cancel: () => undefined };
+            },
+        });
+        try {
+            await rejects(registry.begin("p", ARACLAR), { status: 503 });
+            strictEqual(registry.liveSessionCount, 0);
+            strictEqual(starts, 0);
+            base = "http://127.0.0.1:65000";
+            strictEqual((await registry.begin("p", ARACLAR)).outcome.kind, "end_turn");
+            strictEqual(starts, 1);
+            strictEqual(registry.liveSessionCount, 0);
+        } finally {
+            registry.closeAll("test teardown");
+        }
+    });
+
     it("an agent that exits with a call parked releases that call", async () => {
         const ajan = new SahteAjan();
         const bekleyenCagri: Promise<Record<string, unknown> | undefined>[] = [];

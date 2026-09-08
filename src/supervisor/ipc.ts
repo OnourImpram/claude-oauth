@@ -21,13 +21,21 @@ export interface SupervisorStatus {
 export async function startSupervisorIpc(path: string, status: () => SupervisorStatus): Promise<{
     close(): Promise<void>;
 }> {
-    const server = createServer((socket) => handleSocket(socket, status));
+    const sockets = new Set<Socket>();
+    const server = createServer((socket) => {
+        sockets.add(socket);
+        socket.once("close", () => sockets.delete(socket));
+        socket.once("error", () => socket.destroy());
+        handleSocket(socket, status);
+    });
     server.listen(path);
     await once(server, "listening");
     return {
         close: async () => {
+            const closed = once(server, "close");
             server.close();
-            await once(server, "close");
+            for (const socket of sockets) socket.destroy();
+            await closed;
         },
     };
 }

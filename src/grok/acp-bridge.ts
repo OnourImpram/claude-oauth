@@ -8,6 +8,7 @@ import { RouterError } from "../domain/errors.js";
 import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security/environment.js";
 import { spawnFailureGuard } from "../runtime/child-process.js";
 import { ensurePrivateDirectory } from "../runtime/paths.js";
+import { selectTextLines } from "../runtime/text-lines.js";
 import { readBoundedWorkspaceText, writeBoundedWorkspaceText } from "../security/workspace-read.js";
 import {
     GROK_46_MODEL_ID,
@@ -546,12 +547,13 @@ class ReadOnlyGrokClient {
         return null as unknown as WriteTextFileResponse;
     }
     async readTextFile(params: ReadTextFileParams): Promise<ReadTextFileResponse> {
+        const text = await readBoundedWorkspaceText({
+            workspace: this.#workspace,
+            requestedPath: params.path,
+            maximumBytes: maximumReadableFileBytes,
+        });
         return {
-            content: await readBoundedWorkspaceText({
-                workspace: this.#workspace,
-                requestedPath: params.path,
-                maximumBytes: maximumReadableFileBytes,
-            }),
+            content: selectTextLines(text, params.line, params.limit),
         };
     }
     text(): string {
@@ -563,6 +565,7 @@ export async function runGrokAcp(options: GrokAcpOptions): Promise<GrokAcpResult
         throw new RouterError("invalid_request", "Grok task must not be empty.", 400);
     const environment = await prepareGrokProcessEnvironment(options);
     const child = spawnGrok(options, environment, options.model);
+    const spawnFailure = spawnFailureGuard(child);
     const detach = attachAbort(child, options.signal);
     const implementation = new ReadOnlyGrokClient(options.cwd);
     let initialized = false;
@@ -600,6 +603,10 @@ export async function runGrokAcp(options: GrokAcpOptions): Promise<GrokAcpResult
         return { text: implementation.text(), model: options.model, stopReason: result.stopReason };
     }
     catch (error) {
+        const failure = spawnFailure();
+        if (failure !== undefined) {
+            throw new RouterError("adapter_unavailable", `Grok CLI could not be started (${failure.code ?? "spawn failed"}).`, 503, { cause: failure });
+        }
         if (options.signal?.aborted) {
             throw new RouterError("upstream_timeout", "Grok ACP task was cancelled.", 504, { cause: error });
         }
@@ -671,6 +678,7 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
         if (iptalEdildi) throw new RouterError("upstream_timeout", "Grok ACP session was cancelled before start.", 504);
         const environment = await prepareGrokProcessEnvironment({ ...options, interactive: true });
         child = spawnGrok(options, environment, options.model);
+        const spawnFailure = spawnFailureGuard(child);
         // Race: cancel() may have arrived between the spawn and this line.
         if (iptalEdildi) {
             child.kill();
@@ -716,6 +724,10 @@ export function startGrokAcpSession(options: GrokAcpSessionOptions): GrokAcpSess
                 });
         }
         catch (error) {
+            const failure = spawnFailure();
+            if (failure !== undefined) {
+                throw new RouterError("adapter_unavailable", `Grok CLI could not be started (${failure.code ?? "spawn failed"}).`, 503, { cause: failure });
+            }
             if (options.signal?.aborted) {
                 throw new RouterError("upstream_timeout", "Grok ACP session was cancelled.", 504, { cause: error });
             }

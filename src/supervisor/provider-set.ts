@@ -42,20 +42,29 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
     if (requestedProviders.has("openai")) {
         try {
             const capsule = await startClodexCapsule({ home: paths.clodexHome }, clodexNonce);
-            const catalog = await capsule.catalog();
-            const required = snapshot.models.filter((model) => model.provider === "openai");
-            if (required.every((model) => isVerifiedOpenAiSnapshotRoute(model, catalog))) {
-                const adapter = new ClodexAdapter(new FixedOriginFetchTransport(capsule.origin), capsule.transportNonce, capsule.readiness);
-                adapters.set("openai", adapter);
-                readiness.push(await adapter.readiness());
-                closeActions.push(capsule.close);
+            let retained = false;
+            try {
+                const catalog = await capsule.catalog();
+                const required = snapshot.models.filter((model) => model.provider === "openai");
+                if (required.every((model) => isVerifiedOpenAiSnapshotRoute(model, catalog))) {
+                    const adapter = new ClodexAdapter(new FixedOriginFetchTransport(capsule.origin), capsule.transportNonce, capsule.readiness);
+                    const providerReadiness = await adapter.readiness();
+                    adapters.set("openai", adapter);
+                    readiness.push(providerReadiness);
+                    closeActions.push(capsule.close);
+                    retained = true;
+                }
+                else {
+                    // The single-word code did NOT SAY which model clashed on which number; because
+                    // what falls in the post-release window is not the new model but the working
+                    // sol/terra lane, that silence looked like an outage (FINDING 1).
+                    readiness.push(openAiCatalogDriftReadiness(required, catalog));
+                }
             }
-            else {
-                // The single-word code did NOT SAY which model clashed on which number; because
-                // what falls in the post-release window is not the new model but the working
-                // sol/terra lane, that silence looked like an outage (FINDING 1).
-                readiness.push(openAiCatalogDriftReadiness(required, catalog));
-                await capsule.close();
+            finally {
+                // Startup owns the capsule until the verified adapter takes over shutdown.
+                if (!retained)
+                    await capsule.close();
             }
         }
         catch {
