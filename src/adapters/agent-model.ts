@@ -384,7 +384,11 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
         ...(trailingSystemContext.length === 0 ? [] : ["SESSION CAPABILITY CONTEXT:", ...trailingSystemContext]),
         ...(instruction.trim() === "" ? [] : ["CURRENT USER INSTRUCTION:", instruction]),
     ].join("\n\n");
-    return { text: prompt, inputTokenUpperBound: Math.max(1, bytes), continuationText };
+    // B08 (2026-09-08): bytes were reported as input_tokens; Claude Code read a 320 kB request as
+    // 320k tokens against a 200k window it assumes for an unsuffixed model id, and started a
+    // compaction that the lane could not serve. Three bytes per token is still an upper bound
+    // for the tokenizers behind these lanes; it is an estimate and is labelled as such in the README.
+    return { text: prompt, inputTokenUpperBound: Math.max(1, Math.ceil(bytes / 3)), continuationText };
 }
 function localUsage(inputTokenUpperBound: number, output: string): Record<string, number> {
     return {
@@ -686,13 +690,22 @@ export class AgentModelAdapter implements ProviderAdapter {
         if (!Array.isArray(messages)) {
             throw new RouterError("invalid_request", "Agent routes require a messages array.", 400);
         }
-        const results = extractToolResults(messages);
+        const extracted = extractToolResults(messages);
+        // B08: Claude Code's compaction request replays the last user turn, tool results included.
+        // Results the registry already delivered are not orphans and not a continuation; the request
+        // is a fresh turn (the compaction instruction) over the compiled history.
+        const replayed = extracted.length > 0 && sessions.isReplay(extracted.map((result) => result.toolUseId));
+        if (replayed) {
+            writeSafeLog({ event: "agent_tool_result_replayed", level: "info", route: "mcp", code: String(extracted.length),
+                remedy: "No action needed: an already delivered tool result came back (compaction or client retry); the turn runs as a fresh request." });
+        }
+        const results = replayed ? [] : extracted;
         // Validate continuations through the same compiler before releasing any call.
         const compiled = compilePrompt(request, true);
         const tools = deriveMcpTools(anthropicTools(request.envelope.tools));
         // History compilation truncates tool summaries; MCP receives the full payload.
         const inputTokenUpperBound = results.length === 0 ? compiled.inputTokenUpperBound
-            : Math.max(compiled.inputTokenUpperBound, request.body.length);
+            : Math.max(compiled.inputTokenUpperBound, Math.ceil(request.body.length / 3));
         const runTurn = async (): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a

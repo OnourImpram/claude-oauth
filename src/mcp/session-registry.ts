@@ -266,6 +266,9 @@ export class AgentSessionRegistry {
     #closed = false;
     /** tool call id -> session key. The addressing scheme, see header. */
     #calls = new Map<string, string>();
+    /** delivered tool call ids, bounded FIFO, kept past retirement (B08 replay detection). */
+    #delivered = new Set<string>();
+    static readonly #deliveredCap = 1024;
     #orphanResults = 0;
     readonly #idleTimeoutMs: number;
     readonly #now: () => number;
@@ -445,6 +448,15 @@ export class AgentSessionRegistry {
      * An id nobody minted, or one whose session is gone, is an unmatched result
      * -- counted and reported, never swallowed (spec §7.3).
      */
+    /**
+     * B08: true when none of the ids is pending and at least one was already delivered to a live
+     * session. Claude Code replays the last user turn inside a compaction request; that is not a
+     * continuation and not an orphan.
+     */
+    isReplay(toolUseIds: readonly string[]): boolean {
+        if (toolUseIds.some((id) => this.#calls.has(id))) return false;
+        return toolUseIds.some((id) => this.#delivered.has(id));
+    }
     async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = "", tools?: readonly McpToolDescriptor[]): Promise<BeginResult> {
         if (signal?.aborted) {
             throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);
@@ -480,6 +492,11 @@ export class AgentSessionRegistry {
                 continue;
             }
             this.#calls.delete(result.toolUseId);
+            this.#delivered.add(result.toolUseId);
+            if (this.#delivered.size > AgentSessionRegistry.#deliveredCap) {
+                const oldest = this.#delivered.values().next().value;
+                if (oldest !== undefined) this.#delivered.delete(oldest);
+            }
             // ACP is still inside session/prompt. Its pending MCP reply is the transport
             // available now; label operator context separately from tool output and send
             // it on every reply so concurrently waiting calls cannot miss it.

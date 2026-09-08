@@ -234,7 +234,7 @@ it("B03: continuation usage bounds the full delivered result, not its truncated 
         const response = await h.adapter.send(next);
         const body = await new Response(response.body).json() as { usage: { input_tokens: number } };
         strictEqual(response.headers.get("x-hezarfen-usage-source"), "local-upper-bound");
-        ok(body.usage.input_tokens >= next.body.length, "a truncated summary cannot bound the untruncated MCP payload");
+        ok(body.usage.input_tokens >= Math.ceil(next.body.length / 3), "a truncated summary cannot bound the untruncated MCP payload (B08: three bytes per token)");
     } finally { await h.sessions.closeAllAndWait("test cleanup"); }
 });
 
