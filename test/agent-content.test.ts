@@ -223,3 +223,30 @@ it("N01: embedded resources report known MIME type and payload bytes", () => {
         strictEqual(result[0]?.content, "[resource: media_type=text/plain, bytes=4]");
     }
 });
+
+it("B03: continuation usage bounds the full delivered result, not its truncated history summary", async () => {
+    const h = harness();
+    try {
+        const id = await openCall(h.adapter);
+        const next = request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "result".repeat(10_000) }] }]);
+        const response = await h.adapter.send(next);
+        const body = await new Response(response.body).json() as { usage: { input_tokens: number } };
+        strictEqual(response.headers.get("x-hezarfen-usage-source"), "local-upper-bound");
+        ok(body.usage.input_tokens >= next.body.length, "a truncated summary cannot bound the untruncated MCP payload");
+    } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+});
+
+it("B03: trailing blank text does not reject a valid parked result", async () => {
+    for (const text of ["", " \n "]) {
+        const h = harness();
+        try {
+            const id = await openCall(h.adapter);
+            const response = await h.adapter.send(request([{ role: "user", content: [
+                { type: "tool_result", tool_use_id: id, content: "done" }, { type: "text", text },
+            ] }]));
+            strictEqual(response.status, 200);
+            strictEqual(h.starts(), 1);
+            strictEqual(h.sessions.liveSessionCount, 0);
+        } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+    }
+});

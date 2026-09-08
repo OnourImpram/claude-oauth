@@ -41,6 +41,7 @@ passes and repaired where a repair was narrow enough to carry its own regression
 
 - Result extraction and compilation use the same normalized conversation record. Trailing system records no longer start a second agent.
 - Continuations pass compiler validation before any result is released. All accompanying user text and current system context travel in labelled MCP result text, alongside preserved images. Tests inspect the parked reply and assert a single agent start; this is transport evidence, not model-compliance evidence.
+- Review follow-up: trailing blank text no longer rejects a valid tool result, and continuation usage bounds cover the full request body despite truncated history summaries. Both have separate reproduction and full-suite mutation controls.
 
 ### Fixed: N01 tool-result media (2026-09-08)
 

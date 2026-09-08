@@ -306,11 +306,12 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
         if (entry.text.trim() !== "")
             trailingSystemContext.push(entry.text);
     }
-    const currentRequest = current.blocks.at(-1) ?? "";
+    const currentRequestIndex = current.blocks.findLastIndex((block) => block.trim() !== "");
+    const currentRequest = current.blocks[currentRequestIndex] ?? "";
     if (currentRequest.trim() === "") {
         throw new RouterError("invalid_request", "Agent-readonly routes require a non-empty current user request.", 400);
     }
-    const currentTurnContext = current.blocks.slice(0, -1).filter((block) => block.trim() !== "");
+    const currentTurnContext = current.blocks.slice(0, currentRequestIndex).filter((block) => block.trim() !== "");
     const history = conversation.slice(0, -1).map((entry) => `${entry.role.toUpperCase()}:\n${entry.text}`);
     const availableTools = toolNames(request.envelope.tools);
     const prompt = [
@@ -689,7 +690,9 @@ export class AgentModelAdapter implements ProviderAdapter {
         // Validate continuations through the same compiler before releasing any call.
         const compiled = compilePrompt(request, true);
         const tools = deriveMcpTools(anthropicTools(request.envelope.tools));
-        const inputTokenUpperBound = compiled.inputTokenUpperBound;
+        // History compilation truncates tool summaries; MCP receives the full payload.
+        const inputTokenUpperBound = results.length === 0 ? compiled.inputTokenUpperBound
+            : Math.max(compiled.inputTokenUpperBound, request.body.length);
         const runTurn = async (): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a
