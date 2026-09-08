@@ -28,10 +28,11 @@ validation rejects. Both broader schedules were reproduced on Windows after the 
 the helper must not be treated as a sandbox against arbitrary concurrent
 ancestor changes. A source search in this run found no production caller of the helper.
 
-Related open item with a security dimension: the fact that **B05**, the
-launcher shim that separates `claude` from `claude-oauth` is not in this tree, means the
-native-separation claim cannot be verified from this repository yet. The full list is in the
-README under *Known gaps*.
+**~~B05~~, repaired 2026-09-08.** Portable launchers now separate native invocation from router
+startup and sanitize provider variables on the native entry, with executed shim tests and a
+two-arm probe in this tree. The live negative arm returned exit 1 and named api.anthropic.com.
+The clean Remote Control help arm is NOT_RUN because it timed out at both 30 and 60 seconds.
+See the README's native-separation section for exact output and reproduction commands.
 
 **~~G02~~, Repaired 2026-09-08 (diagnostic branch).** Grok 1.0.13 package documentation
 lists project `.mcp.json` as a discovery source until a Claude import marker suppresses it.
@@ -73,7 +74,7 @@ result is believed.
 
 ## Scope
 
-In scope: everything under `src/`, `scripts/`, `config/` and `docs/` in this repository, and the
+In scope: everything under `src/`, `scripts/`, `shim/`, `config/` and `docs/` in this repository, and the
 behaviour of the built `claude-oauth` command.
 
 Out of scope: the software this project drives, Antigravity `agy` (Google), `grok` (xAI), the

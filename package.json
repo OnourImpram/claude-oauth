@@ -31,6 +31,9 @@
   "files": [
     "dist/src",
     "config",
+    "shim",
+    "scripts/release-id.mjs",
+    "scripts/native-separation-probe.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

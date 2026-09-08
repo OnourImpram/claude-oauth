@@ -6,7 +6,7 @@
 //
 // Usage:
 //   node scripts/release-id.mjs --compute <directory>
-//   node scripts/release-id.mjs --verify  <release-directory>    (compares the name against the content)
+//   node scripts/release-id.mjs --verify  <release-directory>    (checks name, content and optional release-id artifact)
 //   node scripts/release-id.mjs --ozdenetim                      (negative control)
 
 import { createHash } from "node:crypto";
@@ -81,11 +81,22 @@ if (mode === "--verify" && target) {
   const declared = basename(root);
   const computed = await computeReleaseId(root);
   const shaped = RELEASE_ID_PATTERN.test(declared);
+  let artifact;
+  try {
+    artifact = (await readFile(join(root, "release-id"), "utf8")).trim();
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  // Legacy releases may lack this file; portable shims require it. If present it
+  // must agree with both the directory and content, never silently override them.
+  const artifactMatches = artifact === undefined || artifact === computed;
   console.log(`directory name (declared) : ${declared}`);
   console.log(`content        (computed) : ${computed}`);
   console.log(`valid format              : ${shaped ? "yes" : "NO"}`);
-  console.log(`RESULT                    : ${shaped && declared === computed ? "MATCHED" : "DRIFTED"}`);
-  process.exit(shaped && declared === computed ? 0 : 1);
+  console.log(`release-id artifact       : ${artifact === undefined ? "absent (legacy)" : artifactMatches ? "MATCHED" : "DRIFTED"}`);
+  const matched = shaped && declared === computed && artifactMatches;
+  console.log(`RESULT                    : ${matched ? "MATCHED" : "DRIFTED"}`);
+  process.exit(matched ? 0 : 1);
 }
 
 console.log("usage: --compute <directory> | --verify <release-directory> | --ozdenetim");

@@ -68,11 +68,11 @@ habit, and making that habit cheap is the point of the project:
    the file it names.
 4. Where the two disagree, the disagreement is the finding.
 
-What limits this today is in the defect table, not hidden. The generated delegate agents answer
-from what the prompt hands them and cannot drive the harness themselves (N03), so a delegated
-review gets the diff pasted into its prompt. A direct `/model` switch to the Google or xAI lane
-carries the tool loop (G01 and G03 repaired), so a review run that way can open files and run tests
-itself. Which lane reaches what is in the lane table and the defect ids, and nowhere else.
+Generated Google and xAI delegates now inherit the parent's available tools without a launcher
+turn cap (N03 repaired). OpenAI delegates use the built-in tools plus `Skill` by default and
+accept user definitions containing MCP names. The generated JSON and override rules are tested;
+a live `Agent` child-session tool loop and permission inheritance remain NOT_RUN because they
+require a separate authenticated child-session harness.
 
 ### The harness surface, not a chat box
 
@@ -121,9 +121,16 @@ three lanes as "the provider's own official CLI"; that was wrong for OpenAI and 
   shows only Claude models.
 - **As a subagent:** inside a `claude-oauth` session the launcher registers one delegate agent per
   routed model (`gemini-delege`, `grok-delege`, `sol-delege`, …) so a Claude model can hand a task
-  to another model through the `Agent` tool. Today the Google and xAI delegates run with
-  `tools: []` and a single turn, and the OpenAI delegates with a fixed list of six built-in tools
-  and no MCP or `Skill` (N03), they answer, they do not drive the harness.
+  to another model through the `Agent` tool. Google and xAI omit `tools` and `maxTurns`, so Claude
+  Code inherits the available parent tools, including MCP and `Skill`, without a launcher cap.
+  OpenAI defaults to `Read`, `Write`, `Edit`, `Grep`, `Glob`, `PowerShell` and `Skill`, with no turn
+  cap. A user `--agents` definition may widen or narrow either setting, including adding MCP
+  names or omitting `tools` to inherit. Reserved delegates must keep their model identity.
+
+| Delegate lane | Tool reach |
+|---|---|
+| Google and xAI | Inherit available parent tools. Their provider sessions use the router MCP bridge to return tool calls to Claude Code. Permission inheritance through an Agent child session remains NOT_RUN, requiring an authenticated child-session harness. |
+| OpenAI | Clodex carries ordinary HTTP `tool_use`/`tool_result` exchanges; its capsule receives no router MCP endpoint and cannot attach to that session bridge. The default list above reaches built-ins and `Skill`. Explicit MCP names in a user definition can travel as ordinary Claude Code tools, subject to the parent catalogue and permissions; they are not included in the default list. Live OpenAI delegate MCP execution: NOT_RUN, requires an authenticated Agent child-session harness. |
 
 Switching back to a Claude model in the same session is the same `/model` command. There is no
 mode to remember: the native `claude` command never enters any of this.
@@ -142,22 +149,79 @@ mode to remember: the native `claude` command never enters any of this.
 The distinguishing claim of this project is that installing it does not degrade native Claude Code.
 That is a claim, so it gets a measurement rather than a paragraph.
 
-Measured on the maintainer's machine, 2026-09-07, two arms:
+The repository ships [portable launchers](shim/) and
+[a two-arm probe](scripts/native-separation-probe.mjs). From a clone with Node and Claude Code on
+PATH, run this without starting a router or installing the shim:
 
-| Arm | Check | Result |
-|---|---|---|
-| Environment | `ANTHROPIC_BASE_URL` in a normal `claude` session | absent |
-| Process tree | ancestry of the `claude` process | no router process |
-| Positive | `claude remote-control --help` in a clean environment | accepted, full help |
-| Negative | same command with a router-style `ANTHROPIC_BASE_URL` | refused, exit 1 |
+```sh
+node scripts/native-separation-probe.mjs
+```
 
-The negative arm is the point: the check can fail, so the pass means something.
+The positive arm removes provider routing variables, including `ANTHROPIC_BASE_URL`,
+`ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_CUSTOM_HEADERS`, then runs `claude remote-control --help`.
+The negative arm runs the same command with `ANTHROPIC_BASE_URL=http://127.0.0.1:9` and requires
+a non-zero exit plus a message naming `api.anthropic.com`. On Windows the probe prefers
+`claude.exe` on PATH over a sanitizing command wrapper, which would erase the negative arm.
+It prints measurements without copying raw CLI output or configuration. Exit codes: 0 means
+both expected outcomes were measured, 1 means an outcome differed, 2 means Claude was absent
+from PATH, and 3 means an arm could not finish or start.
 
-**Scope, stated honestly:** that measurement was taken on one machine, and the negative arm used a
-synthetic base URL rather than a live router window. **This repository does not yet ship the
-launcher shim or the test that reproduces either arm**, so a reader cannot verify the claim from
-this tree alone. Until it does, treat the claim as the maintainer's measurement, not as a
-repository-verified guarantee. Closing that gap is a release blocker (B05).
+Measured on Windows, 2026-09-08:
+
+```text
+command: claude.exe remote-control --help (resolved on PATH; native executable preferred)
+positive: NOT_RUN reason=ETIMEDOUT
+negative: PASS exit=1 api.anthropic.com=named
+negative: stdout_bytes=0 stderr_bytes=258
+```
+
+The clean arm exceeded the probe's 60-second timeout, following the same outcome with a
+30-second bound. Native Remote Control acceptance is therefore NOT_RUN on this run. The negative
+arm used a synthetic loopback URL. Neither arm establishes native process ancestry or a live
+router session's behavior. Stub tests execute the PowerShell and POSIX shims, check environment
+separation, argument forwarding and exit status, and exercise a native launch with no router
+release. Probe controls detect both an always-accepting and an always-rejecting CLI.
+
+### Using the shipped shims
+
+`shim/claude-oauth.ps1` forwards to `shim/claude-oauth-launcher.ps1`; `shim/claude-oauth.sh` is the
+POSIX entry. Both start the installed router CLI. Remote Control requests (`remote-control`,
+`--remote-control`, `--rc`) and `--hezarfen-entrypoint=claude` take the native path before resolving
+the router release or Node. PowerShell also ships `shim/claude-launcher.ps1` as a direct native
+entry. Native launches clear provider credentials, routing and model overrides, and router
+metadata. The PowerShell scripts restore the caller's environment after the child exits.
+
+Set `CLAUDE_OAUTH_RELEASE_ROOT` to an installed release, or keep `shim/` inside that release.
+When copied into an installation's bin directory, the fallback layout is
+`<shim-directory>/.claude-oauth-runtime/current`. The release must contain `dist/src/cli.js`,
+`config/`, and a one-line `release-id` artifact holding the content identity produced by
+`node scripts/release-id.mjs --compute <release-directory>`. The shim reads that file, never a
+literal release id. The CLI verifies it against the installed content. To check directory name,
+content and artifact together, run `node scripts/release-id.mjs --verify <release-directory>`.
+Legacy releases without the artifact remain verifiable but cannot use these shims until an
+installer supplies it.
+
+`CLAUDE_OAUTH_NODE` selects Node; otherwise PowerShell tries `<release>/node.exe`, POSIX tries
+`<release>/node/bin/node`, then each uses Node on PATH. `CLAUDE_OAUTH_NATIVE_BINARY` selects the
+native Claude binary; otherwise it is resolved on PATH. These scripts preserve the caller's
+working directory and do not include the maintainer's plugin filtering or personal model-pin
+helper. PowerShell invokes executables with explicit Windows argument quoting to preserve
+`--agents` JSON, embedded quotes and empty arguments. A PowerShell child receives the argument
+array through a temporary process environment variable, cleared before the target starts, so
+PowerShell input pipelines and output capture remain available. `--input-format stream-json`
+uses raw OS pipes, with output measured before stdin closes. Relative executable overrides
+resolve against the caller's working directory. Windows `.cmd` and `.bat` targets are refused;
+select the native executable instead. For example, after configuring the release location:
+
+```powershell
+./shim/claude-oauth.ps1 --model gemini
+./shim/claude-launcher.ps1 remote-control --help
+```
+
+```sh
+sh shim/claude-oauth.sh --model gemini
+sh shim/claude-oauth.sh --hezarfen-entrypoint=claude remote-control --help
+```
 
 ## Known gaps
 
@@ -171,7 +235,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | ~~B02~~ | ~~High~~ | **Repaired 2026-09-07 (`b5caf0e`).** A `role:"system"` message arriving after the last user message was dropped silently while compiling the request, measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own `SESSION CAPABILITY CONTEXT` section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface. |
 | ~~B03~~ | ~~High~~ | **Repaired 2026-09-08.** Compilation and result extraction share the last logical conversation record, so trailing system records retain the live session. Every continuation is validated and its system context plus all accompanying user text travels in labelled MCP result text before the agent resumes. Tests measure one start, the instruction received, mixed images, trailing blank text, and a usage bound covering the full request body. This preserves transport, not a guarantee of model compliance. |
 | ~~B04~~ | High, residual scope | **Repaired 2026-09-08 for the checked-file replacement race.** Writes use a non-truncating open, validate the handle identity, and write through that handle; new files use exclusive creation, with deterministic Windows symlink/junction tests proving outside target contents stay unchanged. Arbitrary ancestor replacement remains a limitation requiring platform-specific filesystem support; see `SECURITY.md`. |
-| B05 | High | This tree contains no launcher shim, so the native/router separation cannot be verified from the repository. |
+| ~~B05~~ | ~~High~~ | **Repaired 2026-09-08.** Portable PowerShell/POSIX shims and a reproducible two-arm probe ship in this tree; stub tests measure native environment cleanup and router entry selection. Live negative arm passed; clean Remote Control help is NOT_RUN after timeout, as recorded above. |
 | ~~B06~~ | ~~High~~ | **Repaired 2026-09-08.** `max_input_tokens` uses the lower of the advertised window and snapshot transport capacity, tested for every routed model against its pin; Astra's `context_window` remains a presentation value of 1,000,000 while input is capped at the unchanged 872,000 pin: accepted capacity unproven, advertisement capped at the pin. |
 | ~~G01~~ | ~~High~~ | **Repaired 2026-09-08.** The Google lane now carries the same tool loop the xAI lane has. The objection that kept it away was that `agy mcp add` writes the session nonce into the operator's persistent config; the lane instead runs inside a **call-scoped configuration home** (`USERPROFILE` redirected, identity files hard-linked, never copied), so the operator's own `mcp_config.json` is never opened for writing. Live receipt: the router logged `agent_tool_call_parked`, Claude Code executed the MCP tool 213 ms later, one `tool_use` block crossed the stream, and the model returned a string it could not otherwise know. NOT claimed: a multi-step loop, or the `Agent` sub-loop. |
 | ~~G02~~ | ~~High~~ | **Repaired 2026-09-08, diagnostic branch.** Installed Grok 1.0.13 documentation (`docs/user-guide/07-mcp-servers.md`, Compatibility) says project `.mcp.json` is loaded unless the Claude import marker suppresses it. Refusal is retained and now names `.mcp.json` plus a workspace/user-configuration remedy; root and nested-workspace tests measure it, with hooks/plugins still fail-closed. Live xAI in repositories with non-empty `.mcp.json`: **NOT_RUN, intentionally refused because Grok can discover this file**. |
@@ -179,7 +243,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | ~~G04~~ | ~~High~~ | **Repaired 2026-09-08.** Agent history drops `thinking` and `redacted_thinking`, summarizes `image` and `document` with media type and size, and renders `server_tool_use` and `mcp_tool_use` like tool calls. Per-type Google/xAI tests and a session-lane fixture cover messages and token counting without 422. Media history remains a placeholder; initial multi-text request framing and delegate tooling are outside this repair. |
 | ~~G08~~ | ~~Suspected~~ | **Repaired 2026-09-08.** The SDK-typed HTTP definition and a fake ACP peer verify exact name, URL and `{name,value}[]` headers. Live Grok 1.0.13 reached the router bridge: `agent_tool_call_parked` at `2026-09-08T10:23:44.844Z`, caller PID `49944`, tool `cluster_a_handshake_receipt`; the reply completed with `end_turn` and zero unmatched results. Header removal is exercised as a full-suite mutation control. |
 | ~~N01~~ | ~~High~~ | **Repaired 2026-09-08.** Anthropic and native MCP base64 image tool results cross the shared bridge on both xAI/ACP and Google/Antigravity lanes; text compilation and unsupported/URL media use type, media-type and byte-size placeholders (URL size is unknown). Embedded resources retain known MIME type and payload size. Adapter-to-MCP tests preserve image bytes, MIME casing and error status; the production-log fixture measures payload-free image metadata. Live provider image interpretation is NOT_RUN, no vision task was submitted. |
-| N03 | High | Generated `*-delege` agents carry `tools: []` and `maxTurns: 1`; a user definition that widens them is rejected. |
+| ~~N03~~ | ~~High~~ | **Repaired 2026-09-08.** Google/xAI inherit tools without a launcher turn cap; OpenAI defaults include `Skill` and user definitions may add MCP names. Generated JSON and wider/narrower overrides are tested in both client modes; changed or removed model identities still receive 400. Live Agent tool loops remain NOT_RUN, requiring an authenticated child-session harness. |
 | ~~N04~~ | ~~High~~ | **Repaired 2026-09-08.** Every request derives its catalogue and replaces changed bridge descriptors before releasing parked results; the xAI permission lookup reads the live names. Tests cover ToolSearch adding `mcp__playwright__browser_snapshot`, schema changes, removal, and unchanged descriptors. Already parked removed-tool calls can finish; subsequent calls are refused. Provider-side catalogue cache refresh is NOT_RUN, the offline measurement covers `tools/list`. |
 | ~~N05~~ | ~~High~~ | **Repaired 2026-09-08.** The capsule runs a hash-pinned patched copy of Clodex and receives its session nonce only through the child environment. Measured with an anonymous scratch home, missing/wrong/correct `x-api-key`: catalog and health **401/401/200**, malformed JSON messages **401/401/400**. Empty nonce, missing patch anchors and patched hash drift prevent startup. |
 | ~~N06~~ | ~~Medium~~ | **Repaired 2026-09-08.** Captured helpers receive SIGTERM, then SIGKILL after configurable `terminationGraceMs` (default 100 ms), and reject with a timeout even without `exit`; Windows tests cover the deadline and missing-exit case, while the meaningful SIGTERM-resistant Linux arm is NOT_RUN locally (Windows host). |
@@ -220,8 +284,8 @@ What you **can** do from this tree: build it, run every test, run the gates and 
 controls, read the request compiler and the lane bridges, and reproduce the offline probes behind
 several of the findings above.
 
-What you **cannot** do from this tree yet: install it as the maintainer runs it. There is no
-launcher shim (B05), no release builder documented, and the install lock pins binaries at
+What you **cannot** do from this tree yet: install it as the maintainer runs it. Portable shims
+are included, but there is no release builder documented, and the install lock pins binaries at
 machine-specific Windows locations. `node dist/src/cli.js doctor` will tell you, component by
 component, what it cannot find, that is the intended behaviour, not a bug to report.
 

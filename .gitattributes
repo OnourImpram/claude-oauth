@@ -10,3 +10,6 @@
 # operator decision, because it changes the lock and therefore the release identity), the
 # pinned bytes must be reproduced identically on every platform. That is what this rule does.
 config/claude-oauth-local-patches.mjs text eol=crlf
+
+# POSIX entrypoints must also work after a Windows checkout with autocrlf enabled.
+shim/*.sh text eol=lf
