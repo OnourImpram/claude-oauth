@@ -437,9 +437,8 @@ footer p { max-width: var(--measure); }
       <p>
         As of 2026-09-08 the Google lane reaches that surface for real: the router logged the provider agent parking a
         tool call, Claude Code executed it 213&nbsp;ms later, and the model returned a string it had no other way to know
-        (G01, repaired). One thing still stands between the current tree and the full target: the parent session's
-        permission boundary is not applied to the routed subagents (B01). Capability without that boundary would ship a
-        more powerful hole, so it is not being rushed.
+        (G01, repaired). The native permission paths in Google and xAI are now constrained (B01 below).
+        Permission inheritance through a separate <code>Agent</code> child session remains unmeasured.
       </p>
     </section>
 
@@ -454,8 +453,8 @@ footer p { max-width: var(--measure); }
         <table class="data">
           <thead><tr><th>id</th><th>severity</th><th>what is wrong</th></tr></thead>
           <tbody>
-            <tr><td class="cell-id"><span class="id">B01</span></td><td class="sev sev-critical">critical</td>
-              <td>The parent session's permission boundary is not applied to the Google and xAI subagents. The Google lane forces write and bypass flags on; the xAI lane accepts the first permission option and serves its own file-write handler. <code>executionMode: "agent-readonly"</code> misdescribes the effective authority.</td></tr>
+            <tr><td class="cell-id"><span class="id">B01</span></td><td class="sev">native paths fixed<br>Agent NOT_RUN</td>
+              <td><b>Google direct route: PASS, 2026-09-08.</b> Call-scoped settings allow only the bridge MCP server and deny native <code>write_file</code>, <code>command</code>, <code>browser</code>, <code>execute_url</code>, and <code>unsandboxed</code> actions. Live Claude Code Write denial leaves no file; a native <code>write_to_file</code> fallback is also denied, while MCP still parks and returns the denial. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. The Google live check covers <code>gemini-3.8-flash-high</code> on Windows, not every denied action category. <b>Agent permission inheritance: NOT_RUN (requires a separate Agent child-session harness).</b></td></tr>
             <tr><td class="cell-id"><span class="id">B05</span></td><td class="sev">high</td>
               <td>The launcher shim is not in this repository, so the native-separation claim above cannot be reproduced from this tree.</td></tr>
             <tr><td class="cell-id"><span class="id">G01</span></td><td class="sev">fixed</td>

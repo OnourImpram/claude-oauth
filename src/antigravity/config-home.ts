@@ -79,6 +79,21 @@ export const LINKED_IDENTITY_FILES: readonly string[] = [
 ];
 
 export const DEFAULT_TOOL_SERVER_NAME = "hezarfen-claude-code-tools";
+
+// Native action selectors: https://www.antigravity.google/docs/cli/permissions/#supported-actions--matching-rules
+export const AGY_DENIED_NATIVE_TOOLS: readonly string[] = [
+    // Denies native file creation and edits so mutations use the routed MCP surface.
+    "write_file(*)",
+    // Denies native shell commands so command execution uses the routed MCP surface.
+    "command(*)",
+    // Retains the operator-required legacy browser selector, whose effect current documentation does not establish.
+    "browser(*)",
+    // Denies browser clicks, typing, and other URL interactions through execute_url.
+    "execute_url(*)",
+    // Denies commands that run outside agy's sandbox.
+    "unsandboxed(*)",
+];
+
 const OWNER_FILE = ".hezarfen-owner.json";
 const defaultStaleAfterMs = 6 * 60 * 60 * 1000;
 
@@ -120,9 +135,14 @@ export async function createEphemeralConfigHome(options: ConfigHomeOptions): Pro
             const settingsDirectory = join(gemini, "antigravity-cli");
             await mkdir(settingsDirectory, { recursive: true });
             // Measured with agy 1.1.27 on 2026-09-08: headless permissions use
-            // mcp(server/tool), not a colon. This grants only our MCP server;
-            // agy's implicit workspace file permissions are a separate policy.
-            const settings = { permissions: { allow: [`mcp(${options.serverName ?? DEFAULT_TOOL_SERVER_NAME}/*)`] } };
+            // mcp(server/tool), not a colon. Grant our MCP server and explicitly
+            // deny native mutation actions, including implicitly allowed workspace writes.
+            const settings = {
+                permissions: {
+                    allow: [`mcp(${options.serverName ?? DEFAULT_TOOL_SERVER_NAME}/*)`],
+                    deny: AGY_DENIED_NATIVE_TOOLS,
+                },
+            };
             await writeFile(join(settingsDirectory, "settings.json"), `${JSON.stringify(settings)}\n`, "utf8");
         }
         const owner: OwnerRecord = { pid: options.pid ?? process.pid, createdAt: (options.now ?? Date.now)() };

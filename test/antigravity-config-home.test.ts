@@ -42,7 +42,7 @@ async function serverEntry(home: string): Promise<Record<string, { headers?: Rec
 
 describe("antigravity call-scoped configuration home", () => {
     for (const serverName of [undefined, "custom-claude-bridge"]) {
-        it(`B01 (c): permits only the configured MCP server (${serverName ?? "default"})`, async () => {
+        it(`B01 (c): permits the configured MCP server and denies native mutations (${serverName ?? "default"})`, async () => {
             const root = await scratch();
             try {
                 const home = await createEphemeralConfigHome({
@@ -50,8 +50,14 @@ describe("antigravity call-scoped configuration home", () => {
                     endpoint: { url: "http://127.0.0.1:8787/mcp", headers: {} },
                     ...(serverName === undefined ? {} : { serverName }),
                 });
-                const settings = JSON.parse(await readFile(join(home.path, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as unknown;
-                deepStrictEqual(settings, { permissions: { allow: [`mcp(${serverName ?? DEFAULT_TOOL_SERVER_NAME}/*)`] } });
+                const settings = JSON.parse(await readFile(join(home.path, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as { permissions: { deny: string[] } };
+                settings.permissions.deny.sort();
+                deepStrictEqual(settings, {
+                    permissions: {
+                        allow: [`mcp(${serverName ?? DEFAULT_TOOL_SERVER_NAME}/*)`],
+                        deny: ["browser(*)", "command(*)", "execute_url(*)", "unsandboxed(*)", "write_file(*)"],
+                    },
+                });
                 deepStrictEqual(Object.keys(await serverEntry(home.path)), [serverName ?? DEFAULT_TOOL_SERVER_NAME]);
                 // Exercise the existing bounded-file/selector gate against the generated file.
                 let called = false;
@@ -87,8 +93,13 @@ describe("antigravity call-scoped configuration home", () => {
                         ok(!request.arguments.includes("--mode"));
                         const home = request.environment["USERPROFILE"];
                         ok(home !== undefined && home !== root);
-                        deepStrictEqual(JSON.parse(await readFile(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8")), {
-                            permissions: { allow: [`mcp(${DEFAULT_TOOL_SERVER_NAME}/*)`] },
+                        const settings = JSON.parse(await readFile(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as { permissions: { deny: string[] } };
+                        settings.permissions.deny.sort();
+                        deepStrictEqual(settings, {
+                            permissions: {
+                                allow: [`mcp(${DEFAULT_TOOL_SERVER_NAME}/*)`],
+                                deny: ["browser(*)", "command(*)", "execute_url(*)", "unsandboxed(*)", "write_file(*)"],
+                            },
                         });
                         return { stdout: terminalStream("ok"), stderr: "", exitCode: 0 };
                     },
