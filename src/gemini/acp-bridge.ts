@@ -161,7 +161,7 @@ export async function runGeminiAcp(options: GeminiAcpOptions): Promise<GeminiAcp
     catch (error) {
         const failure = spawnFailure();
         if (failure !== undefined) {
-            throw new RouterError("adapter_unavailable", `Gemini CLI could not be started from its pinned path (${failure.code ?? "spawn failed"}). ONARIM: reinstall the pinned Gemini CLI, then re-run claude-oauth doctor.`, 503, { cause: failure });
+            throw new RouterError("adapter_unavailable", `Gemini CLI could not be started from its pinned path (${failure.code ?? "spawn failed"}). FIX: reinstall the pinned Gemini CLI, then re-run claude-oauth doctor.`, 503, { cause: failure });
         }
         if (options.signal?.aborted) {
             throw new RouterError("upstream_timeout", "Gemini ACP task was cancelled.", 504, { cause: error });
@@ -307,7 +307,7 @@ export function startGeminiAcpSession(options: GeminiAcpSessionOptions): GeminiA
         catch (error) {
             const failure = spawnFailure();
             if (failure !== undefined) {
-                throw new RouterError("adapter_unavailable", `Gemini CLI could not be started from its pinned path (${failure.code ?? "spawn failed"}). ONARIM: reinstall the pinned Gemini CLI, then re-run claude-oauth doctor.`, 503, { cause: failure });
+                throw new RouterError("adapter_unavailable", `Gemini CLI could not be started from its pinned path (${failure.code ?? "spawn failed"}). FIX: reinstall the pinned Gemini CLI, then re-run claude-oauth doctor.`, 503, { cause: failure });
             }
             if (options.signal?.aborted) {
                 throw new RouterError("upstream_timeout", "Gemini ACP session was cancelled.", 504, { cause: error });

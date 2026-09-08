@@ -259,7 +259,7 @@ export async function verifyShadowModelSurface(target: string): Promise<void> {
         }
     }
     if (failures.length > 0) {
-        throw new RouterError("adapter_unavailable", `Claude shadow did not contain the exact required OAuth model-picker proof (${failures.join(", ")}). ONARIM: relaunch -- a stale local patch now resets the shadow to pristine and repatches automatically. If it repeats, the pinned Clodex could not apply config/claude-oauth-local-patches.mjs to this Claude build.`, 503);
+        throw new RouterError("adapter_unavailable", `Claude shadow did not contain the exact required OAuth model-picker proof (${failures.join(", ")}). FIX: relaunch -- a stale local patch now resets the shadow to pristine and repatches automatically. If it repeats, the pinned Clodex could not apply config/claude-oauth-local-patches.mjs to this Claude build.`, 503);
     }
 }
 async function installTrustedLocalPatch(root: string, lock: InstallLock, paths: RuntimePaths): Promise<string> {
@@ -617,7 +617,7 @@ export async function prepareEffectiveInstallation(root: string, environment: No
     // release-identity check cannot be routed around.
     const releaseIdentity = await verifyReleaseIdentity(root, environment);
     if (releaseIdentity.status === "mismatch") {
-        throw new RouterError("adapter_unavailable", `Refusing to run release ${releaseIdentity.declaredId ?? "?"}: its contents no longer hash to its own id (${releaseIdentity.detailCode}). A content-addressed release that was edited in place is not the release it claims to be. ONARIM: reinstall the release, or run "node scripts/release-id.mjs --verify <release-directory>" to see the computed id.`, 503);
+        throw new RouterError("adapter_unavailable", `Refusing to run release ${releaseIdentity.declaredId ?? "?"}: its contents no longer hash to its own id (${releaseIdentity.detailCode}). A content-addressed release that was edited in place is not the release it claims to be. FIX: reinstall the release, or run "node scripts/release-id.mjs --verify <release-directory>" to see the computed id.`, 503);
     }
     const baseLock = await readInstallLock(resolve(root, "config", "install-lock.json"));
     const nodeVersion = process.version.replace(/^v/u, "");

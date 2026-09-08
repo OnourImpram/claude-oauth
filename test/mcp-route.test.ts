@@ -171,7 +171,7 @@ describe("session addressing on the route", () => {
             { sessionKey: "unknownSession" },
         );
         strictEqual(status, 409);
-        ok(String((json?.["error"] as { message: string }).message).includes("ONARIM:"));
+        ok(String((json?.["error"] as { message: string }).message).includes("FIX:"));
     });
 
     it("a tool call arriving over HTTP parks instead of executing", async () => {

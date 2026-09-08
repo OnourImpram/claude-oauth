@@ -194,7 +194,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
                 code: "session_auth_required",
                 route: classifyRoute(routedTarget.target.pathname),
                 authChannels: describeAuthChannels(request.headers, pathNonceValid, options.nonce),
-                remedy: "The gate is fail-closed and refused a caller that carried no session header. ONARIM: authorizationIsSessionNonce means the launcher is publishing the session nonce as a credential -- it must not. That was measured to break the Claude path outright (the client sends the nonce instead of its OAuth token and Anthropic answers 401 Invalid bearer token), so remove it from the child environment rather than opening this gate. Without that marker the caller holds a credential that is not this router's, and that is worth investigating.",
+                remedy: "The gate is fail-closed and refused a caller that carried no session header. FIX: authorizationIsSessionNonce means the launcher is publishing the session nonce as a credential -- it must not. That was measured to break the Claude path outright (the client sends the nonce instead of its OAuth token and Anthropic answers 401 Invalid bearer token), so remove it from the child environment rather than opening this gate. Without that marker the caller holds a credential that is not this router's, and that is worth investigating.",
             });
             throw new RouterError("session_auth_required", "A valid local session header is required.", 401);
         }
@@ -338,7 +338,7 @@ async function handleMcp(request: IncomingMessage, response: ServerResponse, opt
     if (bridge === undefined) {
         // A named error. A silent 404 pushes the agent into endless retries, and from the
         // outside that looks like "the provider is slow".
-        throw new RouterError("invalid_request", "No live agent session for this MCP endpoint. ONARIM: the session was swept or the router restarted; send the turn again so a fresh session starts.", 409);
+        throw new RouterError("invalid_request", "No live agent session for this MCP endpoint. FIX: the session was swept or the router restarted; send the turn again so a fresh session starts.", 409);
     }
     const body = await readBody(request);
     let message: unknown;

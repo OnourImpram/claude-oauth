@@ -325,7 +325,7 @@ export class AgentSessionRegistry {
         // An empty base would hand the agent a relative URL it silently fails to
         // reach. Named error instead: the wiring ran in the wrong order.
         if (base === "") {
-            throw new RouterError("adapter_unavailable", "The MCP base URL is not known yet. ONARIM: the session registry was used before the router server started; wire the router base URL before starting a provider set.", 503);
+            throw new RouterError("adapter_unavailable", "The MCP base URL is not known yet. FIX: the session registry was used before the router server started; wire the router base URL before starting a provider set.", 503);
         }
         return `${base}/mcp/${sessionKey}`;
     }
@@ -367,7 +367,7 @@ export class AgentSessionRegistry {
                 // opening one more fills the machine.
                 throw new RouterError(
                     "adapter_unavailable",
-                    `Too many agent turns in flight (${this.#sessions.size}). ONARIM: wait for a turn to finish or cancel one; each live session holds a provider process.`,
+                    `Too many agent turns in flight (${this.#sessions.size}). FIX: wait for a turn to finish or cancel one; each live session holds a provider process.`,
                     503,
                 );
             }
@@ -434,7 +434,7 @@ export class AgentSessionRegistry {
             this.#orphanResults += results.length;
             throw new RouterError(
                 "invalid_request",
-                "This tool result belongs to no live agent session. ONARIM: the session was swept or the router restarted; send the turn again without tool_result blocks so a fresh session starts.",
+                "This tool result belongs to no live agent session. FIX: the session was swept or the router restarted; send the turn again without tool_result blocks so a fresh session starts.",
                 409,
             );
         }

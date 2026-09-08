@@ -114,7 +114,7 @@ describe("session addressing", () => {
             failure = error instanceof RouterError ? error : undefined;
         }
         strictEqual(failure?.status, 503);
-        ok(String(failure?.message).includes("ONARIM:"));
+        ok(String(failure?.message).includes("FIX:"));
     });
 
     it("the base URL is read lazily, so late wiring still works", () => {

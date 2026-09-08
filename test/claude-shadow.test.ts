@@ -211,14 +211,14 @@ describe("verifyShadowModelSurface (synthetic)", () => {
         await rejects(async () => { await verifyShadowModelSurface(path); }, /model-picker proof/u);
     });
 
-    it("the error message identifies the missing needle and the ONARIM remedy path", async () => {
+    it("the error message identifies the missing needle and the FIX remedy path", async () => {
         const path = await syntheticBinary("diagnosis.bin", "nothing");
         await rejects(
             async () => { await verifyShadowModelSurface(path); },
             (error: unknown) => {
                 const message = (error as Error).message;
                 strictEqual(/needle\[\d+\] x0/u.test(message), true);
-                strictEqual(message.includes("ONARIM:"), true);
+                strictEqual(message.includes("FIX:"), true);
                 return true;
             },
         );

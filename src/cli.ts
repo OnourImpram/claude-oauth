@@ -262,7 +262,7 @@ async function catalogSnapshot(ctx: CliContext, write: boolean, allowShrink = fa
         }
         const dropped = await droppedModelIds(paths.snapshot, snapshot);
         if (write && dropped.length > 0 && !allowShrink) {
-            throw new RouterError("invalid_request", `Refusing to shrink the model snapshot: ${dropped.join(", ")} would be dropped. This is how the picker silently regressed before. ONARIM: fix the provider that stopped verifying (claude-oauth doctor --live), or re-run with "models refresh --allow-shrink" to accept the narrower snapshot deliberately.`, 409);
+            throw new RouterError("invalid_request", `Refusing to shrink the model snapshot: ${dropped.join(", ")} would be dropped. This is how the picker silently regressed before. FIX: fix the provider that stopped verifying (claude-oauth doctor --live), or re-run with "models refresh --allow-shrink" to accept the narrower snapshot deliberately.`, 409);
         }
         if (write)
             await writeSnapshot(paths.snapshot, snapshot);

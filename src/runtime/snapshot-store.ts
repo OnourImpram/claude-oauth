@@ -35,7 +35,7 @@ async function probeSnapshot(path: string): Promise<SnapshotProbe> {
             level: "warn",
             code: "snapshot_discarded",
             pathFingerprint: pathFingerprint(path),
-            remedy: "The model snapshot could not be parsed and the pinned baseline was used instead. ONARIM: run \"claude-oauth models refresh\" to rebuild it from the live provider catalogues.",
+            remedy: "The model snapshot could not be parsed and the pinned baseline was used instead. FIX: run \"claude-oauth models refresh\" to rebuild it from the live provider catalogues.",
         });
         return { state: "unreadable" };
     }

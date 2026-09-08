@@ -74,7 +74,7 @@ export async function startClodexCapsule(options: ClodexCapsuleOptions, transpor
         child.kill();
         const failure = spawnFailure();
         if (failure !== undefined) {
-            throw new RouterError("adapter_unavailable", `Clodex could not be started from its pinned path (${failure.code ?? "spawn failed"}). ONARIM: reinstall the pinned Clodex package, then re-run claude-oauth doctor.`, 503, { cause: failure });
+            throw new RouterError("adapter_unavailable", `Clodex could not be started from its pinned path (${failure.code ?? "spawn failed"}). FIX: reinstall the pinned Clodex package, then re-run claude-oauth doctor.`, 503, { cause: failure });
         }
         throw error;
     }

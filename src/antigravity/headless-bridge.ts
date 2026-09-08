@@ -359,50 +359,79 @@ export async function runAntigravityProcess(request: HeadlessProcessRequest): Pr
 // prompt for, so it was auto-denied"), while the router reported only "Antigravity
 // did not complete the request." The diagnosis was collected and then discarded.
 //
-// A red-team pass over the first version of this fix (2026-09-07, report
-// tasks/router-karar-20260907/astra-red-team.md) broke three of its claims, and the
-// repairs below are its findings, not this file's own optimism:
-//   - the explanation survived on TWO throw paths and was still dropped on a dozen
-//     others, including the one where the child wrote its reason into the terminal
-//     event's `error` field rather than to stderr;
-//   - the redaction let a Bearer value, a query-string token, an AWS key id, a
-//     multi-word field value and any non-ASCII run through;
-//   - the "bytes" counter counted UTF-16 units and could cut a surrogate pair in half.
+// Two adversarial passes have been run against this code, and every rule below is
+// one of their counter-examples rather than this file's own confidence. The second
+// pass (Gemini, 2026-09-07) broke the first repair three more ways:
+//   - "api-signature-token: <password>" was destroyed by the prefix rule, which
+//     removed the very field name the later field rule needed, and the password
+//     then walked out untouched;
+//   - an AWS secret access key survived because "/" and "+" split it into runs
+//     shorter than the 32-character opaque threshold;
+//   - a quoted token after Bearer survived because the scheme rule expected the
+//     value to start immediately.
+// It also showed the reverse failure: redacting a whole line after a bare `key:`
+// deleted the actual error message, which is a diagnostic channel destroying the
+// diagnosis it exists to carry.
 //
-// stderr is untrusted text from a child whose environment carries credentials, so it
-// is redacted before it travels: a diagnostic channel must never become a leak. The
-// redaction deliberately over-reaches on named fields (it takes the rest of the
-// line) — a diagnostic that hides one word too many is recoverable, one that leaks
-// is not.
+// The standing rule for this file: over-redaction is recoverable, a leak is not --
+// but over-redaction that removes the ERROR ITSELF is not recoverable either, so
+// weak field names take a bounded value and strong ones take the line.
 const childDetailLimit = 600;
 
-const secretFieldNames = "api[_-]?key|apikey|key|token|secret|client_secret|access_token|refresh_token|password|passwd|pwd|authorization|auth";
+// Names whose value is a credential often enough that the rest of the line goes.
+const strongSecretFields = "password|passwd|pwd|secret|client_secret|api[_-]?key|apikey|access_token|refresh_token|authorization|private_key";
+// Names that appear in ordinary diagnostics too ("key": "spawn_failed", "unexpected
+// token: '}'"). Their value is bounded and must be long enough to be a credential.
+const weakSecretFields = "key|token|auth|credential";
+
+// A weak field name ("key", "token") sits in front of ordinary diagnostic values as
+// often as in front of credentials, and length alone does not separate them:
+// "spawn_failed" and a 12-character token are the same size. Shape does: a credential
+// is long, or mixes cases, or carries digits. Deleting "spawn_failed" costs the reader
+// the reason their run died, which is the one thing this channel exists to carry.
+function looksLikeCredential(value: string): boolean {
+    return value.length >= 20
+        || (/[0-9]/u.test(value) && /[A-Za-z]/u.test(value))
+        || (/[a-z]/u.test(value) && /[A-Z]/u.test(value));
+}
 
 function redactChildDetail(text: string): string {
     return text
-        // Provider-prefixed credentials. The left lookbehind keeps ordinary words
-        // ("task-management-system" would otherwise match the sk- rule) out of it.
-        .replace(/(?<![A-Za-z0-9])(?:sk|pk|ghp|gho|ghu|ghs|ghr|xai|key|api)[-_][A-Za-z0-9_-]{8,}/giu, "[REDACTED]")
+        // ANSI sequences first: they are noise, they can be cut in half by the byte
+        // limit, and half an escape sequence leaves the reader's terminal in a
+        // colour it never asked for.
+        .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "")
+        // Provider-prefixed credentials. "key" and "api" were in this list and made
+        // it match ordinary hyphenated words like "api-signature-token"; they are
+        // handled as field names below instead.
+        .replace(/(?<![A-Za-z0-9])(?:sk|pk|ghp|gho|ghu|ghs|ghr|xai|ya29|glpat|npm)[-_.][A-Za-z0-9_-]{8,}/giu, "[REDACTED]")
         .replace(/(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])/gu, "[REDACTED]")
         .replace(/(?<![A-Za-z0-9])AIza[A-Za-z0-9_-]{10,}/gu, "[REDACTED]")
-        .replace(/(?<![A-Za-z0-9])ya29\.[A-Za-z0-9._-]{10,}/gu, "[REDACTED]")
-        // The VALUE after a scheme word, not the scheme word itself. The first
-        // version redacted "Bearer" and left the token standing.
-        .replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/giu, "$1 [REDACTED]")
-        // A JWT in full: the header and payload carry claims, so redacting only the
-        // signature (as the first version did) still leaks the contents.
+        // The VALUE after a scheme word, quoted or bare -- not the scheme word.
+        .replace(/\b(Bearer|Basic|Token)\s+["']?[A-Za-z0-9._~+/=-]{8,}["']?/giu, "$1 [REDACTED]")
+        // A JWT in full: header and payload carry claims, so redacting only the
+        // signature still leaks the contents.
         .replace(/(?<![A-Za-z0-9._-])[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{6,}(?![A-Za-z0-9._-])/gu, "[REDACTED]")
-        // A named field in bare, quoted, JSON or query-string form. The value runs to
-        // the end of the line so a multi-word or space-broken secret cannot survive
-        // in fragments; \S+ let the tail through.
-        .replace(new RegExp(`("?\\b(?:${secretFieldNames})"?\\s*[:=]\\s*)[^\\n]*`, "giu"), "$1[REDACTED]")
-        // Long opaque runs, letters of any script — the ASCII-only class missed a
-        // 40-character non-ASCII value entirely.
+        // Strong field names: the value runs to the end of the line, so a multi-word
+        // or space-broken secret cannot survive in fragments.
+        .replace(new RegExp(`("?\\b(?:${strongSecretFields})"?\\s*[:=]\\s*)[^\\n]*`, "giu"), "$1[REDACTED]")
+        // Weak field names: one bounded value, and only when it is long enough to be
+        // a credential. `"key": "spawn_failed"` keeps the rest of its line.
+        .replace(new RegExp(`("?\\b(?:${weakSecretFields})"?\\s*[:=]\\s*)(["']?)([A-Za-z0-9._~+/=-]{8,})\\2`, "giu"),
+                 (whole: string, name: string, quote: string, value: string) =>
+                     (looksLikeCredential(value) ? `${name}${quote}[REDACTED]${quote}` : whole))
+        // Base64-shaped runs, which the opaque-run rule below cannot see because "/"
+        // and "+" split them. Mixed case AND a digit are required so that file paths
+        // -- the most valuable thing in a diagnostic -- are not eaten.
+        .replace(/(?<![A-Za-z0-9+/=])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])/gu, "[REDACTED]")
+        // Long opaque runs, letters of any script.
         .replace(/(?<![\p{L}\p{N}_-])[\p{L}\p{N}_-]{32,}(?![\p{L}\p{N}_-])/gu, "[REDACTED]");
 }
 
-// The limit is in BYTES and is measured in bytes; the first version sliced UTF-16
-// units, reported them as "bytes", and could leave a lone surrogate at the cut.
+// The limit is in BYTES and is measured in bytes; an earlier version sliced UTF-16
+// units, reported them as "bytes", and could leave a lone surrogate at the cut. The
+// cut is also pulled back off a combining mark or a zero-width joiner, so the last
+// glyph is never left half-composed.
 function boundedExcerpt(text: string): string {
     const totalBytes = Buffer.byteLength(text, "utf8");
     if (totalBytes <= childDetailLimit)
@@ -416,11 +445,15 @@ function boundedExcerpt(text: string): string {
         usedBytes += size;
         kept += character;
     }
+    while (kept.length > 0 && /[\p{M}\u200d]/u.test(kept.slice(-1))) {
+        usedBytes -= Buffer.byteLength(kept.slice(-1), "utf8");
+        kept = kept.slice(0, -1);
+    }
     return `${kept}...[${totalBytes - usedBytes} more bytes]`;
 }
 
 // Both channels the child can explain itself through. Measured: with a terminal
-// event carrying `error: "disk full: ..."` and an empty stderr, the first version
+// event carrying `error: "disk full: ..."` and an empty stderr, an earlier version
 // said "child wrote nothing to stderr" while the child had written plenty.
 function childDetail(output: { readonly exitCode: number | null; readonly stderr: string }, reported?: string): string {
     const channels: string[] = [];
@@ -442,31 +475,55 @@ function withChildDetail(error: RouterError, output: HeadlessProcessOutput, repo
 
 // The child names this condition itself. Measured 2026-09-07, agy stderr:
 // "no output produced -- a tool required the \"command\" permission that headless
-// mode cannot prompt for, so it was auto-denied". The first version matched a bare
-// mention of a permission setting, so an INFO line naming permissions.allow and a
-// usage line for --dangerously-skip-permissions were both classified as denials,
-// while "execution rejected: approval unavailable" (verb before noun) was missed.
-// A denial now needs a permission word AND a denial verb, in either order, and an
-// explicit negation disqualifies it.
+// mode cannot prompt for, so it was auto-denied".
+//
+// Three shapes had to be told apart, and each one is a counter-example that was
+// classified wrongly at some point in this file's history:
+//   - a mention is not a denial ("INFO permissions.allow loaded");
+//   - a denial elsewhere in the system is not THIS denial ("IAM permission denied
+//     for project x" is a Google authorisation failure, and sending its reader to
+//     permissions.allow wastes their afternoon);
+//   - a negation is not a denial ("permission was not denied").
+// So a denial needs a permission word, a denial verb, AND a word placing it in this
+// process's tool-approval path -- all within one line, because a `--help` line
+// elsewhere in the output used to disqualify the whole channel.
 const permissionWords = "permissions?|approval|authori[sz]ation";
-const denialWords = "denied|rejected|refused|not permitted|cannot prompt|could not prompt|auto-?denied";
+const denialWords = "denied|rejected|refused|not permitted|cannot prompt|could not prompt|could not be obtained|auto-?denied";
+const toolContextWords = "tool|command|headless|noninteractive|non-interactive|interactive|prompt|approve|approval|skip-permissions|allow-rule|permissions\\.allow";
 const permissionDenialSignature = new RegExp(
     `(?:${permissionWords})[\\s\\S]{0,80}?(?:${denialWords})`
     + `|(?:${denialWords})[\\s\\S]{0,80}?(?:${permissionWords})`
     + `|auto-?denied`,
     "iu",
 );
-const permissionDenialNegation = /\b(?:not|never|n't)\s+(?:auto-?)?(?:denied|rejected|refused)\b|^\s*usage:|--help\b/imu;
+const permissionDenialNegation = /\b(?:not|never|n't)\s+(?:auto-?)?(?:denied|rejected|refused)\b|^\s*usage:|--help\b/iu;
+const toolContext = new RegExp(`(?:${toolContextWords})`, "iu");
 
 function looksLikePermissionDenial(...channels: readonly (string | undefined)[]): boolean {
-    return channels.some((channel) => channel !== undefined
-        && permissionDenialSignature.test(channel)
-        && !permissionDenialNegation.test(channel));
+    // The window is the match's OWN span, widened to whole lines. Testing the entire
+    // channel let a distant "--help" disqualify a real denial; testing single lines
+    // lost a denial that straddled a line break. The match knows where it starts and
+    // ends, so it defines its own neighbourhood.
+    const scanner = new RegExp(permissionDenialSignature.source, "giu");
+    return channels.some((channel) => {
+        if (channel === undefined)
+            return false;
+        scanner.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = scanner.exec(channel)) !== null) {
+            const from = channel.lastIndexOf("\n", match.index) + 1;
+            const lineEnd = channel.indexOf("\n", match.index + match[0].length);
+            const window = channel.slice(from, lineEnd === -1 ? channel.length : lineEnd);
+            if (toolContext.test(window) && !permissionDenialNegation.test(window))
+                return true;
+        }
+        return false;
+    });
 }
 
 export async function runAntigravityHeadless(options: AntigravityHeadlessOptions): Promise<AntigravityHeadlessResult> {
     if (!isAllowedModel(options.model)) {
-        throw new RouterError("model_not_available", `Antigravity model ${JSON.stringify(options.model)} is not in this router's reviewed contract set. ONARIM: add it to AGENT_MODEL_CONTRACTS -- this is a LOCAL policy refusal, not an upstream one.`, 404);
+        throw new RouterError("model_not_available", `Antigravity model ${JSON.stringify(options.model)} is not in this router's reviewed contract set. FIX: add it to AGENT_MODEL_CONTRACTS -- this is a LOCAL policy refusal, not an upstream one.`, 404);
     }
     if (options.prompt.trim() === "")
         throw new RouterError("invalid_request", "Antigravity prompt must not be empty.", 400);
@@ -517,7 +574,17 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         parsed = parseResponse(output.stdout);
     }
     catch (error) {
-        throw error instanceof RouterError ? withChildDetail(error, output) : error;
+        // A non-RouterError here (a TypeError, say) used to escape with the child's
+        // stderr and exit code attached to nothing. Whatever the parser threw, the
+        // caller gets a code it can act on and the diagnosis that goes with it.
+        if (error instanceof RouterError)
+            throw withChildDetail(error, output);
+        throw new RouterError(
+            "upstream_protocol_error",
+            `Antigravity output could not be parsed. ${childDetail(output)}`,
+            502,
+            { cause: error },
+        );
     }
     if (output.exitCode !== 0 || !["success", "ok"].includes(parsed.status.toLowerCase())) {
         const classified = output.exitCode === 0 ? undefined : classifiedProviderResultFailure(parsed);
@@ -545,7 +612,7 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         throw new RouterError(
             permissionDenied ? "provider_tool_permission_denied" : "upstream_protocol_error",
             permissionDenied
-                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. ONARIM: this call ran agy with ${lane} (see processArguments), and a tool needing a permission is auto-denied there, which stops the run. Add an allow-rule for the tool the child names below under permissions.allow in the agy settings, or run the task on a lane that grants that tool. ${childDetail(output, parsed.error)}`
+                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. FIX: this call ran agy with ${lane} (see processArguments), and a tool needing a permission is auto-denied there, which stops the run. Add an allow-rule for the tool the child names below under permissions.allow in the agy settings, or run the task on a lane that grants that tool. ${childDetail(output, parsed.error)}`
                 : `Antigravity reported success with an empty response. ${childDetail(output, parsed.error)}`,
             502,
         );

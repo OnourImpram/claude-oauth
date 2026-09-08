@@ -173,6 +173,47 @@ describe("antigravity failure detail -- the diagnostic channel does not leak", (
         ok(!message.includes(cyrillic), "a long non-ASCII run survived");
     });
 
+    it("an early prefix match does not eat the field name the later rule needs", async () => {
+        // Counter-example from the second adversarial pass: "api-signature-token" was
+        // swallowed by the provider-prefix rule, which removed the field name the
+        // field rule was going to key on, and the value behind it then walked out.
+        const value = "correct-horse-battery-staple";
+        const message = await redactedMessage(`Configuration error on api-signature-token: ${value}`);
+        ok(!message.includes(value), "the value survived because its field name was redacted first");
+    });
+
+    it("a base64-shaped secret survives neither / nor + splitting it", async () => {
+        const value = ["wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY1"].join("/");
+        const message = await redactedMessage(`Signature validation failed: ${value}`);
+        ok(!message.includes(value), "a slash-bearing key fell between the opaque-run boundaries");
+    });
+
+    it("a quoted value after a scheme word is redacted", async () => {
+        const value = "sec_token_9988776655";
+        const message = await redactedMessage(`Rejected handshake for Bearer "${value}" from peer`);
+        ok(!message.includes(value), "a quoted token stood because the rule expected a bare value");
+    });
+
+    it("over-redaction guard: a weak field name does not swallow the error message", async () => {
+        // The other direction of the same defect. A diagnostic channel that deletes
+        // the diagnosis is not safe, it is useless: `"key": "spawn_failed"` must not
+        // take the rest of the line with it.
+        const message = await redactedMessage(
+            '{"level":"error","key":"spawn_failed","message":"permission denied for /bin/sandbox-exec"}');
+        ok(message.includes("sandbox-exec"), "the actual error message was redacted away");
+        ok(message.includes("spawn_failed"), "a short non-credential value was redacted");
+    });
+
+    it("ANSI escape sequences are stripped before the excerpt is cut", async () => {
+        // Built from an escape sequence rather than a raw control byte: an invisible
+        // character in a source file is one careless copy away from silently becoming
+        // something else.
+        const esc = "\u001b";
+        const message = await redactedMessage(`${esc}[31mfatal:${esc}[0m the child stopped`);
+        ok(!message.includes(esc), "an escape sequence reached the reader's terminal");
+        ok(message.includes("fatal:"), "the text inside the escapes was lost");
+    });
+
     it("the excerpt is bounded in BYTES, says exactly how many were dropped, and cuts on a character", async () => {
         // Words, not one long run: a 2,000-character run of letters is itself
         // secret-shaped, so redaction collapses it to a single token and the
@@ -208,7 +249,7 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
             stderr: "jetski: no output produced -- the permission was auto-denied in headless mode",
         });
         strictEqual(error.code, "provider_tool_permission_denied");
-        ok(error.message.includes("ONARIM:"), "an actionable code shipped without its remedy");
+        ok(error.message.includes("FIX:"), "an actionable code shipped without its remedy");
         ok(error.message.includes("--mode plan --sandbox"), "the remedy does not name this lane's flags");
     });
 
@@ -250,6 +291,29 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
         strictEqual(error.code, "upstream_protocol_error");
     });
 
+    it("an unrelated authorisation failure is NOT reported as a tool-permission denial", async () => {
+        // Counter-example from the second adversarial pass: a Google IAM refusal puts
+        // "permission" and "denied" next to each other, and the old signature sent its
+        // reader to permissions.allow -- the wrong afternoon entirely.
+        const error = await bridgeFailure({
+            exitCode: 0,
+            stdout: success(""),
+            stderr: "Google API error: IAM permission denied for project my-proj",
+        });
+        strictEqual(error.code, "upstream_protocol_error");
+    });
+
+    it("a --help line elsewhere in the output does not disqualify a real denial", async () => {
+        // The negation used to be tested against the whole channel, so one help line
+        // anywhere in stderr silenced the classification of a genuine denial.
+        const error = await bridgeFailure({
+            exitCode: 0,
+            stdout: success(""),
+            stderr: "Tool command was auto-denied in headless mode.\nFor options, see agy --help",
+        });
+        strictEqual(error.code, "provider_tool_permission_denied");
+    });
+
     it("negative arm: a usage line advertising the skip flag is not a denial", async () => {
         const error = await bridgeFailure({
             exitCode: 0,
@@ -272,7 +336,10 @@ describe("antigravity failure detail -- an empty success is named by evidence", 
         const error = await bridgeFailure({
             exitCode: 0,
             stdout: success(""),
-            stderr: "permission\nwas denied by policy",
+            // The break is what this arm measures; the tool context has to be there
+            // too, because "permission ... denied" on its own is also what an IAM
+            // refusal looks like and that must NOT be classified as this condition.
+            stderr: "tool permission\nwas denied by policy in headless mode",
         });
         strictEqual(error.code, "provider_tool_permission_denied");
     });

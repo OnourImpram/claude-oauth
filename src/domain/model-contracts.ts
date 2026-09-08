@@ -303,7 +303,7 @@ export function clodexCatalogDriftDetailCode(drift: readonly OpenAiSnapshotRoute
         .join(",");
     return `clodex_session_catalog_drift:${detail}`;
 }
-export const OPENAI_CATALOG_DRIFT_REMEDY = "ONARIM: claude-oauth models refresh -- the OpenAI lane stays closed until this RUN succeeds. If the live count differs from the lock, first set config/install-lock.json claudeShadow.openAiContextWindow to the measured count, then run refresh AGAIN (if the first refresh hits the shrink gate with 409, no snapshot is written).";
+export const OPENAI_CATALOG_DRIFT_REMEDY = "FIX: claude-oauth models refresh -- the OpenAI lane stays closed until this RUN succeeds. If the live count differs from the lock, first set config/install-lock.json claudeShadow.openAiContextWindow to the measured count, then run refresh AGAIN (if the first refresh hits the shrink gate with 409, no snapshot is written).";
 export function openAiCatalogDriftReadiness(models: readonly ModelRecord[], catalog: readonly ProviderModelRecord[]): ProviderReadiness {
     return {
         provider: "openai",

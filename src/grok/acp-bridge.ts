@@ -499,7 +499,7 @@ export async function inspectGrokModels(options: GrokCatalogOptions): Promise<re
     catch (error) {
         const failure = spawnFailure();
         if (failure !== undefined) {
-            throw new RouterError("adapter_unavailable", `Grok CLI could not be started from its pinned path (${failure.code ?? "spawn failed"}). ONARIM: install the pinned grok build, then re-run claude-oauth doctor.`, 503, { cause: failure });
+            throw new RouterError("adapter_unavailable", `Grok CLI could not be started from its pinned path (${failure.code ?? "spawn failed"}). FIX: install the pinned grok build, then re-run claude-oauth doctor.`, 503, { cause: failure });
         }
         if (options.signal?.aborted) {
             throw new RouterError("upstream_timeout", "Grok ACP catalog inspection was cancelled.", 504, { cause: error });
@@ -511,7 +511,7 @@ export async function inspectGrokModels(options: GrokCatalogOptions): Promise<re
         // once led to a wrong diagnosis that said "log in".
         const rpcCode: unknown = isRecord(error) ? error["code"] : undefined;
         if (rpcCode === -32601) {
-            throw new RouterError("upstream_protocol_error", "Grok ACP no longer exposes the expected model-catalog surface. ONARIM: re-inspect the initialize response and update src/grok/acp-bridge.ts.", 502, { cause: error });
+            throw new RouterError("upstream_protocol_error", "Grok ACP no longer exposes the expected model-catalog surface. FIX: re-inspect the initialize response and update src/grok/acp-bridge.ts.", 502, { cause: error });
         }
         throw new RouterError("provider_auth_required", "Grok ACP could not return the OAuth model catalog. Complete grok login.", 401, { cause: error });
     }
