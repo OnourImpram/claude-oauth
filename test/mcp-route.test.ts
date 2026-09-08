@@ -36,16 +36,16 @@ const snapshot: ModelSnapshot = {
 };
 
 const nonce = "m".repeat(43);
-const CANLI = "canliOturum";
+const LIVE_SESSION_KEY = "liveSession";
 let directory = "";
 let router: RunningRouter | undefined;
 let bridge: McpToolBridge | undefined;
-const parkEdilen: ParkedToolCall[] = [];
+const parkedCalls: ParkedToolCall[] = [];
 
 before(async () => {
     directory = await mkdtemp(join(tmpdir(), "router-mcp-"));
     bridge = new McpToolBridge({
-        onToolCall: (call) => parkEdilen.push(call),
+        onToolCall: (call) => parkedCalls.push(call),
         callTimeoutMs: 0,
     });
     bridge.setTools(deriveMcpTools([{ name: "Read", description: "read a file" }]));
@@ -53,7 +53,7 @@ before(async () => {
         nonce,
         registry: new ModelRegistry(snapshot, new Map()),
         receipts: new ReceiptStore(join(directory, "receipts.jsonl")),
-        mcpBridge: (sessionKey) => (sessionKey === CANLI ? bridge : undefined),
+        mcpBridge: (sessionKey) => (sessionKey === LIVE_SESSION_KEY ? bridge : undefined),
     });
 });
 
@@ -63,13 +63,13 @@ after(async () => {
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
-async function mcpGonder(
+async function sendMcp(
     body: unknown,
-    { oturum = CANLI, kimlik = true }: { oturum?: string; kimlik?: boolean } = {},
+    { sessionKey = LIVE_SESSION_KEY, authenticated = true }: { sessionKey?: string; authenticated?: boolean } = {},
 ): Promise<{ status: number; json: Record<string, unknown> | undefined; text: string }> {
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (kimlik) headers[SESSION_HEADER] = nonce;
-    const response = await fetch(`${router?.baseUrl}/mcp/${oturum}`, {
+    if (authenticated) headers[SESSION_HEADER] = nonce;
+    const response = await fetch(`${router?.baseUrl}/mcp/${sessionKey}`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -89,16 +89,16 @@ describe("the MCP endpoint sits behind the existing gate", () => {
     // a provider CLI work, this fails. Any local process could otherwise drive
     // Claude Code's tools.
     it("refuses a caller with no session nonce", async () => {
-        const { status, json } = await mcpGonder(
+        const { status, json } = await sendMcp(
             { jsonrpc: "2.0", id: 1, method: "initialize" },
-            { kimlik: false },
+            { authenticated: false },
         );
         strictEqual(status, 401);
         strictEqual((json?.["error"] as { type: string }).type, "session_auth_required");
     });
 
     it("accepts the same nonce through the URL path door", async () => {
-        const response = await fetch(`${router?.baseUrl}/_session/${nonce}/mcp/${CANLI}`, {
+        const response = await fetch(`${router?.baseUrl}/_session/${nonce}/mcp/${LIVE_SESSION_KEY}`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
@@ -107,7 +107,7 @@ describe("the MCP endpoint sits behind the existing gate", () => {
     });
 
     it("a wrong nonce is refused like no nonce at all", async () => {
-        const response = await fetch(`${router?.baseUrl}/mcp/${CANLI}`, {
+        const response = await fetch(`${router?.baseUrl}/mcp/${LIVE_SESSION_KEY}`, {
             method: "POST",
             headers: { "content-type": "application/json", [SESSION_HEADER]: "x".repeat(43) },
             body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "ping" }),
@@ -118,11 +118,11 @@ describe("the MCP endpoint sits behind the existing gate", () => {
 
 describe("MCP protocol over HTTP", () => {
     it("initialize and tools/list answer through the route", async () => {
-        const init = await mcpGonder({ jsonrpc: "2.0", id: 10, method: "initialize" });
+        const init = await sendMcp({ jsonrpc: "2.0", id: 10, method: "initialize" });
         strictEqual(init.status, 200);
         strictEqual((init.json?.["result"] as { protocolVersion: string }).protocolVersion, "2025-06-18");
 
-        const list = await mcpGonder({ jsonrpc: "2.0", id: 11, method: "tools/list" });
+        const list = await sendMcp({ jsonrpc: "2.0", id: 11, method: "tools/list" });
         const tools = (list.json?.["result"] as { tools: { name: string }[] }).tools;
         deepStrictEqual(tools.map((tool) => tool.name), ["Read"]);
     });
@@ -131,13 +131,13 @@ describe("MCP protocol over HTTP", () => {
     // and the agent stops mid-loop -- which reaches the operator as "the model is
     // selected but no answer comes back", the exact symptom Phase 9 exists to end.
     it("a notification gets 202 and an empty body", async () => {
-        const { status, text } = await mcpGonder({ jsonrpc: "2.0", method: "notifications/initialized" });
+        const { status, text } = await sendMcp({ jsonrpc: "2.0", method: "notifications/initialized" });
         strictEqual(status, 202);
         strictEqual(text, "");
     });
 
     it("malformed JSON is a JSON-RPC parse error, not a crash", async () => {
-        const response = await fetch(`${router?.baseUrl}/mcp/${CANLI}`, {
+        const response = await fetch(`${router?.baseUrl}/mcp/${LIVE_SESSION_KEY}`, {
             method: "POST",
             headers: { "content-type": "application/json", [SESSION_HEADER]: nonce },
             body: "{ not json",
@@ -151,13 +151,13 @@ describe("MCP protocol over HTTP", () => {
     // would strand the rest, and a stranded call becomes an unmatched
     // tool_result -- the number spec §7.3 gates on.
     it("a batched request is refused rather than half-processed", async () => {
-        const { status, json } = await mcpGonder([{ jsonrpc: "2.0", id: 20, method: "ping" }]);
+        const { status, json } = await sendMcp([{ jsonrpc: "2.0", id: 20, method: "ping" }]);
         strictEqual(status, 400);
         strictEqual((json?.["error"] as { code: number }).code, -32600);
     });
 
     it("GET is refused; this endpoint is POST only", async () => {
-        const response = await fetch(`${router?.baseUrl}/mcp/${CANLI}`, {
+        const response = await fetch(`${router?.baseUrl}/mcp/${LIVE_SESSION_KEY}`, {
             headers: { [SESSION_HEADER]: nonce },
         });
         strictEqual(response.status, 405);
@@ -166,17 +166,17 @@ describe("MCP protocol over HTTP", () => {
 
 describe("session addressing on the route", () => {
     it("an unknown session key gets a named error, not a bare 404", async () => {
-        const { status, json } = await mcpGonder(
+        const { status, json } = await sendMcp(
             { jsonrpc: "2.0", id: 30, method: "ping" },
-            { oturum: "olmayanOturum" },
+            { sessionKey: "unknownSession" },
         );
         strictEqual(status, 409);
         ok(String((json?.["error"] as { message: string }).message).includes("ONARIM:"));
     });
 
     it("a tool call arriving over HTTP parks instead of executing", async () => {
-        parkEdilen.length = 0;
-        const bekleyen = mcpGonder({
+        parkedCalls.length = 0;
+        const pending = sendMcp({
             jsonrpc: "2.0",
             id: 40,
             method: "tools/call",
@@ -185,11 +185,11 @@ describe("session addressing on the route", () => {
         // The call must NOT resolve on its own: the tool runs on the Claude Code
         // side. Proving that means answering it here, from the other end.
         await new Promise((resolve) => setTimeout(resolve, 30));
-        strictEqual(parkEdilen.length, 1);
-        const call = parkEdilen[0] as ParkedToolCall;
+        strictEqual(parkedCalls.length, 1);
+        const call = parkedCalls[0] as ParkedToolCall;
         deepStrictEqual(call.input, { path: "a.txt" });
         strictEqual(bridge?.deliverToolResult(call.id, "file body", false), true);
-        const { status, json } = await bekleyen;
+        const { status, json } = await pending;
         strictEqual(status, 200);
         const result = json?.["result"] as { content: { text: string }[]; isError: boolean };
         strictEqual(result.content[0]?.text, "file body");

@@ -10,4 +10,4 @@ const target = resolve(import.meta.dirname, "..", "dist");
 let existed = false;
 try { await stat(target); existed = true; } catch { /* already absent */ }
 await rm(target, { recursive: true, force: true });
-console.log(existed ? `silindi: ${target}` : `zaten yoktu: ${target}`);
+console.log(existed ? `deleted: ${target}` : `already absent: ${target}`);

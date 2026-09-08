@@ -13,7 +13,7 @@ import { RouterError } from "../src/domain/errors.js";
 // below exists to make that number honest -- a bridge that silently swallowed a
 // mismatch would report zero while losing work.
 
-const kopru = (onToolCall: (call: ParkedToolCall) => void = () => {}): McpToolBridge =>
+const createBridge = (onToolCall: (call: ParkedToolCall) => void = () => {}): McpToolBridge =>
     new McpToolBridge({ onToolCall, callTimeoutMs: 0 });
 
 describe("deriveMcpTools", () => {
@@ -33,23 +33,23 @@ describe("deriveMcpTools", () => {
 
     // Ambiguity here means calling the WRONG tool, so it must be refused, not resolved.
     it("refuses duplicate tool names", () => {
-        let atildi = false;
+        let threw = false;
         try {
             deriveMcpTools([{ name: "Read" }, { name: "Read" }]);
         } catch (error) {
-            atildi = error instanceof RouterError;
+            threw = error instanceof RouterError;
         }
-        strictEqual(atildi, true);
+        strictEqual(threw, true);
     });
 
     it("refuses an empty tool name", () => {
-        let atildi = false;
+        let threw = false;
         try {
             deriveMcpTools([{ name: "   " }]);
         } catch (error) {
-            atildi = error instanceof RouterError;
+            threw = error instanceof RouterError;
         }
-        strictEqual(atildi, true);
+        strictEqual(threw, true);
     });
 
     it("no tools is empty, not an error", () => {
@@ -59,44 +59,44 @@ describe("deriveMcpTools", () => {
 
 describe("McpToolBridge protocol", () => {
     it("initialize answers with the pinned protocol version", async () => {
-        const bridge = kopru();
-        const cevap = await bridge.handle({ jsonrpc: "2.0", id: 1, method: "initialize" });
-        const result = cevap?.["result"] as Record<string, unknown>;
+        const bridge = createBridge();
+        const response = await bridge.handle({ jsonrpc: "2.0", id: 1, method: "initialize" });
+        const result = response?.["result"] as Record<string, unknown>;
         strictEqual(result["protocolVersion"], MCP_PROTOCOL_VERSION);
         strictEqual(bridge.initialized, true);
     });
 
     it("tools/list returns exactly what was set", async () => {
-        const bridge = kopru();
+        const bridge = createBridge();
         bridge.setTools(deriveMcpTools([{ name: "Edit" }, { name: "Bash" }]));
-        const cevap = await bridge.handle({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-        const result = cevap?.["result"] as { tools: { name: string }[] };
+        const response = await bridge.handle({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+        const result = response?.["result"] as { tools: { name: string }[] };
         deepStrictEqual(result.tools.map((t) => t.name), ["Edit", "Bash"]);
     });
 
     // A notification has no id and MUST NOT get a body; answering one desyncs
     // the JSON-RPC stream and the agent stops mid-loop.
     it("a notification gets no response", async () => {
-        const bridge = kopru();
+        const bridge = createBridge();
         strictEqual(await bridge.handle({ jsonrpc: "2.0", method: "notifications/initialized" }), undefined);
     });
 
     it("an unknown method is an error, not silence", async () => {
-        const bridge = kopru();
-        const cevap = await bridge.handle({ jsonrpc: "2.0", id: 3, method: "no/such" });
-        strictEqual((cevap?.["error"] as { code: number }).code, -32601);
+        const bridge = createBridge();
+        const response = await bridge.handle({ jsonrpc: "2.0", id: 3, method: "no/such" });
+        strictEqual((response?.["error"] as { code: number }).code, -32601);
     });
 });
 
 describe("tool call parking -- the stateless/stateful join", () => {
     it("a call parks, surfaces to the caller, and resolves on its result", async () => {
-        let gorulen: ParkedToolCall | undefined;
-        const bridge = kopru((call) => {
-            gorulen = call;
+        let observedCall: ParkedToolCall | undefined;
+        const bridge = createBridge((call) => {
+            observedCall = call;
         });
         bridge.setTools(deriveMcpTools([{ name: "Read" }]));
 
-        const bekleyen = bridge.handle({
+        const pending = bridge.handle({
             jsonrpc: "2.0",
             id: 9,
             method: "tools/call",
@@ -104,12 +104,12 @@ describe("tool call parking -- the stateless/stateful join", () => {
         });
 
         strictEqual(bridge.pendingCount, 1);
-        strictEqual(gorulen?.name, "Read");
-        deepStrictEqual(gorulen?.input, { path: "a.txt" });
+        strictEqual(observedCall?.name, "Read");
+        deepStrictEqual(observedCall?.input, { path: "a.txt" });
 
-        strictEqual(bridge.deliverToolResult(gorulen.id, "file body", false), true);
-        const cevap = await bekleyen;
-        const result = cevap?.["result"] as { content: { text: string }[]; isError: boolean };
+        strictEqual(bridge.deliverToolResult(observedCall.id, "file body", false), true);
+        const response = await pending;
+        const result = response?.["result"] as { content: { text: string }[]; isError: boolean };
         strictEqual(result.content[0]?.text, "file body");
         strictEqual(result.isError, false);
         strictEqual(bridge.pendingCount, 0);
@@ -118,65 +118,65 @@ describe("tool call parking -- the stateless/stateful join", () => {
 
     // THE §7.3 GATE. An id nobody parked must be COUNTED, never ignored.
     it("an unmatched result is counted, not swallowed", () => {
-        const bridge = kopru();
-        strictEqual(bridge.deliverToolResult("mcp_yok", "x", false), false);
+        const bridge = createBridge();
+        strictEqual(bridge.deliverToolResult("mcp_missing", "x", false), false);
         strictEqual(bridge.unmatchedResultCount, 1);
     });
 
     it("an error result reaches the agent as isError", async () => {
         let id = "";
-        const bridge = kopru((call) => {
+        const bridge = createBridge((call) => {
             id = call.id;
         });
         bridge.setTools(deriveMcpTools([{ name: "Bash" }]));
-        const bekleyen = bridge.handle({
+        const pending = bridge.handle({
             jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "Bash" },
         });
         bridge.deliverToolResult(id, "command failed", true);
-        const result = (await bekleyen)?.["result"] as { isError: boolean };
+        const result = (await pending)?.["result"] as { isError: boolean };
         strictEqual(result.isError, true);
     });
 
     it("cancelAll releases every parked call and reports how many", async () => {
-        const bridge = kopru();
+        const bridge = createBridge();
         bridge.setTools(deriveMcpTools([{ name: "Read" }]));
-        const bekleyen = bridge.handle({
+        const pending = bridge.handle({
             jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "Read" },
         });
         strictEqual(bridge.cancelAll("session ended"), 1);
-        const cevap = await bekleyen;
-        strictEqual((cevap?.["error"] as { code: number }).code, -32001);
+        const response = await pending;
+        strictEqual((response?.["error"] as { code: number }).code, -32001);
         strictEqual(bridge.pendingCount, 0);
     });
 
     it("a tool the agent invented is refused, not parked", async () => {
-        const bridge = kopru();
+        const bridge = createBridge();
         bridge.setTools(deriveMcpTools([{ name: "Read" }]));
-        const cevap = await bridge.handle({
-            jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "Uydurma" },
+        const response = await bridge.handle({
+            jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "Invented" },
         });
-        strictEqual((cevap?.["error"] as { code: number }).code, -32001);
+        strictEqual((response?.["error"] as { code: number }).code, -32001);
         strictEqual(bridge.pendingCount, 0);
     });
 
     it("ids are unique across calls, so results cannot cross", async () => {
-        const idler: string[] = [];
-        const bridge = kopru((call) => idler.push(call.id));
+        const ids: string[] = [];
+        const bridge = createBridge((call) => ids.push(call.id));
         bridge.setTools(deriveMcpTools([{ name: "Read" }]));
         void bridge.handle({ jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: "Read" } });
         void bridge.handle({ jsonrpc: "2.0", id: 14, method: "tools/call", params: { name: "Read" } });
-        strictEqual(idler.length, 2);
-        strictEqual(new Set(idler).size, 2);
+        strictEqual(ids.length, 2);
+        strictEqual(new Set(ids).size, 2);
         bridge.cancelAll("test teardown");
     });
 
     it("after teardown a new call is refused instead of hanging forever", async () => {
-        const bridge = kopru();
+        const bridge = createBridge();
         bridge.setTools(deriveMcpTools([{ name: "Read" }]));
         bridge.cancelAll("closed");
-        const cevap = await bridge.handle({
+        const response = await bridge.handle({
             jsonrpc: "2.0", id: 15, method: "tools/call", params: { name: "Read" },
         });
-        strictEqual((cevap?.["error"] as { code: number }).code, -32001);
+        strictEqual((response?.["error"] as { code: number }).code, -32001);
     });
 });

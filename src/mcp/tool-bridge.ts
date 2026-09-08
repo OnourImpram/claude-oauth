@@ -56,10 +56,10 @@ export type ToolCallOutcome =
     | { readonly kind: "result"; readonly content: string; readonly isError: boolean }
     | { readonly kind: "cancelled"; readonly reason: string };
 
-interface Bekleyen {
+interface PendingToolCall {
     readonly call: ParkedToolCall;
-    readonly cozumle: (outcome: ToolCallOutcome) => void;
-    readonly zamanlayici: NodeJS.Timeout | undefined;
+    readonly resolveOutcome: (outcome: ToolCallOutcome) => void;
+    readonly timer: NodeJS.Timeout | undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -77,8 +77,8 @@ export function deriveMcpTools(
     tools: readonly AnthropicToolDefinition[] | undefined,
 ): readonly McpToolDescriptor[] {
     if (tools === undefined) return [];
-    const gorulen = new Set<string>();
-    const cikti: McpToolDescriptor[] = [];
+    const seen = new Set<string>();
+    const output: McpToolDescriptor[] = [];
     for (const tool of tools) {
         const name = typeof tool?.name === "string" ? tool.name.trim() : "";
         if (name === "") {
@@ -86,20 +86,20 @@ export function deriveMcpTools(
         }
         // Duplicate names would make a call ambiguous, and ambiguity here means
         // running the WRONG tool. Refuse rather than pick one.
-        if (gorulen.has(name)) {
+        if (seen.has(name)) {
             throw new RouterError("invalid_request", `Duplicate tool name: ${name}.`, 400);
         }
-        gorulen.add(name);
+        seen.add(name);
         const schema = isRecord(tool.input_schema)
             ? (tool.input_schema as Record<string, unknown>)
             : { type: "object", properties: {} };
-        cikti.push({
+        output.push({
             name,
             description: typeof tool.description === "string" ? tool.description : "",
             inputSchema: schema,
         });
     }
-    return cikti;
+    return output;
 }
 
 export interface ToolBridgeOptions {
@@ -118,15 +118,15 @@ export interface ToolBridgeOptions {
  */
 export class McpToolBridge {
     #tools: readonly McpToolDescriptor[] = [];
-    #bekleyenler = new Map<string, Bekleyen>();
+    #pendingCalls = new Map<string, PendingToolCall>();
     #initialized = false;
-    #kapali = false;
-    #eslesmeyenSonuc = 0;
+    #closed = false;
+    #unmatchedResults = 0;
     // Calls WE timed out. A late answer to one of these is NOT COUNTED as unmatched:
     // 'work was lost' is one event, 'we gave up' is another. If both are written to the
     // same counter the gate cannot say what it measures.
-    #zamanAsimiSonuc = 0;
-    readonly #zamanAsimina = new Set<string>();
+    #timedOutResults = 0;
+    readonly #timedOutCallIds = new Set<string>();
     readonly #onToolCall: (call: ParkedToolCall) => void;
     readonly #timeoutMs: number;
 
@@ -145,17 +145,17 @@ export class McpToolBridge {
     }
 
     get pendingCount(): number {
-        return this.#bekleyenler.size;
+        return this.#pendingCalls.size;
     }
 
     /** spec §7.3 gate: this must be zero at the end of a healthy session. */
     get unmatchedResultCount(): number {
-        return this.#eslesmeyenSonuc;
+        return this.#unmatchedResults;
     }
 
     /** Late answers to calls we dropped ourselves. A SEPARATE measurement. */
     get timedOutResultCount(): number {
-        return this.#zamanAsimiSonuc;
+        return this.#timedOutResults;
     }
 
     get initialized(): boolean {
@@ -167,51 +167,51 @@ export class McpToolBridge {
      * Returns false when nothing was waiting for this id -- counted, never hidden.
      */
     deliverToolResult(id: string, content: string, isError: boolean): boolean {
-        const bekleyen = this.#bekleyenler.get(id);
-        if (bekleyen === undefined) {
+        const pending = this.#pendingCalls.get(id);
+        if (pending === undefined) {
             // If WE dropped this call, a late answer is not lost work.
-            if (this.#zamanAsimina.delete(id)) {
-                this.#zamanAsimiSonuc += 1;
+            if (this.#timedOutCallIds.delete(id)) {
+                this.#timedOutResults += 1;
                 return false;
             }
-            this.#eslesmeyenSonuc += 1;
+            this.#unmatchedResults += 1;
             return false;
         }
-        this.#bekleyenler.delete(id);
-        if (bekleyen.zamanlayici !== undefined) clearTimeout(bekleyen.zamanlayici);
-        bekleyen.cozumle({ kind: "result", content, isError });
+        this.#pendingCalls.delete(id);
+        if (pending.timer !== undefined) clearTimeout(pending.timer);
+        pending.resolveOutcome({ kind: "result", content, isError });
         return true;
     }
 
     /** Releases every parked call. Used on cancel, abort and session teardown. */
     cancelAll(reason: string): number {
-        const adet = this.#bekleyenler.size;
-        for (const [, bekleyen] of this.#bekleyenler) {
-            if (bekleyen.zamanlayici !== undefined) clearTimeout(bekleyen.zamanlayici);
-            bekleyen.cozumle({ kind: "cancelled", reason });
+        const count = this.#pendingCalls.size;
+        for (const [, pending] of this.#pendingCalls) {
+            if (pending.timer !== undefined) clearTimeout(pending.timer);
+            pending.resolveOutcome({ kind: "cancelled", reason });
         }
-        this.#bekleyenler.clear();
-        this.#kapali = true;
-        return adet;
+        this.#pendingCalls.clear();
+        this.#closed = true;
+        return count;
     }
 
     /** Handles one JSON-RPC message. Returns undefined for notifications. */
     async handle(message: unknown): Promise<Record<string, unknown> | undefined> {
         if (!isRecord(message)) {
-            return this.#hata(null, -32600, "Invalid Request");
+            return this.#errorResponse(null, -32600, "Invalid Request");
         }
         const method = message["method"];
         const id = message["id"] ?? null;
         if (typeof method !== "string") {
-            return this.#hata(id, -32600, "Invalid Request");
+            return this.#errorResponse(id, -32600, "Invalid Request");
         }
         // Notifications carry no id and must never get a response body.
-        const bildirim = message["id"] === undefined;
+        const isNotification = message["id"] === undefined;
 
         switch (method) {
             case "initialize": {
                 this.#initialized = true;
-                return this.#sonuc(id, {
+                return this.#resultResponse(id, {
                     protocolVersion: MCP_PROTOCOL_VERSION,
                     capabilities: { tools: { listChanged: true } },
                     serverInfo: { name: "hezarfen-claude-code-tools", version: "1.0.0" },
@@ -220,9 +220,9 @@ export class McpToolBridge {
             case "notifications/initialized":
                 return undefined;
             case "ping":
-                return bildirim ? undefined : this.#sonuc(id, {});
+                return isNotification ? undefined : this.#resultResponse(id, {});
             case "tools/list": {
-                return this.#sonuc(id, {
+                return this.#resultResponse(id, {
                     tools: this.#tools.map((tool) => ({
                         name: tool.name,
                         description: tool.description,
@@ -231,22 +231,22 @@ export class McpToolBridge {
                 });
             }
             case "tools/call": {
-                const outcome = await this.#cagir(message["params"]);
+                const outcome = await this.#callTool(message["params"]);
                 if (outcome.kind === "cancelled") {
-                    return this.#hata(id, -32001, `Tool call cancelled: ${outcome.reason}`);
+                    return this.#errorResponse(id, -32001, `Tool call cancelled: ${outcome.reason}`);
                 }
-                return this.#sonuc(id, {
+                return this.#resultResponse(id, {
                     content: [{ type: "text", text: outcome.content }],
                     isError: outcome.isError,
                 });
             }
             default:
-                return bildirim ? undefined : this.#hata(id, -32601, `Method not found: ${method}`);
+                return isNotification ? undefined : this.#errorResponse(id, -32601, `Method not found: ${method}`);
         }
     }
 
-    async #cagir(params: unknown): Promise<ToolCallOutcome> {
-        if (this.#kapali) {
+    async #callTool(params: unknown): Promise<ToolCallOutcome> {
+        if (this.#closed) {
             return { kind: "cancelled", reason: "bridge closed" };
         }
         if (!isRecord(params) || typeof params["name"] !== "string") {
@@ -265,18 +265,18 @@ export class McpToolBridge {
         const id = `mcp_${randomUUID().replace(/-/gu, "").slice(0, 24)}`;
         const call: ParkedToolCall = { id, name, input };
 
-        return await new Promise<ToolCallOutcome>((cozumle) => {
-            const zamanlayici =
+        return await new Promise<ToolCallOutcome>((resolveOutcome) => {
+            const timer =
                 this.#timeoutMs > 0
                     ? setTimeout(() => {
-                          if (this.#bekleyenler.delete(id)) {
-                              this.#zamanAsimina.add(id);
-                              cozumle({ kind: "cancelled", reason: "tool result timed out" });
+                          if (this.#pendingCalls.delete(id)) {
+                              this.#timedOutCallIds.add(id);
+                              resolveOutcome({ kind: "cancelled", reason: "tool result timed out" });
                           }
                       }, this.#timeoutMs)
                     : undefined;
-            zamanlayici?.unref?.();
-            this.#bekleyenler.set(id, { call, cozumle, zamanlayici });
+            timer?.unref?.();
+            this.#pendingCalls.set(id, { call, resolveOutcome, timer });
             // Told AFTER parking: the caller may answer synchronously in a test,
             // and a result arriving before the entry exists would be counted as
             // unmatched -- the very number spec §7.3 gates on.
@@ -284,11 +284,11 @@ export class McpToolBridge {
         });
     }
 
-    #sonuc(id: unknown, result: Record<string, unknown>): Record<string, unknown> {
+    #resultResponse(id: unknown, result: Record<string, unknown>): Record<string, unknown> {
         return { jsonrpc: "2.0", id, result };
     }
 
-    #hata(id: unknown, code: number, message: string): Record<string, unknown> {
+    #errorResponse(id: unknown, code: number, message: string): Record<string, unknown> {
         return { jsonrpc: "2.0", id, error: { code, message } };
     }
 }

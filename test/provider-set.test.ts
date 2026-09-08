@@ -15,7 +15,7 @@ import { startProviderSet } from "../src/supervisor/provider-set.js";
 // agy binary: only the pure branches run.
 const GROK = agentModelContract("anthropic-xai-grok-4.6");
 if (GROK === undefined)
-    throw new Error("grok sozlesmesi yok: AGENT_MODEL_CONTRACTS degisti");
+    throw new Error("Grok contract is missing: AGENT_MODEL_CONTRACTS changed");
 const snapshot: ModelSnapshot = {
     schemaVersion: 1,
     generatedAt: "2026-01-01T00:00:00.000Z",
@@ -48,33 +48,33 @@ const snapshot: ModelSnapshot = {
     ],
 };
 
-describe("startProviderSet -- A4 yan saglayici devre disi", () => {
-    let dizin: string;
+describe("startProviderSet -- A4 side provider disabled", () => {
+    let directory: string;
 
     beforeEach(async () => {
-        dizin = await mkdtemp(join(tmpdir(), "provider-set-"));
+        directory = await mkdtemp(join(tmpdir(), "provider-set-"));
     });
 
     afterEach(async () => {
-        await rm(dizin, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+        await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     });
 
-    it("disabledProviders icindeki xai install_lock_drift ile raporlanir ve modelleri duser", async () => {
-        const set = await startProviderSet(snapshot, runtimePaths({ LOCALAPPDATA: dizin }), "nonce", {
-            cwd: dizin,
+    it("xai in disabledProviders is reported with install_lock_drift and its models are dropped", async () => {
+        const set = await startProviderSet(snapshot, runtimePaths({ LOCALAPPDATA: directory }), "nonce", {
+            cwd: directory,
             environment: {},
-            antigravityBinary: join(dizin, "yok-agy.exe"),
-            grokBinary: join(dizin, "yok-grok.exe"),
+            antigravityBinary: join(directory, "missing-agy.exe"),
+            grokBinary: join(directory, "missing-grok.exe"),
             disabledProviders: new Set(["xai"]),
         });
         try {
             const xai = set.readiness.find((entry) => entry.provider === "xai");
-            ok(xai !== undefined, "xai readiness satiri var");
+            ok(xai !== undefined, "xai readiness row exists");
             strictEqual(xai.status, "unavailable");
             strictEqual(xai.detailCode, "install_lock_drift");
-            deepStrictEqual(set.snapshot.models.map((model) => model.id), ["claude-opus-5"], "xai modeli servis edilmez");
-            ok(!set.adapters.has("xai"), "xai adapter'i kurulmaz");
-            ok(set.adapters.has("anthropic"), "ana yol dokunulmaz");
+            deepStrictEqual(set.snapshot.models.map((model) => model.id), ["claude-opus-5"], "xai model is not served");
+            ok(!set.adapters.has("xai"), "xai adapter is not installed");
+            ok(set.adapters.has("anthropic"), "the main path remains untouched");
         }
         finally {
             await set.close();
@@ -85,17 +85,17 @@ describe("startProviderSet -- A4 yan saglayici devre disi", () => {
     // path (no real binary, but the adapter is installed and its model stays in the list).
     // If the first test could not tell this arm apart, "install_lock_drift" would be a
     // label, not a measure.
-    it("devre disi kume bossa xai dali yumusamaz: adapter kurulur, model kalir", async () => {
-        const set = await startProviderSet(snapshot, runtimePaths({ LOCALAPPDATA: dizin }), "nonce", {
-            cwd: dizin,
+    it("an empty disabled set does not degrade the xai branch: the adapter is installed and the model stays", async () => {
+        const set = await startProviderSet(snapshot, runtimePaths({ LOCALAPPDATA: directory }), "nonce", {
+            cwd: directory,
             environment: {},
-            antigravityBinary: join(dizin, "yok-agy.exe"),
-            grokBinary: join(dizin, "yok-grok.exe"),
+            antigravityBinary: join(directory, "missing-agy.exe"),
+            grokBinary: join(directory, "missing-grok.exe"),
         });
         try {
             const xai = set.readiness.find((entry) => entry.provider === "xai");
             ok(xai !== undefined);
-            ok(xai.detailCode !== "install_lock_drift", `bos kumede install_lock_drift olmaz (${xai.detailCode})`);
+            ok(xai.detailCode !== "install_lock_drift", `an empty set must not produce install_lock_drift (${xai.detailCode})`);
             deepStrictEqual(set.snapshot.models.map((model) => model.id), ["claude-opus-5", "anthropic-xai-grok-4.6"]);
         }
         finally {

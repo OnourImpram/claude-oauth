@@ -60,23 +60,23 @@ after(async () => {
 
 const base = (): string => router?.baseUrl.replace(/\/$/u, "") ?? "";
 
-describe("router kimlik kapisi", () => {
-    it("oturum basligi ACAR", async () => {
+describe("router authentication gate", () => {
+    it("the session header OPENS the gate", async () => {
         const response = await fetch(`${base()}/v1/models`, { headers: { [SESSION_HEADER]: nonce } });
         strictEqual(response.status, 200);
     });
 
-    it("URL yolundaki nonce ACAR", async () => {
+    it("the nonce in the URL path OPENS the gate", async () => {
         const response = await fetch(`${base()}/_session/${nonce}/v1/models`);
         strictEqual(response.status, 200);
     });
 
-    it("hicbir kimlik yoksa 401", async () => {
+    it("returns 401 when no authentication is supplied", async () => {
         const response = await fetch(`${base()}/v1/models`);
         strictEqual(response.status, 401);
     });
 
-    it("YANLIS nonce tasiyan oturum basligi 401", async () => {
+    it("returns 401 for a session header carrying the WRONG nonce", async () => {
         const response = await fetch(`${base()}/v1/models`, { headers: { [SESSION_HEADER]: "y".repeat(43) } });
         strictEqual(response.status, 401);
     });
@@ -84,12 +84,12 @@ describe("router kimlik kapisi", () => {
     // A PINNED DECISION, not a convenience defect: Authorization does NOT open the gate,
     // even when it carries the correct nonce. Anyone who opens the gate to "fix" this test
     // opens, in the same move, the path that sends the local secret to the provider.
-    it("DOGRU nonce'u tasisa bile Authorization kapiyi ACMAZ", async () => {
+    it("Authorization DOES NOT OPEN the gate even when it carries the CORRECT nonce", async () => {
         const response = await fetch(`${base()}/v1/models`, { headers: { authorization: `Bearer ${nonce}` } });
         strictEqual(response.status, 401);
     });
 
-    it("x-api-key kapiyi ACMAZ", async () => {
+    it("x-api-key DOES NOT OPEN the gate", async () => {
         const response = await fetch(`${base()}/v1/models`, { headers: { "x-api-key": nonce } });
         strictEqual(response.status, 401);
     });

@@ -44,22 +44,22 @@ after(async () => {
 });
 
 describe("writeSnapshot / readSnapshot", () => {
-    it("yazilan snapshot aynen geri okunur", async () => {
-        const path = join(directory, "gidis-donus.json");
+    it("reads back the written snapshot exactly", async () => {
+        const path = join(directory, "round-trip.json");
         await writeSnapshot(path, baseline);
         deepStrictEqual(await readSnapshot(path), baseline);
     });
 
-    it("yazma sonrasi dizinde gecici dosya birakmaz", async () => {
-        const path = join(directory, "artik-yok.json");
+    it("leaves no temporary files in the directory after writing", async () => {
+        const path = join(directory, "no-leftovers.json");
         await writeSnapshot(path, baseline);
         const { readdir } = await import("node:fs/promises");
         const leftovers = (await readdir(directory)).filter((name) => name.includes(".tmp"));
         deepStrictEqual(leftovers, []);
     });
 
-    it("ustune yazmak eski icerigi tamamen degistirir", async () => {
-        const path = join(directory, "ustune.json");
+    it("overwriting replaces the old content completely", async () => {
+        const path = join(directory, "overwrite.json");
         await writeSnapshot(path, baseline);
         const wider: ModelSnapshot = { ...baseline, source: "live-provider-refresh", models: [] };
         await writeSnapshot(path, wider);
@@ -68,54 +68,54 @@ describe("writeSnapshot / readSnapshot", () => {
 });
 
 describe("readSnapshotOrDefault", () => {
-    it("runtime dosyasi yoksa tabana duser", async () => {
-        strictEqual((await readSnapshotOrDefault(join(directory, "yok.json"), defaultPath())).source, "pinned-install-baseline");
+    it("falls back to the baseline when the runtime file is missing", async () => {
+        strictEqual((await readSnapshotOrDefault(join(directory, "missing.json"), defaultPath())).source, "pinned-install-baseline");
     });
 
-    it("runtime dosyasi BOZUKSA tabana duser, firlatmaz", async () => {
-        const broken = join(directory, "bozuk.json");
-        await writeFile(broken, "{ bu JSON degil", "utf8");
+    it("falls back to the baseline without throwing when the runtime file is CORRUPT", async () => {
+        const broken = join(directory, "corrupt.json");
+        await writeFile(broken, "{ this is not JSON", "utf8");
         strictEqual((await readSnapshotOrDefault(broken, defaultPath())).source, "pinned-install-baseline");
     });
 
     // REGRESSION: a corrupt snapshot file made `claude` unable to start, with a raw
     // SyntaxError. It now falls back to the baseline -- but not silently, with a
     // structured warning.
-    it("bozuk snapshot'i olan seedSnapshot yeniden tohumlar, firlatmaz", async () => {
-        const broken = join(directory, "bozuk-tohum.json");
-        await writeFile(broken, "{ yarim yazilmis", "utf8");
+    it("seedSnapshot reseeds a corrupt snapshot without throwing", async () => {
+        const broken = join(directory, "corrupt-seed.json");
+        await writeFile(broken, "{ partially written", "utf8");
         await seedSnapshot(broken, defaultPath());
         strictEqual((await readSnapshot(broken)).source, "pinned-install-baseline");
     });
 
-    it("sema disi ama gecerli JSON da bozuk sayilir", async () => {
-        const wrongShape = join(directory, "sema-disi.json");
-        await writeFile(wrongShape, JSON.stringify({ schemaVersion: 99, models: "liste degil" }), "utf8");
+    it("valid JSON outside the schema is also treated as corrupt", async () => {
+        const wrongShape = join(directory, "outside-schema.json");
+        await writeFile(wrongShape, JSON.stringify({ schemaVersion: 99, models: "not a list" }), "utf8");
         strictEqual((await readSnapshotOrDefault(wrongShape, defaultPath())).source, "pinned-install-baseline");
     });
 
-    it("gecerli runtime dosyasi varsa onu tercih eder", async () => {
-        const live = join(directory, "canli.json");
+    it("prefers a valid runtime file when present", async () => {
+        const live = join(directory, "live.json");
         await writeSnapshot(live, { ...baseline, source: "live-provider-refresh" });
         strictEqual((await readSnapshotOrDefault(live, defaultPath())).source, "live-provider-refresh");
     });
 });
 
 describe("seedSnapshot", () => {
-    it("yoksa tabandan tohumlar", async () => {
+    it("seeds from the baseline when absent", async () => {
         await seedSnapshot(runtimePath(), defaultPath());
         strictEqual((await readSnapshot(runtimePath())).source, "pinned-install-baseline");
     });
 
-    it("VAR OLAN snapshot'i ezmez", async () => {
+    it("does not overwrite an EXISTING snapshot", async () => {
         await writeSnapshot(runtimePath(), { ...baseline, source: "live-provider-refresh" });
         await seedSnapshot(runtimePath(), defaultPath());
         strictEqual((await readSnapshot(runtimePath())).source, "live-provider-refresh");
     });
 
     // REGRESSION: when two terminals opened at the same time the first seeding raced (Windows EBUSY).
-    it("es zamanli sekiz tohumlama yarismaz ve dosyayi bozmaz", async () => {
-        const racing = join(directory, "yaris.json");
+    it("eight concurrent seed operations do not race or corrupt the file", async () => {
+        const racing = join(directory, "race.json");
         await Promise.all(Array.from({ length: 8 }, async () => { await seedSnapshot(racing, defaultPath()); }));
         const text = await readFile(racing, "utf8");
         const parsed = JSON.parse(text) as ModelSnapshot;
@@ -123,14 +123,14 @@ describe("seedSnapshot", () => {
         strictEqual(parsed.models.length, 1);
     });
 
-    it("es zamanli yazmalar yarim dosya birakmaz", async () => {
-        const racing = join(directory, "yaris2.json");
+    it("concurrent writes do not leave a partial file", async () => {
+        const racing = join(directory, "race2.json");
         await Promise.all(Array.from({ length: 8 }, async (_unused, index) => {
-            await writeSnapshot(racing, { ...baseline, source: `kosum-${index}` });
+            await writeSnapshot(racing, { ...baseline, source: `run-${index}` });
         }));
         const parsed = JSON.parse(await readFile(racing, "utf8")) as ModelSnapshot;
         strictEqual(parsed.schemaVersion, 1);
-        strictEqual(parsed.source.startsWith("kosum-"), true);
+        strictEqual(parsed.source.startsWith("run-"), true);
     });
 
     // NEGATIVE CONTROL: the test above is green thanks to the bounded rename retry on the
@@ -138,8 +138,8 @@ describe("seedSnapshot", () => {
     // permanent error, the gate's green loses its meaning. When the target is a DIRECTORY
     // the rename can never succeed; what is expected here is not that the error is
     // suppressed but that it is THROWN.
-    it("kalici rename hatasini yutmaz", async () => {
-        const blocked = join(directory, "engel-dizini");
+    it("does not swallow a permanent rename error", async () => {
+        const blocked = join(directory, "blocking-directory");
         await mkdir(blocked, { recursive: true });
         await rejects(async () => { await writeSnapshot(blocked, baseline); });
     });

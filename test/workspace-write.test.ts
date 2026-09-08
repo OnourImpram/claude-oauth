@@ -10,73 +10,73 @@ async function workspace(): Promise<string> {
 }
 
 describe("writeBoundedWorkspaceText", () => {
-    it("calisma alani icine yazar ve icerigi birebir korur", async () => {
+    it("writes inside the workspace and preserves the content exactly", async () => {
         const root = await workspace();
-        await writeBoundedWorkspaceText({ workspace: root, requestedPath: "not/kanit.txt", content: "GROK-WRITE-OK\n", maximumBytes: 1024 });
-        strictEqual(await readFile(join(root, "not", "kanit.txt"), "utf8"), "GROK-WRITE-OK\n");
+        await writeBoundedWorkspaceText({ workspace: root, requestedPath: "notes/evidence.txt", content: "GROK-WRITE-OK\n", maximumBytes: 1024 });
+        strictEqual(await readFile(join(root, "notes", "evidence.txt"), "utf8"), "GROK-WRITE-OK\n");
     });
 
-    it("var olan dosyanin uzerine yazar", async () => {
+    it("overwrites an existing file", async () => {
         const root = await workspace();
-        await writeFile(join(root, "a.txt"), "eski", "utf8");
-        await writeBoundedWorkspaceText({ workspace: root, requestedPath: "a.txt", content: "yeni", maximumBytes: 1024 });
-        strictEqual(await readFile(join(root, "a.txt"), "utf8"), "yeni");
+        await writeFile(join(root, "a.txt"), "old", "utf8");
+        await writeBoundedWorkspaceText({ workspace: root, requestedPath: "a.txt", content: "new", maximumBytes: 1024 });
+        strictEqual(await readFile(join(root, "a.txt"), "utf8"), "new");
     });
 
-    it("calisma alanindan KACAN yolu reddeder", async () => {
+    it("rejects a path that ESCAPES the workspace", async () => {
         const root = await workspace();
-        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "../disari.txt", content: "x", maximumBytes: 1024 }),
+        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "../outside.txt", content: "x", maximumBytes: 1024 }),
             (error: Error) => /outside the allowed workspace/u.test(error.message));
     });
 
-    it("KORUMALI dizine yazmayi reddeder (.git)", async () => {
+    it("rejects writes to a PROTECTED directory (.git)", async () => {
         const root = await workspace();
         await mkdir(join(root, ".git"), { recursive: true });
         await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: ".git/config", content: "x", maximumBytes: 1024 }),
             (error: Error) => /protected workspace file/u.test(error.message));
     });
 
-    it("BOYUT tavanini asan icerigi reddeder", async () => {
+    it("rejects content exceeding the SIZE cap", async () => {
         const root = await workspace();
-        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "buyuk.txt", content: "x".repeat(64), maximumBytes: 16 }),
+        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "large.txt", content: "x".repeat(64), maximumBytes: 16 }),
             (error: Error) => /bounded text-file policy/u.test(error.message));
     });
 
-    it("reddedilen yazma diske HICBIR SEY birakmaz", async () => {
+    it("a rejected write leaves NOTHING on disk", async () => {
         const root = await workspace();
-        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "../sizinti.txt", content: "x", maximumBytes: 1024 }));
+        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "../leak.txt", content: "x", maximumBytes: 1024 }));
         const { readdir } = await import("node:fs/promises");
         deepStrictEqual(await readdir(root), []);
         ok(true);
     });
 
-    it("SEMBOLIK BAGLI ust dizin uzerinden kacisi reddeder (junction)", async () => {
+    it("rejects escape through a SYMLINKED parent directory (junction)", async () => {
         const root = await workspace();
-        const disari = await workspace();
+        const outside = await workspace();
         try {
-            await symlink(disari, join(root, "kapi"), "junction");
+            await symlink(outside, join(root, "gate"), "junction");
         }
         catch {
             return; // if the junction cannot be created the arm is skipped; not a silent pass, it shows up in the run report
         }
-        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "kapi/sizinti.txt", content: "x", maximumBytes: 1024 }),
+        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "gate/leak.txt", content: "x", maximumBytes: 1024 }),
             (error: Error) => /outside the allowed workspace|symlinked directory/u.test(error.message));
         const { readdir } = await import("node:fs/promises");
-        deepStrictEqual(await readdir(disari), []);
+        deepStrictEqual(await readdir(outside), []);
     });
 
-    it("SEMBOLIK BAGLI ust dizin altindaki VAR OLAN dosyanin uzerine yazmayi reddeder", async () => {
+    it("rejects overwriting an EXISTING file under a SYMLINKED parent directory", async () => {
         const root = await workspace();
-        const disari = await workspace();
-        await writeFile(join(disari, "hedef.txt"), "dokunulmadi", "utf8");
+        const outside = await workspace();
+        await writeFile(join(outside, "target.txt"), "untouched", "utf8");
         try {
-            await symlink(disari, join(root, "kapi2"), "junction");
+            await symlink(outside, join(root, "gate2"), "junction");
         }
         catch {
             return;
         }
-        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "kapi2/hedef.txt", content: "EZILDI", maximumBytes: 1024 }),
+        await rejects(() => writeBoundedWorkspaceText({ workspace: root, requestedPath: "gate2/target.txt", content: "OVERWRITTEN", maximumBytes: 1024 }),
             (error: Error) => /outside the allowed workspace|symlinked directory/u.test(error.message));
-        strictEqual(await readFile(join(disari, "hedef.txt"), "utf8"), "dokunulmadi");
+        strictEqual(await readFile(join(outside, "target.txt"), "utf8"), "untouched");
     });
 });

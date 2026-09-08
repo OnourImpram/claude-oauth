@@ -24,11 +24,11 @@ import { join, resolve } from "node:path";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail) => {
-  console.log(`  ${ok ? "GECTI" : "DUSTU"}  ${name}${detail ? "  -> " + detail : ""}`);
+  console.log(`  ${ok ? "OK" : "FAILED"}  ${name}${detail ? "  -> " + detail : ""}`);
   ok ? pass++ : fail++;
 };
 
-console.log("== KAPI 1: verifyShadowModelSurface ==");
+console.log("== GATE 1: verifyShadowModelSurface ==");
 // Both binaries live outside the repository and differ per machine. Unset means the
 // arm did not run; it must not be reported as a pass. Exit 3 marks "could not run",
 // distinct from exit 1 which marks "ran and failed".
@@ -42,16 +42,16 @@ if (!shadow || !native) {
   );
   process.exit(3);
 }
-try { await verifyShadowModelSurface(shadow); check("pozitif kol: yamali shadow KABUL edildi", true); }
-catch (e) { check("pozitif kol: yamali shadow KABUL edildi", false, e.message); }
-try { await verifyShadowModelSurface(native); check("negatif kol: yamasiz native REDDEDILDI", false, "firlatmadi!"); }
-catch (e) { check("negatif kol: yamasiz native REDDEDILDI", /model-picker proof/.test(e.message), "kod=" + e.code); }
+try { await verifyShadowModelSurface(shadow); check("positive arm: patched shadow ACCEPTED", true); }
+catch (e) { check("positive arm: patched shadow ACCEPTED", false, e.message); }
+try { await verifyShadowModelSurface(native); check("negative arm: unpatched native REJECTED", false, "did not throw!"); }
+catch (e) { check("negative arm: unpatched native REJECTED", /model-picker proof/.test(e.message), "code=" + e.code); }
 
-console.log("\n== KAPI 2: verifyClodexPackageLock ==");
+console.log("\n== GATE 2: verifyClodexPackageLock ==");
 const real = process.cwd();
 const lock = JSON.parse(await readFile(join(real, "config", "install-lock.json"), "utf8"));
 const r = await verifyClodexPackageLock(lock, real);
-check("pozitif kol: gercek agac ok", r.status === "ok", r.detailCode);
+check("positive arm: real tree is ok", r.status === "ok", r.detailCode);
 
 async function fakeRoot(mutate) {
   const root = await mkdtemp(join(tmpdir(), "clodex-nk-"));
@@ -67,15 +67,15 @@ async function fakeRoot(mutate) {
 }
 
 const cases = [
-  ["surum sapmasi", async ({ pkg }) => { const m = JSON.parse(await readFile(join(pkg,"package.json"),"utf8")); m.version = "9.9.9"; await writeFile(join(pkg,"package.json"), JSON.stringify(m), "utf8"); }, "locked_package_version_mismatch"],
-  ["SRI sapmasi", async ({ slim }) => { slim.packages["node_modules/@bman654/clodex"] = { ...slim.packages["node_modules/@bman654/clodex"], integrity: "sha512-" + "A".repeat(88) }; }, "locked_package_integrity_mismatch"],
-  ["entrypoint bayti degistirildi", async ({ pkg }) => { await writeFile(join(pkg,"dist","cli.js"), "// kurcalandi\n", "utf8"); }, "locked_package_entrypoint_hash_mismatch"],
-  ["paket hic yok", async ({ root, pkg }) => { await writeFile(join(pkg,"package.json"), "", "utf8"); }, "locked_package_manifest_unreadable"],
+  ["version drift", async ({ pkg }) => { const m = JSON.parse(await readFile(join(pkg,"package.json"),"utf8")); m.version = "9.9.9"; await writeFile(join(pkg,"package.json"), JSON.stringify(m), "utf8"); }, "locked_package_version_mismatch"],
+  ["SRI drift", async ({ slim }) => { slim.packages["node_modules/@bman654/clodex"] = { ...slim.packages["node_modules/@bman654/clodex"], integrity: "sha512-" + "A".repeat(88) }; }, "locked_package_integrity_mismatch"],
+  ["entrypoint bytes changed", async ({ pkg }) => { await writeFile(join(pkg,"dist","cli.js"), "// tampered\n", "utf8"); }, "locked_package_entrypoint_hash_mismatch"],
+  ["package entirely missing", async ({ root, pkg }) => { await writeFile(join(pkg,"package.json"), "", "utf8"); }, "locked_package_manifest_unreadable"],
 ];
 for (const [name, mutate, expected] of cases) {
   const root = await fakeRoot(mutate);
   const out = await verifyClodexPackageLock(lock, root);
-  check(`negatif kol: ${name}`, out.status !== "ok" && out.detailCode === expected, out.detailCode);
+  check(`negative arm: ${name}`, out.status !== "ok" && out.detailCode === expected, out.detailCode);
 }
-console.log(`\ntoplam: ${pass} gecti, ${fail} dustu`);
+console.log(`\ntotal: ${pass} succeeded, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -357,12 +357,12 @@ export class AgentSessionRegistry {
         // again, yet its process lives on. On hitting the ceiling the oldest IDLE session
         // is reclaimed -- recovering the resource rather than hitting the user with a 503.
         while (this.#sessions.size >= this.#maxLiveSessions) {
-            let enEski: [string, AgentSession] | undefined;
-            for (const giris of this.#sessions) {
-                if (giris[1].running) continue;
-                if (enEski === undefined || giris[1].touchedAt < enEski[1].touchedAt) enEski = giris;
+            let oldest: [string, AgentSession] | undefined;
+            for (const entry of this.#sessions) {
+                if (entry[1].running) continue;
+                if (oldest === undefined || entry[1].touchedAt < oldest[1].touchedAt) oldest = entry;
             }
-            if (enEski === undefined) {
+            if (oldest === undefined) {
                 // All of them are mid-turn: there is nothing to reclaim, and silently
                 // opening one more fills the machine.
                 throw new RouterError(
@@ -371,8 +371,8 @@ export class AgentSessionRegistry {
                     503,
                 );
             }
-            enEski[1].cancel("reclaimed: oldest idle session");
-            this.#retire(enEski[0]);
+            oldest[1].cancel("reclaimed: oldest idle session");
+            this.#retire(oldest[0]);
         }
         const sessionKey = randomUUID().replace(/-/gu, "");
         const session = new AgentSession(
@@ -486,10 +486,10 @@ export class AgentSessionRegistry {
         // client-disconnect aborts stay DEAD ON THIS ROUTE: the only thing that would end
         // a running ACP turn is the agent finishing on its own. On top of that a #running
         // session is never swept, so a stuck session is immortal.
-        const iptal = (): void => session.cancel("client request aborted");
+        const onAbort = (): void => session.cancel("client request aborted");
         if (signal !== undefined) {
-            if (signal.aborted) iptal();
-            else signal.addEventListener("abort", iptal, { once: true });
+            if (signal.aborted) onAbort();
+            else signal.addEventListener("abort", onAbort, { once: true });
         }
         try {
             const outcome = await turn;
@@ -500,7 +500,7 @@ export class AgentSessionRegistry {
             this.#retire(sessionKey);
             throw error;
         } finally {
-            signal?.removeEventListener("abort", iptal);
+            signal?.removeEventListener("abort", onAbort);
         }
     }
 
