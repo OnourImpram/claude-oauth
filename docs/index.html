@@ -480,9 +480,10 @@ footer p { max-width: var(--measure); }
         <span class="id">B02</span> — <b>repaired 2026-09-07.</b> A <code>role:"system"</code> message arriving after the last
         user message was dropped silently while compiling the request; measured loss ~77,500 characters, which is the
         skill catalogue, the agent catalogue, MCP instructions and the output style. It is now carried in its own
-        section of the compiled prompt (<code>SESSION CAPABILITY CONTEXT</code>). The fix is on branch
-        <code>fix/b02-system-message</code>, commit <code>b5caf0e</code>, awaiting merge to <code>main</code>; until it
-        merges, the README on <code>main</code> still lists B02 as open.
+        section of the compiled prompt (<code>SESSION CAPABILITY CONTEXT</code>). Merged to <code>main</code> as <code>b5caf0e</code>, with six arms and a
+        mutation control: removing the line that collects the message fails two of them. The claim this page will not
+        make is the end-to-end one — a green test is not a live run, and G01 below still keeps the Google lane away from
+        the tool surface entirely.
       </div>
     </section>
 

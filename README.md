@@ -19,7 +19,7 @@ into a chat box.
 
 The goal here is the opposite: **every model reachable through the router should be able to use the
 same Claude Code surface** — the `Agent` tool, skills, MCP servers such as Playwright, file
-editing under the same permission rules. That goal is **not met today**; B01, B02 and G01 below
+editing under the same permission rules. That goal is **not met today**; B01 and G01 below
 say exactly where it falls short.
 
 Two audiences, both intentional:
@@ -117,7 +117,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | Id | Severity | What is wrong |
 |---|---|---|
 | B01 | **Critical** | The parent session's permission boundary is not applied to Google and xAI subagents. The Google lane forces write/bypass flags on; the xAI lane accepts the first permission option and serves its own write handler. `executionMode: "agent-readonly"` therefore **misdescribes** the effective authority. |
-| B02 | High | A `role:"system"` message that arrives after the last user message is silently dropped when compiling the request. Measured loss on the maintainer's machine: ~77.5k characters — the skill catalogue, the agent catalogue, MCP server instructions, output style. No error, no warning, no detector. This is why skills and the `Agent` tool appear unavailable to routed models. |
+| ~~B02~~ | ~~High~~ | **Repaired 2026-09-07 (`b5caf0e`).** A `role:"system"` message arriving after the last user message was dropped silently while compiling the request — measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own `SESSION CAPABILITY CONTEXT` section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface. |
 | B03 | High | An xAI continuation request can lose both the session id and the new user instruction. |
 | B04 | High | The workspace write check does not write the file it checks; a path race is open. |
 | B05 | High | This tree contains no launcher shim, so the native/router separation cannot be verified from the repository. |
@@ -132,7 +132,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | N05 | High | The OpenAI capsule's own loopback port does not enforce the transport nonce; a local process could reach it without going through the router. |
 | N06 | Medium | On POSIX, a helper that ignores SIGTERM keeps the timeout waiting; there is no escalation to SIGKILL. Unmeasured on Linux. |
 
-B01 and B02 together are the reason the capability goal is not met today: routed models neither
+B01 and G01 are the reason the capability goal is not met today: routed models neither
 receive the catalogue that tells them what exists, nor operate under a permission boundary that
 makes handing them tools safe. **Both must land together.** Restoring capability without restoring
 the boundary would ship a more powerful hole.
