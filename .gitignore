@@ -1,8 +1,16 @@
-# Derleme ciktisi kaynaktan uretilir; kaynagin kendisi git'te durur.
-# Bu dizinde kaynagin KAYIP olmasi, onarilan olayin ta kendisiydi.
+# Build output is produced from source; the source itself stays in git.
+# A MISSING source tree in this directory was the very incident this repo repairs.
 dist/
 node_modules/
 
-# Arac durumu, oturum artigi, yerel veritabani -- kaynak degil.
+# Tool state, session residue, local database -- not source.
 .omc/
 ruvector.db
+
+# Review evidence and session task files written by agents working in this tree.
+# These are deliberately visible here rather than in .git/info/exclude: an exclusion
+# that lives only in one machine's .git makes `git status` clean on that machine and
+# dirty in every clone, which is the same class of defect as a gate that exists on
+# one disk only.
+/.astra-review/
+/tasks/todo.md
