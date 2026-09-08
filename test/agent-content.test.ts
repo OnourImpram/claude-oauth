@@ -197,3 +197,29 @@ it("G04: the session lane and token counter accept mixed legacy history", async 
         strictEqual(prompt.includes("private signature"), false);
     } finally { await h.sessions.closeAllAndWait("test cleanup"); }
 });
+
+it("N01: native MCP images retain their payload on the live bridge", async () => {
+    const h = harness();
+    try {
+        const id = await openCall(h.adapter);
+        await h.adapter.send(request([{ role: "user", content: [{ type: "tool_result", tool_use_id: id,
+            content: [{ type: "image", mimeType: "image/png", data: "AQID" }],
+        }] }]));
+        deepStrictEqual(h.received(), { jsonrpc: "2.0", id: 1, result: { isError: false, content: [
+            { type: "text", text: "[image: media_type=image/png, bytes=3]" },
+            { type: "image", mimeType: "image/png", data: "AQID" },
+        ] } });
+    } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+});
+
+it("N01: embedded resources report known MIME type and payload bytes", () => {
+    for (const resource of [
+        { mimeType: "text/plain", text: "üç" },
+        { mimeType: "text/plain", blob: "AQIDBA==" },
+    ]) {
+        const result = extractToolResults([{ role: "user", content: [{ type: "tool_result", tool_use_id: "resource-call",
+            content: [{ type: "resource", resource }],
+        }] }]);
+        strictEqual(result[0]?.content, "[resource: media_type=text/plain, bytes=4]");
+    }
+});

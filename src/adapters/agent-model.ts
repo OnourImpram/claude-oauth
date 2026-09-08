@@ -49,12 +49,14 @@ function unsupported(message: string): never {
 
 function blockSummary(block: Record<string, unknown>): { type: string; mediaType: string; bytes?: number; text: string } {
     const type = typeof block["type"] === "string" && /^[a-z_]{1,48}$/u.test(block["type"]) ? block["type"] : "unknown";
-    const source = isRecord(block["source"]) ? block["source"] : block;
+    const source = isRecord(block["source"]) ? block["source"] : isRecord(block["resource"]) ? block["resource"] : block;
     const media = source["media_type"] ?? source["mimeType"];
     const mediaType = typeof media === "string" && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/iu.test(media) ? media : "unknown";
-    const data = source["data"];
+    const data = source["data"] ?? source["blob"] ?? source["text"];
+    const base64 = source["type"] === "base64" || typeof source["blob"] === "string" ||
+        (source === block && (type === "image" || type === "audio"));
     const bytes = typeof data === "string"
-        ? (source["type"] === "base64" || source === block ? Buffer.from(data, "base64").length : Buffer.byteLength(data, "utf8"))
+        ? (base64 ? Buffer.from(data, "base64").length : Buffer.byteLength(data, "utf8"))
         : source["type"] === "url" ? undefined : Buffer.byteLength(JSON.stringify(block), "utf8");
     return { type, mediaType, ...(bytes === undefined ? {} : { bytes }),
         text: `[${type}: media_type=${mediaType}, bytes=${bytes ?? "unknown (URL source)"}]` };
@@ -107,8 +109,8 @@ function toolResultBlocks(value: unknown): readonly McpToolResultContent[] | und
         writeSafeLog({ event: "agent_tool_result_content", level: "info", route: "mcp",
             contentBlockType: summary.type, contentMediaType: summary.mediaType,
             ...(summary.bytes === undefined ? {} : { contentBytes: summary.bytes }) });
-        const source = record["source"];
-        if (record["type"] === "image" && isRecord(source) && source["type"] === "base64" &&
+        const source = isRecord(record["source"]) ? record["source"] : record;
+        if (record["type"] === "image" && (source["type"] === "base64" || source === record) &&
             typeof source["data"] === "string" && summary.mediaType.startsWith("image/")) {
             parts.push({ type: "image", data: source["data"], mimeType: summary.mediaType });
         }
