@@ -1,0 +1,56 @@
+name: check
+
+# The gate this repository lives by: lint + type-check + build + tests + secret scan, and
+# then the gates' own negative controls. A green run here means the instruments fired and
+# found nothing -- not that the instruments exist.
+#
+# Both platforms are measured, not assumed. Two tests skip on a clean machine on either OS
+# (they need an installed Claude binary); that skip is reported by the runner, not hidden.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install (locked)
+        run: npm ci --no-audit --no-fund
+
+      - name: Gate -- lint, typecheck, build, tests, secret scan
+        run: npm run check
+
+      - name: Negative controls -- each gate proves it can fail
+        run: npm run self-check
+
+      - name: The pinned patch file hashes to the pin on this platform
+        # Belt and braces for the .gitattributes eol rule: if a checkout ever produces
+        # different bytes, say so in plain words rather than through a test name.
+        shell: bash
+        run: |
+          expected=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('config/install-lock.json','utf8')).clodex.localPatchSha256.toUpperCase())")
+          actual=$(node -e "const c=require('crypto');process.stdout.write(c.createHash('sha256').update(require('fs').readFileSync('config/claude-oauth-local-patches.mjs')).digest('hex').toUpperCase())")
+          echo "expected $expected"
+          echo "actual   $actual"
+          test "$expected" = "$actual"
