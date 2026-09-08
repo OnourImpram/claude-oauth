@@ -1,0 +1,301 @@
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { AdapterRequest, ModelRecord } from "../src/domain/contracts.js";
+import { AgentModelAdapter, extractToolResults } from "../src/adapters/agent-model.js";
+import { AgentSessionRegistry, type AgentRunHandle } from "../src/mcp/session-registry.js";
+import type { McpToolBridge } from "../src/mcp/tool-bridge.js";
+
+// Faz 9 / Yol 4 -- the loop, end to end through the adapter.
+//
+// The claim being tested is the one the operator reported broken: Grok and
+// Gemini "look selected but nothing comes back". The cause was that this route
+// answered 422 the moment a conversation contained a tool block, so a tool loop
+// -- and therefore compaction, which resends the whole history -- could never
+// run on those lanes. These arms hold the fixed shape.
+
+const model: ModelRecord = {
+    id: "hezarfen-xai-grok-4.6",
+    provider: "xai",
+    upstreamModel: "grok-4.6",
+    displayName: "Grok 4.6",
+    oauthType: "xai-cli",
+    executionMode: "agent-readonly",
+    discoverable: true,
+    capabilities: ["messages"],
+};
+
+class SahteAjan {
+    #parcalar: string[] = [];
+    #bitir: () => void = () => undefined;
+    readonly done: Promise<void>;
+    bridge: McpToolBridge | undefined;
+
+    constructor() {
+        this.done = new Promise<void>((resolve) => {
+            this.#bitir = resolve;
+        });
+    }
+
+    handle(): AgentRunHandle {
+        return {
+            done: this.done,
+            text: () => this.#parcalar.join(""),
+            cancel: () => this.#bitir(),
+        };
+    }
+
+    soyle(text: string): void {
+        this.#parcalar.push(text);
+    }
+
+    aracCagir(name: string, args: Record<string, unknown> = {}): void {
+        void this.bridge?.handle({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: args },
+        });
+    }
+
+    bitti(): void {
+        this.#bitir();
+    }
+}
+
+function istek(envelope: Record<string, unknown>): AdapterRequest {
+    const body = Buffer.from(JSON.stringify(envelope), "utf8");
+    return {
+        requestId: "test",
+        path: "/v1/messages",
+        query: "",
+        model,
+        envelope: envelope as AdapterRequest["envelope"],
+        body,
+        headers: new Headers(),
+        signal: new AbortController().signal,
+    };
+}
+
+async function govde(response: { body: ReadableStream<Uint8Array> | null }): Promise<string> {
+    if (response.body === null) return "";
+    const parcalar: Uint8Array[] = [];
+    const reader = response.body.getReader();
+    for (;;) {
+        const sonuc = await reader.read();
+        if (sonuc.done) break;
+        parcalar.push(sonuc.value);
+    }
+    return Buffer.concat(parcalar.map((p) => Buffer.from(p))).toString("utf8");
+}
+
+function kur(ajan: SahteAjan, kurulum: (a: SahteAjan) => void): AgentModelAdapter {
+    const sessions = new AgentSessionRegistry({
+        mcpBaseUrl: "http://127.0.0.1:65000",
+        startAgent: (options) => {
+            ajan.bridge = options.bridge;
+            kurulum(ajan);
+            return ajan.handle();
+        },
+    });
+    return new AgentModelAdapter({
+        provider: "xai",
+        readiness: async () => ({ provider: "xai" as const, oauthReady: true, adapterReady: true, status: "ready" as const, detailCode: "test" }),
+        run: async () => {
+            throw new Error("the text-only runner must not be reached on the tool path");
+        },
+        sessions,
+    });
+}
+
+const ARACLAR = [{ name: "Edit", description: "edit a file", input_schema: { type: "object" } }];
+
+describe("extractToolResults -- the session identity", () => {
+    it("reads tool_use_id, string content and the error flag", () => {
+        const sonuc = extractToolResults([
+            { role: "assistant", content: [{ type: "text", text: "x" }] },
+            {
+                role: "user",
+                content: [
+                    { type: "tool_result", tool_use_id: "mcp_a", content: "ok" },
+                    { type: "tool_result", tool_use_id: "mcp_b", content: "bad", is_error: true },
+                ],
+            },
+        ]);
+        deepStrictEqual(sonuc.map((r) => [r.toolUseId, r.content, r.isError]), [
+            ["mcp_a", "ok", false],
+            ["mcp_b", "bad", true],
+        ]);
+    });
+
+    it("reads block-array content, which is the shape Claude Code actually sends", () => {
+        const sonuc = extractToolResults([
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "tool_result",
+                        tool_use_id: "mcp_a",
+                        content: [{ type: "text", text: "line" }],
+                    },
+                ],
+            },
+        ]);
+        strictEqual(sonuc[0]?.content, "line");
+    });
+
+    // A plain turn is NOT an error state -- it means "open a new session".
+    it("a plain text turn yields no results", () => {
+        strictEqual(
+            extractToolResults([{ role: "user", content: [{ type: "text", text: "hi" }] }]).length,
+            0,
+        );
+    });
+});
+
+describe("the tool loop through the adapter", () => {
+    it("a parked call becomes stop_reason tool_use with a tool_use block", async () => {
+        const ajan = new SahteAjan();
+        const adapter = kur(ajan, (a) => {
+            a.soyle("I will edit that file.");
+            a.aracCagir("Edit", { path: "a.ts" });
+        });
+        const response = await adapter.send(
+            istek({
+                model: model.id,
+                messages: [{ role: "user", content: [{ type: "text", text: "edit a.ts" }] }],
+                tools: ARACLAR,
+            }),
+        );
+        const payload = JSON.parse(await govde(response)) as {
+            stop_reason: string;
+            content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
+        };
+        strictEqual(payload.stop_reason, "tool_use");
+        strictEqual(payload.content[0]?.type, "text");
+        strictEqual(payload.content[0]?.text, "I will edit that file.");
+        const cagri = payload.content[1];
+        strictEqual(cagri?.type, "tool_use");
+        strictEqual(cagri.name, "Edit");
+        deepStrictEqual(cagri.input, { path: "a.ts" });
+        ok(String(cagri.id).startsWith("mcp_"));
+    });
+
+    it("an empty preamble produces no empty text block", async () => {
+        const ajan = new SahteAjan();
+        const adapter = kur(ajan, (a) => a.aracCagir("Edit"));
+        const response = await adapter.send(
+            istek({
+                model: model.id,
+                messages: [{ role: "user", content: "go" }],
+                tools: ARACLAR,
+            }),
+        );
+        const payload = JSON.parse(await govde(response)) as { content: { type: string }[] };
+        deepStrictEqual(payload.content.map((b) => b.type), ["tool_use"]);
+    });
+
+    // THE ARM THE OPERATOR'S BUG REPORT MAPS TO. A conversation carrying tool
+    // blocks used to be refused with 422 in 5-6 ms, before any network call.
+    it("a turn carrying tool_result resumes the same session and finishes", async () => {
+        const ajan = new SahteAjan();
+        const adapter = kur(ajan, (a) => a.aracCagir("Edit", { path: "a.ts" }));
+        const first = await adapter.send(
+            istek({
+                model: model.id,
+                messages: [{ role: "user", content: "edit a.ts" }],
+                tools: ARACLAR,
+            }),
+        );
+        const opened = JSON.parse(await govde(first)) as { content: { id?: string }[] };
+        const callId = opened.content[0]?.id;
+        ok(callId !== undefined);
+
+        ajan.soyle("Done, the file is edited.");
+        ajan.bitti();
+        const second = await adapter.send(
+            istek({
+                model: model.id,
+                messages: [
+                    { role: "user", content: "edit a.ts" },
+                    { role: "assistant", content: [{ type: "tool_use", id: callId, name: "Edit", input: {} }] },
+                    { role: "user", content: [{ type: "tool_result", tool_use_id: callId, content: "written" }] },
+                ],
+                tools: ARACLAR,
+            }),
+        );
+        const payload = JSON.parse(await govde(second)) as { stop_reason: string; content: { text: string }[] };
+        strictEqual(payload.stop_reason, "end_turn");
+        strictEqual(payload.content[0]?.text, "Done, the file is edited.");
+    });
+
+    it("streaming emits input_json_delta and closes on tool_use", async () => {
+        const ajan = new SahteAjan();
+        const adapter = kur(ajan, (a) => a.aracCagir("Edit", { path: "b.ts" }));
+        const response = await adapter.send(
+            istek({
+                model: model.id,
+                stream: true,
+                messages: [{ role: "user", content: "edit b.ts" }],
+                tools: ARACLAR,
+            }),
+        );
+        const akis = await govde(response);
+        ok(akis.includes('"type":"tool_use"'));
+        ok(akis.includes("input_json_delta"));
+        ok(akis.includes('{\\"path\\":\\"b.ts\\"}') || akis.includes('"partial_json":"{\\"path\\":\\"b.ts\\"}"'));
+        ok(akis.includes('"stop_reason":"tool_use"'));
+        ok(akis.trimEnd().endsWith('data: {"type":"message_stop"}'));
+    });
+
+    // Tool blocks left over from an earlier, retired session must not kill the
+    // conversation: refusing them with 422 is what broke compaction on these
+    // lanes, and dropping them silently would make the agent forget its work.
+    it("stale tool blocks in history are carried as text, not refused", async () => {
+        const ajan = new SahteAjan();
+        const adapter = kur(ajan, (a) => {
+            a.soyle("continuing");
+            a.bitti();
+        });
+        const response = await adapter.send(
+            istek({
+                model: model.id,
+                messages: [
+                    { role: "user", content: "start" },
+                    { role: "assistant", content: [{ type: "tool_use", id: "mcp_eski", name: "Edit", input: {} }] },
+                    { role: "user", content: [{ type: "tool_result", tool_use_id: "mcp_eski", content: "old" }] },
+                    { role: "user", content: "keep going" },
+                ],
+                tools: ARACLAR,
+            }),
+        );
+        const payload = JSON.parse(await govde(response)) as { stop_reason: string };
+        strictEqual(payload.stop_reason, "end_turn");
+    });
+});
+
+describe("the text-only route is untouched without a registry", () => {
+    // REGRESSION RECEIPT. Sol and Terra ride this same adapter class. If the new
+    // capability leaked into the default, a tool block would stop being a 422 and
+    // those lanes would silently change behaviour.
+    it("a tool block is still 422 when no session registry is wired", async () => {
+        const adapter = new AgentModelAdapter({
+            provider: "xai",
+            readiness: async () => ({ provider: "xai" as const, oauthReady: true, adapterReady: true, status: "ready" as const, detailCode: "test" }),
+            run: async () => ({ text: "unused" }),
+        });
+        let durum = 0;
+        try {
+            await adapter.send(
+                istek({
+                    model: model.id,
+                    messages: [
+                        { role: "user", content: [{ type: "tool_result", tool_use_id: "x", content: "y" }] },
+                    ],
+                }),
+            );
+        } catch (error) {
+            durum = (error as { status: number }).status;
+        }
+        strictEqual(durum, 422);
+    });
+});

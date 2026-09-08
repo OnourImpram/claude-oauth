@@ -1,0 +1,8 @@
+# Derleme ciktisi kaynaktan uretilir; kaynagin kendisi git'te durur.
+# Bu dizinde kaynagin KAYIP olmasi, onarilan olayin ta kendisiydi.
+dist/
+node_modules/
+
+# Arac durumu, oturum artigi, yerel veritabani -- kaynak degil.
+.omc/
+ruvector.db

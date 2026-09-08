@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "node": {
+    "version": "24.14.0"
+  },
+  "claude": {
+    "version": "2.1.257",
+    "executable": "%USERPROFILE%\\.local\\bin\\claude.exe",
+    "sha256": "190A5FE1A2A0C76176CD4E387A2C3555220CA7ACADDA295D2D45CDBC562BD400"
+  },
+  "claudeShadow": {
+    "version": "2.1.251",
+    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\shadow\\claude-2.1.251-5B410A82\\claude.exe",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "openAiContextWindow": 872000
+  },
+  "clodex": {
+    "package": "@bman654/clodex",
+    "version": "2.11.1",
+    "integrity": "sha512-j3yM0Znh9kZiBDrp2l/YYbtd/0SIVaSeN7rV7VwY92oMrVNtLsL+B++Y7bCU9bBLHVElj12tKJtvXvHZ9qAUTQ==",
+    "entrypointSha256": "3528B137FB81B12CAD58E914995ACA8092381CBC75463E3B3F3DFE3522519872",
+    "localPatch": "config/claude-oauth-local-patches.mjs",
+    "localPatchSha256": "B61572B8CA51EAB8B724751D7C6DCD8312AD48E515F22922BA6EEDAB162E1122"
+  },
+  "grok": {
+    "version": "1.0.13",
+    "sourceCommit": "5e9a58528b76",
+    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\grok\\bin\\grok.exe",
+    "sha256": "BF43DC75F5478A106EAB1E86D422C963E4DBE9666CF14DAB363733D27BF1E672",
+    "installerSha256": "12F665D4FE58A043AA7BA19A6BFA1C455DBD400E05F3146A791963268FEAD552"
+  },
+  "gemini": {
+    "version": "0.38.2",
+    "executable": "%USERPROFILE%\\.local\\bin\\gemini.cmd",
+    "sha256": "2671DEE8F63ED9D88C6CE247AA9BAC30B1952A9F71B4AD5EC51566B45D669DD5",
+    "entrypoint": "%APPDATA%\\npm\\node_modules\\@google\\gemini-cli\\bundle\\gemini.js",
+    "entrypointSha256": "5C7B690ED5065FFAE65017555463071533AD163AA7540136D396410DE6D9B407"
+  },
+  "antigravity": {
+    "version": "1.1.27",
+    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\antigravity\\bin\\agy.exe",
+    "sha256": "D3BAE6895069231C169F427C99527D1F556951E9C43488F45E8B040FBF3011ED",
+    "sourceManifest": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json"
+  },
+  "claudeClient": {
+    "mode": "native-gateway"
+  }
+}

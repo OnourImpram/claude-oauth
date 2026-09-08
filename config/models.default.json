@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-27T00:00:00.000Z",
+  "source": "pinned-install-baseline",
+  "models": [
+    {
+      "id": "claude-fable-5",
+      "provider": "anthropic",
+      "upstreamModel": "claude-fable-5",
+      "displayName": "Claude Fable 5",
+      "oauthType": "claude.ai",
+      "executionMode": "native-message-loop",
+      "discoverable": false,
+      "capabilities": [
+        "messages",
+        "streaming",
+        "tools",
+        "vision",
+        "thinking"
+      ]
+    },
+    {
+      "id": "claude-fable-5-1",
+      "provider": "anthropic",
+      "upstreamModel": "claude-fable-5-1",
+      "displayName": "Claude Fable 5.1",
+      "oauthType": "claude.ai",
+      "executionMode": "native-message-loop",
+      "discoverable": false,
+      "capabilities": [
+        "messages",
+        "streaming",
+        "tools",
+        "vision",
+        "thinking"
+      ]
+    },
+    {
+      "id": "claude-opus-5",
+      "provider": "anthropic",
+      "upstreamModel": "claude-opus-5",
+      "displayName": "Claude Opus 5",
+      "oauthType": "claude.ai",
+      "executionMode": "native-message-loop",
+      "discoverable": false,
+      "capabilities": [
+        "messages",
+        "streaming",
+        "tools",
+        "vision",
+        "thinking"
+      ]
+    },
+    {
+      "id": "claude-sonnet-5",
+      "provider": "anthropic",
+      "upstreamModel": "claude-sonnet-5",
+      "displayName": "Claude Sonnet 5",
+      "oauthType": "claude.ai",
+      "executionMode": "native-message-loop",
+      "discoverable": false,
+      "capabilities": [
+        "messages",
+        "streaming",
+        "tools",
+        "vision",
+        "thinking"
+      ]
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "provider": "anthropic",
+      "upstreamModel": "claude-haiku-4-5-20251001",
+      "displayName": "Claude Haiku 4.5",
+      "oauthType": "claude.ai",
+      "executionMode": "native-message-loop",
+      "discoverable": false,
+      "capabilities": [
+        "messages",
+        "streaming",
+        "tools",
+        "vision",
+        "thinking"
+      ]
+    }
+  ]
+}
