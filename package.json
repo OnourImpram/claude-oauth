@@ -2,6 +2,25 @@
   "name": "@onour-impram/claude-oauth",
   "version": "0.1.0",
   "description": "Run other models inside Claude Code over their own OAuth sessions, without replacing the native Claude path",
+  "keywords": [
+    "claude-code",
+    "router",
+    "oauth",
+    "model-router",
+    "agent-harness",
+    "antigravity",
+    "grok",
+    "codex",
+    "mcp"
+  ],
+  "homepage": "https://onourimpram.github.io/claude-oauth/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OnourImpram/claude-oauth.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OnourImpram/claude-oauth/issues"
+  },
   "license": "Apache-2.0",
   "author": "Onour Impram",
   "private": true,
@@ -9,6 +28,14 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "files": [
+    "dist/src",
+    "config",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "bin": {
     "claude-oauth": "dist/src/cli.js"
   },
@@ -20,6 +47,7 @@
     "coverage": "npm run build && node --test --experimental-test-coverage dist/test/*.test.js",
     "secret-scan": "node scripts/secret-scan.mjs",
     "check": "npm run lint && npm run test && npm run secret-scan",
+    "self-check": "node scripts/lint.mjs --ozdenetim && node scripts/secret-scan.mjs --ozdenetim && node scripts/release-id.mjs --ozdenetim",
     "start": "node dist/src/cli.js"
   },
   "dependencies": {
