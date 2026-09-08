@@ -30,11 +30,11 @@
     "installerSha256": "12F665D4FE58A043AA7BA19A6BFA1C455DBD400E05F3146A791963268FEAD552"
   },
   "gemini": {
-    "version": "0.38.2",
+    "version": "0.58.0",
     "executable": "%USERPROFILE%\\.local\\bin\\gemini.cmd",
     "sha256": "2671DEE8F63ED9D88C6CE247AA9BAC30B1952A9F71B4AD5EC51566B45D669DD5",
     "entrypoint": "%APPDATA%\\npm\\node_modules\\@google\\gemini-cli\\bundle\\gemini.js",
-    "entrypointSha256": "5C7B690ED5065FFAE65017555463071533AD163AA7540136D396410DE6D9B407"
+    "entrypointSha256": "25F087A42F4484891AA73E6E36CC2790E69A3C023CC44FD244ADF44A091EEBD7"
   },
   "antigravity": {
     "version": "1.1.27",
