@@ -171,3 +171,29 @@ it("N04: unchanged catalogue keeps the same advertised descriptors", async () =>
         strictEqual(bridge?.tools, initial);
     } finally { await h.sessions.closeAllAndWait("test cleanup"); }
 });
+
+it("G04: the session lane and token counter accept mixed legacy history", async () => {
+    const h = harness();
+    try {
+        const next = request([
+            { role: "assistant", content: [
+                { type: "thinking", thinking: "private thought" },
+                { type: "redacted_thinking", data: "private signature" },
+                imageBlock,
+                { type: "document", source: { type: "text", media_type: "text/plain", data: "hello" } },
+                { type: "server_tool_use", name: "web_search" },
+                { type: "mcp_tool_use", name: "browser_snapshot" },
+            ] },
+            { role: "user", content: "Continue." },
+        ]);
+        strictEqual((await h.adapter.send(next)).status, 200);
+        strictEqual((await h.adapter.send({ ...next, path: "/v1/messages/count_tokens" })).status, 200);
+        const prompt = h.started()?.prompt ?? "";
+        ok(prompt.includes("[document: media_type=text/plain, bytes=5]"));
+        ok(prompt.includes("[image: media_type=image/png, bytes=3]"));
+        ok(prompt.includes("[tool call: web_search]"));
+        ok(prompt.includes("[tool call: browser_snapshot]"));
+        strictEqual(prompt.includes("private thought"), false);
+        strictEqual(prompt.includes("private signature"), false);
+    } finally { await h.sessions.closeAllAndWait("test cleanup"); }
+});

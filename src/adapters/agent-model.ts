@@ -184,7 +184,7 @@ function textBlocks(value: unknown, location: string): string[] {
  * history. Rejecting them with 422 kills the conversation; dropping them silently makes
  * the agent forget what it did -- both are wrong. They are carried over as a summary.
  */
-function toleratedBlocks(value: unknown, location: string): string[] {
+function toleratedBlocks(value: unknown, location: string, allowTools = true): string[] {
     if (typeof value === "string") return [value];
     if (!Array.isArray(value)) {
         unsupported(`${location} must contain text or tool blocks.`);
@@ -199,11 +199,16 @@ function toleratedBlocks(value: unknown, location: string): string[] {
             parts.push(block["text"]);
             continue;
         }
-        if (kind === "tool_use" && typeof block["name"] === "string") {
+        if (kind === "thinking" || kind === "redacted_thinking") continue;
+        if (kind === "image" || kind === "document") {
+            parts.push(blockSummary(block).text);
+            continue;
+        }
+        if ((kind === "server_tool_use" || kind === "mcp_tool_use" || (allowTools && kind === "tool_use")) && typeof block["name"] === "string") {
             parts.push(`[tool call: ${block["name"]}]`);
             continue;
         }
-        if (kind === "tool_result") {
+        if (allowTools && kind === "tool_result") {
             const toolText = toolResultText(block["content"]);
             const truncatedText = toolText.length > 4000 ? `${toolText.slice(0, 4000)}\n[truncated]` : toolText;
             parts.push(`[tool result${block["is_error"] === true ? " (error)" : ""}]\n${truncatedText}`);
@@ -258,10 +263,11 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     const messageContext: { readonly index: number; readonly role: string; readonly text: string }[] = [];
     const conversation: { readonly index: number; readonly role: string; readonly text: string; readonly blocks: readonly string[] }[] = [];
     const normalized = normalizeMessages(messages);
+    const currentMessage = currentConversationMessage(normalized);
     for (const { index, role, content } of normalized) {
-        const blocks = allowToolBlocks
-            ? toleratedBlocks(content, `messages[${index}].content`)
-            : textBlocks(content, `messages[${index}].content`);
+        // Historical tools are summaries on every lane. A current tool result still
+        // requires a session registry, while media and thinking have explicit rules.
+        const blocks = toleratedBlocks(content, `messages[${index}].content`, allowToolBlocks || index !== currentMessage?.index);
         const text = blocks.join("\n\n");
         if (role === "system" || role === "developer") {
             messageContext.push({ index, role, text });
@@ -270,7 +276,6 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
             conversation.push({ index, role, text, blocks });
         }
     }
-    const currentMessage = currentConversationMessage(normalized);
     const current = conversation.find((entry) => entry.index === currentMessage?.index);
     if (current?.role !== "user") {
         throw new RouterError("invalid_request", "Agent-readonly routes require the current user request as the final message.", 400);

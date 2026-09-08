@@ -17,6 +17,11 @@ repair entries below record the defects that have since been closed.
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
 
+### Fixed: G04 agent history conversion (2026-09-08)
+
+- Thinking and redacted thinking are dropped; images and documents retain media-type and size placeholders; server and MCP tool-use blocks become tool-call summaries. Historical tool blocks are summarized on both session and text lanes.
+- Per-type Google/xAI tests and mixed session history cover messages and count_tokens. Initial multi-text request framing and delegate tooling are outside this repair.
+
 ### Fixed: N04 continuation tool catalogue (2026-09-08)
 
 - Each adapter request derives MCP tools. Resume updates changed descriptors before releasing any parked call; equal catalogues retain their descriptors. xAI permission matching reads the live bridge names.
