@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="claude-oauth: farklı modelleri kendi OAuth oturumları üzerinden Claude Code’a bağlayan deneysel router. Mevcut yollar, açık sınırlamalar ve projenin amacı.">
+  <title>claude-oauth — Model değişir. Çalıştığın yer Claude Code.</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: oklch(0.972 0.003 155);
+      --ink: oklch(0.215 0.015 155);
+      --muted: oklch(0.455 0.018 155);
+      --line: oklch(0.80 0.013 155);
+      --accent: oklch(0.405 0.12 145);
+      --signal: oklch(0.58 0.19 140);
+      --board: oklch(0.94 0.03 145);
+      --route-ink: oklch(0.13 0.02 145);
+      --warning-bg: oklch(0.915 0.037 85);
+      --warning-ink: oklch(0.35 0.06 75);
+      --space: clamp(1.25rem, 4.8vw, 4.5rem);
+      --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-synthesis: none;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: oklch(0.175 0.008 155);
+        --ink: oklch(0.945 0.008 155);
+        --muted: oklch(0.735 0.015 155);
+        --line: oklch(0.385 0.016 155);
+        --accent: oklch(0.80 0.18 140);
+        --signal: oklch(0.80 0.21 140);
+        --board: oklch(0.225 0.02 145);
+        --route-ink: oklch(0.20 0.03 145);
+        --warning-bg: oklch(0.265 0.03 85);
+        --warning-ink: oklch(0.86 0.07 85);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-padding-top: 1.5rem; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 1rem; line-height: 1.65; }
+    a { color: inherit; text-underline-offset: 0.25em; text-decoration-thickness: 1px; }
+    a:hover { color: var(--accent); }
+    a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
+    h1, h2, h3, p, figure { margin: 0; }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+    code { font-family: var(--mono); font-size: 0.91em; }
+    .wrap { width: min(100% - 2 * var(--space), 1180px); margin-inline: auto; }
+    .skip { position: absolute; top: -5rem; left: 1rem; padding: 0.65rem 1rem; background: var(--bg); z-index: 1; }
+    .skip:focus { top: 1rem; }
+    header { padding-block: 1.65rem; }
+    .nav { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; }
+    .brand { display: inline-flex; gap: 0.7rem; align-items: center; font-weight: 700; font-size: 1.1rem; text-decoration: none; letter-spacing: -0.02em; }
+    .brand svg { width: 30px; height: 36px; }
+    nav { display: flex; align-items: center; gap: clamp(1rem, 3vw, 2rem); font-size: 0.9rem; }
+    nav a { padding-block: 0.6rem; }
+    .hero { display: grid; grid-template-columns: 1fr 1.07fr; gap: clamp(2rem, 4vw, 4rem); align-items: center; padding-block: 4.5rem 5rem; }
+    .status { display: inline-flex; gap: 0.55rem; align-items: center; color: var(--muted); font-size: 0.875rem; margin-bottom: 1.8rem; }
+    .status::before { content: ""; width: 8px; height: 8px; border: 2px solid currentColor; border-radius: 50%; }
+    h1 { font-size: clamp(2.65rem, 4.7vw, 4.3rem); font-weight: 650; line-height: 1.07; letter-spacing: -0.038em; }
+    h1 span { display: block; }
+    .intro { max-width: 42ch; margin-top: 1.65rem; font-size: 1.08rem; color: var(--muted); line-height: 1.7; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1.3rem; margin-top: 2.2rem; }
+    .primary { padding: 0.8rem 1.15rem; color: var(--bg); background: var(--ink); text-decoration: none; font-weight: 600; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+    .primary:hover { background: var(--accent); color: var(--bg); }
+    .primary:active { transform: translateY(1px); }
+    .secondary { font-size: 0.9rem; }
+    .routing-board { background: var(--board); padding: 1.25rem 1.25rem 1rem; }
+    .board-heading { display: flex; justify-content: space-between; gap: 1rem; padding-inline: 0.45rem; font-size: 0.78rem; color: var(--muted); }
+    .routing-board svg { display: block; width: 100%; height: auto; margin-top: 0.5rem; }
+    .routing-board text { font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif; fill: var(--ink); }
+    .routing-board .command { font-family: var(--mono); font-size: 16px; font-weight: 600; }
+    .routing-board .label { font-size: 15px; }
+    .routing-board .detail { font-size: 12px; fill: var(--muted); }
+    .routing-board .router-label { fill: var(--route-ink); font-size: 14px; font-weight: 650; }
+    .path-native { stroke: var(--ink); }
+    .path-router { stroke: var(--signal); }
+    figcaption { margin-top: 0.9rem; color: var(--muted); font-size: 0.8rem; line-height: 1.6; max-width: 68ch; }
+    .purpose { display: grid; grid-template-columns: 1fr 1.5fr; gap: 3rem; border-top: 1px solid var(--line); padding-block: 3rem 5rem; }
+    .purpose h2 { font-size: 1.4rem; font-weight: 650; line-height: 1.35; max-width: 18ch; }
+    .purpose p { max-width: 62ch; font-size: 1.08rem; color: var(--muted); }
+    .purpose strong { color: var(--ink); font-weight: 600; }
+    .lanes { padding-block: 1rem 5rem; }
+    .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 2rem; }
+    h2 { font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 600; line-height: 1.2; letter-spacing: -0.025em; }
+    .section-heading p { font-size: 0.9rem; color: var(--muted); }
+    .lane { display: grid; grid-template-columns: 0.8fr 0.8fr 1.7fr; gap: 2rem; padding-block: 1.75rem; border-top: 1px solid var(--line); align-items: start; }
+    .lane:last-child { border-bottom: 1px solid var(--line); }
+    .lane h3 { font-size: 1.2rem; font-weight: 650; }
+    .lane .account { display: block; color: var(--muted); font-size: 0.82rem; margin-top: 0.25rem; }
+    .lane .transport { color: var(--accent); font-family: var(--mono); font-size: 0.9rem; padding-top: 0.25rem; }
+    .lane p { color: var(--muted); max-width: 55ch; font-size: 0.96rem; }
+    .limits { background: var(--board); padding-block: 3.5rem; }
+    .limits-layout { display: grid; grid-template-columns: 0.85fr 1.6fr; gap: clamp(2rem, 6vw, 5rem); }
+    .limits-intro p { margin-top: 1.2rem; color: var(--muted); max-width: 34ch; }
+    .release-note { display: inline-block; background: var(--warning-bg); color: var(--warning-ink); padding: 0.35rem 0.65rem; font-size: 0.83rem; margin-bottom: 1.25rem; }
+    .limit { padding-block: 1.35rem; border-top: 1px solid var(--line); }
+    .limit:first-child { border-top: 0; padding-top: 0; }
+    .limit h3 { font-size: 1.05rem; font-weight: 650; margin-bottom: 0.5rem; }
+    .limit p { color: var(--muted); font-size: 0.96rem; }
+    .limit-id { color: var(--muted); font: 0.8rem var(--mono); margin-left: 0.55rem; white-space: nowrap; }
+    .source-note { display: block; margin-top: 1.2rem; font-size: 0.9rem; }
+    .closing { display: grid; grid-template-columns: 1fr 1.5fr; gap: 3rem; padding-block: 4.5rem; }
+    .closing h2 { max-width: 14ch; }
+    .closing p { max-width: 60ch; color: var(--muted); }
+    .closing p + p { margin-top: 1rem; }
+    .closing a { display: inline-block; margin-top: 1.5rem; font-weight: 600; }
+    footer { border-top: 1px solid var(--line); padding-block: 1.5rem 2rem; font-size: 0.8rem; color: var(--muted); }
+    .footer-row { display: flex; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+    .footer-row a + a { margin-left: 1rem; }
+    .footnote { margin-top: 0.9rem; max-width: 80ch; font-size: 0.76rem; }
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr 1fr; gap: 1.5rem; padding-top: 2.5rem; }
+      h1 { font-size: clamp(2.5rem, 5.5vw, 4rem); }
+      .routing-board { padding: 0.75rem; }
+      .purpose, .closing { grid-template-columns: 1fr 1.4fr; gap: 2rem; }
+      .lane { grid-template-columns: 0.75fr 0.85fr 1.4fr; gap: 1.2rem; }
+    }
+    @media (max-width: 650px) {
+      header { padding-block: 1rem; }
+      .nav { align-items: flex-start; gap: 0.7rem; flex-wrap: wrap; }
+      nav { font-size: 0.83rem; gap: 1.25rem; }
+      .hero { grid-template-columns: 1fr; padding-block: 2.1rem 3rem; gap: 2.6rem; }
+      h1 { font-size: clamp(2.5rem, 10.5vw, 4rem); }
+      .status { margin-bottom: 1.25rem; }
+      .intro { max-width: 44ch; font-size: 1rem; }
+      .routing-board .command { font-size: 21px; }
+      .routing-board .label { font-size: 21px; }
+      .routing-board .detail { font-size: 16px; }
+      .routing-board .router-label { font-size: 19px; }
+      .purpose, .closing, .limits-layout { grid-template-columns: 1fr; gap: 1.5rem; }
+      .purpose { padding-block: 2rem 3rem; }
+      .purpose h2, .closing h2 { max-width: 22ch; }
+      .purpose p { font-size: 1rem; }
+      .section-heading { display: block; margin-bottom: 1.5rem; }
+      .section-heading p { margin-top: 0.65rem; }
+      .lanes { padding-bottom: 3rem; }
+      .lane { grid-template-columns: 1fr 1fr; gap: 0.7rem; padding-block: 1.5rem; }
+      .lane p { grid-column: 1 / -1; margin-top: 0.3rem; }
+      .lane .transport { text-align: right; }
+      .limits { padding-block: 2.5rem; }
+      .limits-intro p { max-width: none; }
+      .limit:first-child { border-top: 1px solid var(--line); padding-top: 1.35rem; }
+      .closing { padding-block: 3rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#icerik">İçeriğe geç</a>
+  <header class="wrap">
+    <div class="nav">
+      <a class="brand" href="#" aria-label="claude-oauth, sayfa başı">
+        <svg viewBox="0 0 30 36" aria-hidden="true"><path d="M6 3v30" fill="none" stroke="currentColor" stroke-width="5"/><path d="M17 3v16q0 5 7 5v9" fill="none" stroke="var(--accent)" stroke-width="5"/></svg>
+        claude-oauth
+      </a>
+      <nav aria-label="Ana gezinme">
+        <a href="#yollar">Yollar</a>
+        <a href="#durum">Mevcut durum</a>
+        <a href="https://github.com/OnourImpram/claude-oauth">Depo <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>
+  <main id="icerik">
+    <section class="hero wrap" aria-labelledby="baslik">
+      <div>
+        <p class="status">Yayın öncesi · Depo şu an özel</p>
+        <h1 id="baslik"><span>Model değişir.</span><span>Çalıştığın yer</span><span>Claude Code.</span></h1>
+        <p class="intro">Farklı modelleri kendi OAuth oturumları üzerinden Claude Code’a bağlayan deneysel router. Geliştiriciler ve bu çalışma ortamını öğrenen öğrenciler için.</p>
+        <div class="actions">
+          <a class="primary" href="#durum">Mevcut durumu gör <span aria-hidden="true">↓</span></a>
+          <a class="secondary" href="#yollar">Şeritleri incele</a>
+        </div>
+      </div>
+      <figure>
+        <div class="routing-board">
+          <div class="board-heading"><span>İki komut, iki yol</span><span>Tasarım ilkesi</span></div>
+          <svg viewBox="0 0 500 490" role="img" aria-labelledby="route-title route-desc">
+            <title id="route-title">Native Claude yolu ve ayrı router yolu</title>
+            <desc id="route-desc">claude komutu native Claude yolunu, claude-oauth komutu Google, xAI ve OpenAI şeritlerine ayrılan router yolunu temsil eder. Çizim bir ayrım ilkesini anlatır; native yolun değişmediğine dair doğrulama değildir.</desc>
+            <line x1="198" y1="82" x2="198" y2="440" stroke="var(--line)" stroke-dasharray="3 7"/>
+            <text class="command" x="46" y="45">claude</text>
+            <text class="command" x="250" y="45">claude-oauth</text>
+            <path class="path-native" d="M82 77V354" stroke-width="19" fill="none"/>
+            <circle cx="82" cy="77" r="6" fill="var(--board)"/>
+            <path class="path-native" d="m65 341 17 20 17-20" stroke-width="8" fill="none"/>
+            <path class="path-router" d="M310 77V175Q310 214 349 214H386Q432 214 432 260V374" stroke-width="19" fill="none"/>
+            <path class="path-router" d="M350 214V374M310 187Q270 215 270 259V374" stroke-width="12" fill="none"/>
+            <circle cx="310" cy="77" r="6" fill="var(--board)"/>
+            <rect x="271" y="121" width="78" height="32" fill="var(--signal)"/>
+            <text class="router-label" text-anchor="middle" x="310" y="142">router</text>
+            <text class="label" x="46" y="402">Claude</text>
+            <text class="detail" x="46" y="424">Native yol</text>
+            <circle cx="270" cy="374" r="8" fill="var(--board)" stroke="var(--signal)" stroke-width="5"/>
+            <circle cx="350" cy="374" r="8" fill="var(--board)" stroke="var(--signal)" stroke-width="5"/>
+            <circle cx="432" cy="374" r="8" fill="var(--board)" stroke="var(--signal)" stroke-width="5"/>
+            <text class="label" text-anchor="middle" x="270" y="402">Google</text>
+            <text class="label" text-anchor="middle" x="350" y="402">xAI</text>
+            <text class="label" text-anchor="middle" x="432" y="402">OpenAI</text>
+            <text class="detail" text-anchor="middle" x="350" y="459">Her şerit, kendi sağlayıcı oturumu.</text>
+          </svg>
+        </div>
+        <figcaption>Komut ayrımı projenin ilkesidir. Native yolun etkilenmediği bu depodan henüz doğrulanamıyor; launcher shim’i ağaçta bulunmuyor.</figcaption>
+      </figure>
+    </section>
+
+    <section class="purpose wrap" aria-labelledby="amac">
+      <h2 id="amac">Claude Code’u daha çok kişinin öğrenmesi için.</h2>
+      <p>Projenin amacı, geliştiricilerin ve öğrencilerin Claude Code çalışma ortamını benimsemesini kolaylaştırmak. <strong>Native Claude yolunu değiştirmeden ayrı bir giriş sunmak</strong> tasarımın temel ilkesi. Her sağlayıcının oturumu, model erişimi ve kotası kendi hesabına bağlı; proje ek erişim hakkı sağlamaz.</p>
+    </section>
+
+    <section class="lanes wrap" id="yollar" aria-labelledby="yollar-baslik">
+      <div class="section-heading">
+        <h2 id="yollar-baslik">Kodda üç sağlayıcı şeridi.</h2>
+        <p>Araç kapsamları birbirinden farklı.</p>
+      </div>
+      <article class="lane">
+        <div><h3>Google</h3><span class="account">Google OAuth oturumu</span></div>
+        <div class="transport">Antigravity · agy</div>
+        <p>Antigravity’nin kendi ajan döngüsünü kullanır. Bu yola Claude Code’un MCP araç köprüsü aktarılmıyor.</p>
+      </article>
+      <article class="lane">
+        <div><h3>xAI</h3><span class="account">Grok OAuth oturumu</span></div>
+        <div class="transport">Grok · ACP</div>
+        <p>Araç çağrısı ile sonucunu oturum boyunca eşleştiren bir MCP köprüsü içerir. Claude Code’un tam araç yüzeyine erişim doğrulanmış değil.</p>
+      </article>
+      <article class="lane">
+        <div><h3>OpenAI</h3><span class="account">ChatGPT OAuth oturumu</span></div>
+        <div class="transport">Codex · Clodex</div>
+        <p>Clodex uyumluluk kapsülü üzerinden mesajları iletir. Katalog ve sürüm denetimleri bulunur; bunlar uçtan uca yetenek doğrulaması değildir.</p>
+      </article>
+    </section>
+
+    <section class="limits" id="durum" aria-labelledby="durum-baslik">
+      <div class="wrap limits-layout">
+        <div class="limits-intro">
+          <span class="release-note">Kullanıma hazır bir sürüm değil</span>
+          <h2 id="durum-baslik">Bugünkü sınırlar.</h2>
+          <p>Depo özel ve proje yayın öncesinde. Bu sayfa bir kurulum daveti değil, üzerinde çalışılan sistemin mevcut durumudur.</p>
+        </div>
+        <div>
+          <article class="limit">
+            <h3>İzin sınırı uygulanmıyor.<span class="limit-id">B01</span></h3>
+            <p>Üst oturumun izinleri Google ve Grok alt ajanlarına uygulanmıyor. Bu yüzden dosya düzenlemenin aynı izin kuralları altında gerçekleştiği söylenemez.</p>
+          </article>
+          <article class="limit">
+            <h3>Tam araç yüzeyi doğrulanmadı.<span class="limit-id">B02</span></h3>
+            <p>Son kullanıcı mesajından sonra gelen sistem mesajları derleme sırasında düşebiliyor. Skill, ajan ve MCP talimatları kaybolabiliyor; tam <code>Agent</code>, skill ve Playwright erişimi vaat edilmiyor.</p>
+          </article>
+          <article class="limit">
+            <h3>Native ayrımı depodan kanıtlanamıyor.<span class="limit-id">B05</span></h3>
+            <p><code>claude</code> komutunu native bırakmak projenin ilkesi. Ancak launcher shim’i ve ayrımı yeniden üreten test bu ağaçta olmadığı için bu ilke bir doğrulama garantisi olarak sunulmuyor.</p>
+          </article>
+          <a class="source-note" href="https://github.com/OnourImpram/claude-oauth#known-gaps">Bilinen kusurların tamamı depoda <span aria-hidden="true">↗</span> · erişim gerekli</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing wrap" aria-labelledby="katki">
+      <h2 id="katki">Önce gözlenebilir davranış.</h2>
+      <div>
+        <p>Şu aşamada en değerli katkı, bir davranışı somut girdisiyle yeniden üretmek: hangi şerit, hangi araç, hangi beklenen sonuç? Yerel testler ve bağımsız inceleme bu çalışmanın parçası; çalışan bir test, canlı sağlayıcıda aynı sonucun alındığını tek başına göstermiyor.</p>
+        <p>Depo erişimin varsa kodu ve açık kusurları birlikte inceleyebilirsin.</p>
+        <a href="https://github.com/OnourImpram/claude-oauth">GitHub deposunu aç <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+  </main>
+  <footer class="wrap">
+    <div class="footer-row">
+      <p>claude-oauth · Durum kaydı: <time datetime="2026-09-07">7 Eylül 2026</time></p>
+      <div><a href="https://github.com/OnourImpram/claude-oauth/blob/astra-review-fixes/LICENSE">Apache-2.0</a><a href="https://onourimpram.com/en/open-source">Diğer projeler</a></div>
+    </div>
+    <p class="footnote">Bağımsız bir proje. Anthropic, Google, xAI veya OpenAI’nin resmî ürünü değildir. Bu sayfa dış font, betik, izleme veya CDN isteği yapmaz.</p>
+  </footer>
+</body>
+</html>
