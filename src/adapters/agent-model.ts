@@ -224,6 +224,19 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     if (current?.role !== "user") {
         throw new RouterError("invalid_request", "Agent-readonly routes require the current user request as the final message.", 400);
     }
+    // B02, measured 2026-09-07: a system message that arrives AFTER the last user
+    // message fell through both branches below and was dropped in silence -- no error,
+    // no warning, no detector. Claude Code puts exactly that message at the end when it
+    // does not recognise the model identity, and it carries the skill catalogue, the
+    // agent catalogue, the MCP instructions and the output style: about 77,500
+    // characters in the measured session. Routed models could not see skills or the
+    // Agent tool for this one reason.
+    //
+    // Wire order put it last; meaning puts it with the system context, because that is
+    // what it is -- a description of the capabilities this turn runs under. It is
+    // carried in its own labelled section so the reader (and the model) can tell it
+    // apart from the operator's own binding rules, and CURRENT USER REQUEST stays last.
+    const trailingSystemContext: string[] = [];
     for (const entry of messageContext) {
         if (entry.index < current.index) {
             bindingContext.push(`${entry.role.toUpperCase()}:\n${entry.text}`);
@@ -232,6 +245,8 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
         if (entry.role === "developer") {
             unsupported("A developer message after the current user request cannot be mapped safely.");
         }
+        if (entry.text.trim() !== "")
+            trailingSystemContext.push(entry.text);
     }
     const currentRequest = current.blocks.at(-1) ?? "";
     if (currentRequest.trim() === "") {
@@ -276,6 +291,13 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
         ...(bindingContext.length === 0
             ? []
             : ["", "BINDING SYSTEM AND PROJECT CONTEXT:", ...bindingContext]),
+        ...(trailingSystemContext.length === 0
+            ? []
+            : [
+                "",
+                "SESSION CAPABILITY CONTEXT (skills, agents, MCP servers and output style available to you this turn):",
+                ...trailingSystemContext,
+            ]),
         ...(currentTurnContext.length === 0
             ? []
             : [
