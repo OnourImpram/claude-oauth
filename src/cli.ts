@@ -133,12 +133,21 @@ function requireComponents(ctx: CliContext, components: readonly InstallComponen
 }
 async function nativeAuthStatus(ctx: CliContext): Promise<NativeAuthStatus> {
     const binary = expandLockedPath(ctx.installLock.claude.executable, ctx.environment);
-    const result = await runCaptured(binary, ["auth", "status", "--json"], {
-        cwd: process.cwd(),
-        environment: sanitizedClaudeEnvironment(ctx.environment),
-        timeoutMs: 30_000,
-        maximumOutputBytes: 64 * 1024,
-    });
+    let result: Awaited<ReturnType<typeof runCaptured>>;
+    try {
+        result = await runCaptured(binary, ["auth", "status", "--json"], {
+            cwd: process.cwd(),
+            environment: sanitizedClaudeEnvironment(ctx.environment),
+            timeoutMs: 30_000,
+            maximumOutputBytes: 64 * 1024,
+        });
+    }
+    catch {
+        // P01: a native binary that cannot be spawned (absent on this platform, ENOENT) is
+        // "not logged in"; the install check beside it names the missing component. Doctor
+        // must not die on the probe of a component it has already reported as missing.
+        return { loggedIn: false };
+    }
     if (result.exitCode !== 0)
         return { loggedIn: false };
     try {
