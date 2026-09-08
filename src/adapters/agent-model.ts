@@ -145,9 +145,9 @@ function toleratedBlocks(value: unknown, location: string): string[] {
             continue;
         }
         if (kind === "tool_result") {
-            const govde = toolResultText(block["content"]);
-            const kesilmis = govde.length > 4000 ? `${govde.slice(0, 4000)}\n[truncated]` : govde;
-            parts.push(`[tool result${block["is_error"] === true ? " (error)" : ""}]\n${kesilmis}`);
+            const toolText = toolResultText(block["content"]);
+            const truncatedText = toolText.length > 4000 ? `${toolText.slice(0, 4000)}\n[truncated]` : toolText;
+            parts.push(`[tool result${block["is_error"] === true ? " (error)" : ""}]\n${truncatedText}`);
             continue;
         }
         unsupported(`${location} contains an unsupported ${typeof kind === "string" ? kind : "unknown"} block.`);
