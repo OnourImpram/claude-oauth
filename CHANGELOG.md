@@ -41,6 +41,14 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 - Windows tests cover normal output, a SIGTERM-handler child, and a kill failure with no
   exit event. The handler test passes trivially on Windows because kill is terminal there.
   The meaningful Linux arm is NOT_RUN locally because this run uses a Windows host.
+### Fixed: B08 compaction replay refused, bytes reported as tokens (2026-09-08)
+
+- Found by a two-step bridged tool probe on the Google lane. Bytes were reported as `input_tokens`;
+  Claude Code judged the turn too long, compacted, and its compaction request replayed the last
+  delivered `tool_result`, refused as 409 ten times. Delivered ids are now remembered (bounded), a
+  replayed result set runs as a fresh turn (`agent_tool_result_replayed`), the input bound is
+  `ceil(bytes / 3)`, and each session retirement names its reason (`agent_session_retired`).
+
 ### Fixed: B07 headless permission denial returned as a retryable 502 (2026-09-08)
 
 - Found on the Agent inheritance measurement: the Google model chose its native `read_file`, the
