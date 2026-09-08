@@ -20,8 +20,8 @@ into a chat box.
 The goal here is the opposite: **every model reachable through the router should be able to use the
 same Claude Code surface** — the `Agent` tool, skills, MCP servers such as Playwright, file
 editing under the same permission rules. Since 2026-09-08 the Google lane reaches that surface for real
-(G01 below, with a live receipt); what still stands between here and the full goal is B01 — the parent
-session's permission boundary is not applied to the routed subagents.
+(G01 below, with a live receipt). The native permission paths in Google and xAI are now constrained
+(B01 below); permission inheritance through a separate `Agent` child session remains unmeasured.
 
 Two audiences, both intentional:
 
@@ -117,7 +117,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 
 | Id | Severity | What is wrong |
 |---|---|---|
-| B01 | **Critical** | The parent session's permission boundary is not applied to Google and xAI subagents. The Google lane forces write/bypass flags on; the xAI lane accepts the first permission option and serves its own write handler. `executionMode: "agent-readonly"` therefore **misdescribes** the effective authority. |
+| B01 | **Native paths repaired; Agent NOT_RUN** | **Google direct route: PASS, 2026-09-08.** Call-scoped settings allow only the bridge MCP server and deny native `write_file`, `command`, `browser`, `execute_url`, and `unsandboxed` actions. Live Claude Code Write denial leaves no file; a native `write_to_file` fallback is also denied, while MCP still parks and returns the denial. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. `Agent` permission inheritance: **NOT_RUN (requires a separate Agent child-session harness)**. |
 | ~~B02~~ | ~~High~~ | **Repaired 2026-09-07 (`b5caf0e`).** A `role:"system"` message arriving after the last user message was dropped silently while compiling the request — measured loss ~77.5k characters: the skill catalogue, the agent catalogue, MCP server instructions, the output style. It now travels in its own `SESSION CAPABILITY CONTEXT` section. Six test arms, mutation-verified. The end-to-end claim is NOT made here: G01 still keeps the Google lane off the tool surface. |
 | B03 | High | An xAI continuation request can lose both the session id and the new user instruction. |
 | B04 | High | The workspace write check does not write the file it checks; a path race is open. |
@@ -133,9 +133,9 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | N05 | High | The OpenAI capsule's own loopback port does not enforce the transport nonce; a local process could reach it without going through the router. |
 | N06 | Medium | On POSIX, a helper that ignores SIGTERM keeps the timeout waiting; there is no escalation to SIGKILL. Unmeasured on Linux. |
 
-B01 is now the reason the capability goal is not fully met: routed models reach the tools, but do not
-yet operate under a permission boundary that makes handing them tools safe. Restoring capability without restoring
-the boundary would ship a more powerful hole.
+B01's measured Google native-write bypass is closed. The live check covers direct routing with
+`gemini-3.8-flash-high` on Windows; it does not establish permission inheritance through `Agent`
+child sessions or live enforcement of every denied action category.
 
 ## Requirements
 

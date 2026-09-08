@@ -49,7 +49,6 @@ export function startAntigravitySession(options: AntigravitySessionOptions): Age
             cwd: options.cwd,
             prompt: options.prompt,
             model: options.model,
-            allowEdits: true,
             toolEndpoint: options.toolEndpoint,
             configHomeRoot: options.configHomeRoot,
             signal: controller.signal,

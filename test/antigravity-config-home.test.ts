@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,6 +41,92 @@ async function serverEntry(home: string): Promise<Record<string, { headers?: Rec
 }
 
 describe("antigravity call-scoped configuration home", () => {
+    for (const serverName of [undefined, "custom-claude-bridge"]) {
+        it(`B01 (c): permits the configured MCP server and denies native mutations (${serverName ?? "default"})`, async () => {
+            const root = await scratch();
+            try {
+                const home = await createEphemeralConfigHome({
+                    root: join(root, "homes"), sourceHome: await sourceHome(root),
+                    endpoint: { url: "http://127.0.0.1:8787/mcp", headers: {} },
+                    ...(serverName === undefined ? {} : { serverName }),
+                });
+                const settings = JSON.parse(await readFile(join(home.path, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as { permissions: { deny: string[] } };
+                settings.permissions.deny.sort();
+                deepStrictEqual(settings, {
+                    permissions: {
+                        allow: [`mcp(${serverName ?? DEFAULT_TOOL_SERVER_NAME}/*)`],
+                        deny: ["browser(*)", "command(*)", "execute_url(*)", "unsandboxed(*)", "write_file(*)"],
+                    },
+                });
+                deepStrictEqual(Object.keys(await serverEntry(home.path)), [serverName ?? DEFAULT_TOOL_SERVER_NAME]);
+                // Exercise the existing bounded-file/selector gate against the generated file.
+                let called = false;
+                await runAntigravityHeadless({
+                    binary: "agy.exe", cwd: root, home: home.path, prompt: "hello",
+                    model: "gemini-3.8-flash-high", environment: {},
+                    processRunner: async () => {
+                        called = true;
+                        return { stdout: terminalStream("ok"), stderr: "", exitCode: 0 };
+                    },
+                });
+                ok(called, "the generated settings must pass the existing readiness gate");
+                await home.dispose();
+            }
+            finally { await rm(root, { recursive: true, force: true }); }
+        });
+    }
+
+    it("B01 (a): a bridge endpoint enforces sandbox even if allowEdits is requested", async () => {
+        const root = await scratch();
+        try {
+            for (const allowEdits of [false, true]) {
+                let called = false;
+                await runAntigravityHeadless({
+                    binary: "agy.exe", cwd: root, home: await sourceHome(root), prompt: "hello",
+                    model: "gemini-3.8-flash-high", environment: {}, allowEdits,
+                    configHomeRoot: join(root, "homes"),
+                    toolEndpoint: { url: "http://127.0.0.1:8787/mcp", headers: {} },
+                    processRunner: async (request) => {
+                        called = true;
+                        ok(request.arguments.includes("--sandbox"));
+                        ok(!request.arguments.includes("--dangerously-skip-permissions"));
+                        ok(!request.arguments.includes("--mode"));
+                        const home = request.environment["USERPROFILE"];
+                        ok(home !== undefined && home !== root);
+                        const settings = JSON.parse(await readFile(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8")) as { permissions: { deny: string[] } };
+                        settings.permissions.deny.sort();
+                        deepStrictEqual(settings, {
+                            permissions: {
+                                allow: [`mcp(${DEFAULT_TOOL_SERVER_NAME}/*)`],
+                                deny: ["browser(*)", "command(*)", "execute_url(*)", "unsandboxed(*)", "write_file(*)"],
+                            },
+                        });
+                        return { stdout: terminalStream("ok"), stderr: "", exitCode: 0 };
+                    },
+                });
+                ok(called);
+            }
+        }
+        finally { await rm(root, { recursive: true, force: true }); }
+    });
+
+    it("B01: an endpoint without a config root cannot fall back to the operator home", async () => {
+        const root = await scratch();
+        try {
+            let called = false;
+            await rejects(runAntigravityHeadless({
+                binary: "agy.exe", cwd: root, home: root, prompt: "hello",
+                model: "gemini-3.8-flash-high", environment: {},
+                toolEndpoint: { url: "http://127.0.0.1:8787/mcp", headers: {} },
+                processRunner: async () => {
+                    called = true;
+                    return { stdout: terminalStream("ok"), stderr: "", exitCode: 0 };
+                },
+            }), /requires a call-scoped configuration root/u);
+            strictEqual(called, false);
+        }
+        finally { await rm(root, { recursive: true, force: true }); }
+    });
     it("writes the nonce into a home of ours and links identity without copying", async () => {
         const root = await scratch();
         try {
@@ -214,13 +300,14 @@ describe("antigravity call-scoped configuration home", () => {
         }
     });
 
-    it("without an endpoint the home carries no server and no secret", async () => {
+    it("B01 (d): without an endpoint no agy permission settings are written", async () => {
         const root = await scratch();
         try {
             const source = await sourceHome(root);
             const home = await createEphemeralConfigHome({ root: join(root, "homes"), sourceHome: source });
             const servers = await serverEntry(home.path);
             strictEqual(Object.keys(servers).length, 0);
+            ok(await missing(join(home.path, ".gemini", "antigravity-cli", "settings.json")));
             await home.dispose();
         }
         finally {

@@ -126,14 +126,10 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
         else {
             const adapter = new AgentModelAdapter({
                 provider: "google",
-                // 2026-09-03: agy has its OWN tool loop (the filesystem/git/memory servers in
-                // the operator's persistent mcp_config.json). Our MCP bridge was NOT injected --
-                // no session secret was written anywhere. That was why the preamble stopped
-                // saying "read-only" while still producing no Anthropic tool_use blocks.
-                //
-                // 2026-09-08 (G01): WHEN a registry is supplied the lane carries the real tool
-                // loop and the self-driven fallback is gone. Both are kept because the delegation
-                // lane runs without a registry and must keep working as before.
+                // With a registry, agy's call-scoped MCP map contains only our
+                // server and --sandbox is enforced. Claude Code decides each
+                // bridged tool call. The legacy registry-free fallback below retains
+                // its own tools and permission bypass; it is not the routed session lane.
                 ...(externalRuntime.googleSessions === undefined
                     ? { selfDrivenTools: true }
                     : { sessions: externalRuntime.googleSessions }),

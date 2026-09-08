@@ -37,7 +37,7 @@ export interface HeadlessProcessOutput {
 }
 export type AntigravityProcessRunner = (request: HeadlessProcessRequest) => Promise<HeadlessProcessOutput>;
 export interface AntigravityHeadlessOptions {
-    /** If true, agy becomes a fully working agent (accept-edits); the delegation lane leaves it false. */
+    /** Legacy calls without a tool endpoint may bypass permissions; ignored on the bridge lane. */
     readonly allowEdits?: boolean;
     readonly binary: string;
     readonly cwd: string;
@@ -285,14 +285,9 @@ function processEnvironment(source: NodeJS.ProcessEnv, configHome?: string): Nod
     return environment;
 }
 function processArguments(model: string, timeoutMs: number, allowEdits = false): string[] {
-    // 2026-09-03: `--mode plan --sandbox` makes agy READ-ONLY. That was not a secrecy or
-    // security constraint but a flag we passed ourselves; measured: with `--mode accept-edits
-    // --dangerously-skip-permissions` agy WROTE a file through its own filesystem MCP server
-    // (evidence: tasks/sistem-onarim-20260903/kanit.md A13). The tool bridge is NOT injected --
-    // agy already carries the tools from the operator's persistent mcp_config.json, so no
-    // session secret is written anywhere; the Phase 9 objection does not cover this path.
-    // The one-shot delegation lane (cli.ts) does NOT pass allowEdits: there, plan mode is the
-    // correct behaviour.
+    // Measured with agy 1.1.27 on 2026-09-08: --mode has no effect alongside
+    // --disable-slash-commands. Sandbox constrains terminal execution on the bridge
+    // and delegation lanes; agy's workspace file permissions are configured separately.
     return [
         "--input-format",
         "stream-json",
@@ -301,8 +296,6 @@ function processArguments(model: string, timeoutMs: number, allowEdits = false):
         "--model",
         model,
         ...(model === "gemini-3.8-flash-high" ? ["--effort", "high"] : []),
-        "--mode",
-        allowEdits ? "accept-edits" : "plan",
         ...(allowEdits ? ["--dangerously-skip-permissions"] : ["--sandbox"]),
         "--disable-slash-commands",
         "--print-timeout",
@@ -577,9 +570,13 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         throw new RouterError("invalid_request", "Antigravity timeout must be a positive bounded integer.", 400);
     }
     const source = options.environment ?? process.env;
+    const allowEdits = options.toolEndpoint === undefined && options.allowEdits === true;
     assertNoApiKeySelectors(source);
     assertNoCustomSelectors(source);
     await assertSettingsDoNotSelectGemini(options.home ?? homedir());
+    if (options.toolEndpoint !== undefined && options.configHomeRoot === undefined) {
+        throw new RouterError("invalid_request", "An Antigravity tool endpoint requires a call-scoped configuration root.", 400);
+    }
     let output: HeadlessProcessOutput;
     let configHome: EphemeralConfigHome | undefined;
     try {
@@ -589,10 +586,11 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
                 ...(options.home === undefined ? {} : { sourceHome: options.home }),
                 endpoint: options.toolEndpoint,
             });
+            await assertSettingsDoNotSelectGemini(configHome.path);
         }
         output = await (options.processRunner ?? runAntigravityProcess)({
             command: options.binary,
-            arguments: processArguments(options.model, timeoutMs, options.allowEdits === true),
+            arguments: processArguments(options.model, timeoutMs, allowEdits),
             input: processInput(options.prompt),
             cwd: options.cwd,
             environment: processEnvironment(source, configHome?.path),
@@ -656,17 +654,15 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
     // delivering nothing.
     if (parsed.response.trim() === "") {
         const permissionDenied = looksLikePermissionDenial(output.stderr, parsed.error);
-        // The remedy names the arguments this call ACTUALLY used. The first version
-        // hardcoded "--mode plan --sandbox" while provider-set.ts passes
-        // allowEdits: true, so on that lane the message described a command that was
-        // never run -- a remedy that misdescribes the run teaches distrust.
-        const lane = options.allowEdits === true
-            ? `"--mode accept-edits --dangerously-skip-permissions"`
-            : `"--mode plan --sandbox"`;
+        // Use the same effective policy as argv, including the bridge override.
+        const lane = allowEdits ? `"--dangerously-skip-permissions"` : `"--sandbox"`;
+        const remedy = options.toolEndpoint === undefined
+            ? "Add an allow-rule for the tool the child names below under permissions.allow in the agy settings, or run the task on a lane that grants that tool."
+            : "Use the Claude Code MCP bridge for tool effects; do not widen this call's native tool permissions.";
         throw new RouterError(
             permissionDenied ? "provider_tool_permission_denied" : "upstream_protocol_error",
             permissionDenied
-                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. FIX: this call ran agy with ${lane} (see processArguments), and a tool needing a permission is auto-denied there, which stops the run. Add an allow-rule for the tool the child names below under permissions.allow in the agy settings, or run the task on a lane that grants that tool. ${childDetail(output, parsed.error)}`
+                ? `Antigravity produced no response: a tool permission could not be granted in headless mode. FIX: this call ran agy with ${lane} (see processArguments), and a tool needing a permission is auto-denied there, which stops the run. ${remedy} ${childDetail(output, parsed.error)}`
                 : `Antigravity reported success with an empty response. ${childDetail(output, parsed.error)}`,
             502,
         );
