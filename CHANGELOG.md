@@ -17,6 +17,11 @@ repair entries below record the defects that have since been closed.
 What follows is the work of 2026-09-07, when the tree was reviewed by several independent
 passes and repaired where a repair was narrow enough to carry its own regression test.
 
+### Fixed: G02 project MCP refusal diagnosis (2026-09-08)
+
+- The installed Grok 1.0.13 package documents project `.mcp.json` discovery independently of the Claude vendor compatibility switch. Retain refusal; the error names the file and a workspace/user-configuration remedy. Hooks and plugins stay fail-closed.
+- Root/nested-workspace tests reproduce the former generic error. Live xAI in repositories containing non-empty `.mcp.json` is NOT_RUN because that configuration is intentionally refused.
+
 ### Fixed: G04 agent history conversion (2026-09-08)
 
 - Thinking and redacted thinking are dropped; images and documents retain media-type and size placeholders; server and MCP tool-use blocks become tool-call summaries. Historical tool blocks are summarized on both session and text lanes.

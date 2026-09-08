@@ -92,7 +92,6 @@ const executableHomeEntries = ["hooks", "hooks-paths", "plugins"];
 const executableProjectEntries = [
     join(".grok", "hooks"),
     join(".grok", "plugins"),
-    ".mcp.json",
 ];
 const disabledCompatibilityVariables = [
     "GROK_CLAUDE_SKILLS_ENABLED",
@@ -349,6 +348,17 @@ async function assertSafeGrokConfig(home: string, cwd: string): Promise<void> {
         await assertSafeConfigFile(join(current, ".grok", "config.toml"));
         for (const name of executableProjectEntries)
             await assertEmptyOrMissing(join(current, name));
+        // Installed Grok 1.0.13 docs/user-guide/07-mcp-servers.md, Compatibility:
+        // project .mcp.json is loaded until the Claude import marker is set. Its
+        // row has a separate gate from GROK_CLAUDE_MCPS_ENABLED, so retain refusal.
+        try {
+            await assertEmptyOrMissing(join(current, ".mcp.json"));
+        }
+        catch (error) {
+            throw new RouterError("adapter_unavailable",
+                "Project .mcp.json cannot be safely excluded from Grok MCP discovery. FIX: use an xAI workspace without .mcp.json, or relocate its MCP declarations to Claude Code user configuration before retrying. .grok/hooks and .grok/plugins must also remain empty or absent.",
+                503, { cause: error });
+        }
         if (await exists(join(current, ".git")))
             break;
         const parent = dirname(current);
