@@ -30,7 +30,9 @@ export async function prepareClodexCapsuleEntrypoint(root: string): Promise<Clod
     requireClodexCapsuleHash(createHash("sha256").update(patched).digest("hex").toUpperCase(), lock);
     // Stay below the module root so bare ESM imports use this installation's dependencies.
     // Source: https://nodejs.org/download/release/v24.14.0/docs/api/esm.html#resolution-algorithm-specification
-    const parent = join(root, "dist", "clodex-capsules");
+    // Stay OUTSIDE the content-addressed directories (dist, config): a capsule left behind by a
+    // killed session changed the release id and the next start refused the release (B09).
+    const parent = join(root, ".runtime", "clodex-capsules");
     await ensurePrivateDirectory(parent);
     const directory = await mkdtemp(join(parent, "session-"));
     const close = async (): Promise<void> => { await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); };

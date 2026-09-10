@@ -14,3 +14,5 @@ ruvector.db
 # one disk only.
 /.astra-review/
 /tasks/todo.md
+# runtime state written beside a release (B09): never part of a content-addressed tree
+.runtime/

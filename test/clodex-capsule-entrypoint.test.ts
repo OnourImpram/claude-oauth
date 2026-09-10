@@ -36,7 +36,10 @@ it("N05 prepares a pinned copy, preserves upstream bytes and removes the copy on
     try {
         strictEqual(await sha256File(prepared.path), (await readInstallLock(join(root, "config/install-lock.json"))).clodex.capsuleEntrypointSha256);
         strictEqual(await sha256File(join(upstream, "cli.js")), before);
-        strictEqual(prepared.path.startsWith(join(root, "dist", "clodex-capsules")), true);
+        strictEqual(prepared.path.startsWith(join(root, ".runtime", "clodex-capsules")), true);
+        // B09: the capsule must never land inside a content-addressed directory of the release.
+        strictEqual(prepared.path.startsWith(join(root, "dist")), false);
+        strictEqual(prepared.path.startsWith(join(root, "config")), false);
     }
     finally {
         await prepared.close();
@@ -50,7 +53,7 @@ for (const anchor of ["getServerPasswordForQuickMode", 'pathname === "/health"']
         const scratch = await isolatedInstallation(source);
         try {
             await rejects(prepareClodexCapsuleEntrypoint(scratch), /patch anchor .* matched 0 times/u);
-            await rejects(access(join(scratch, "dist/clodex-capsules")));
+            await rejects(access(join(scratch, ".runtime/clodex-capsules")));
         }
         finally { await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
     });
@@ -72,7 +75,7 @@ it("N05 mismatched patched hash prevents entrypoint preparation", async () => {
             const prepared = await prepareClodexCapsuleEntrypoint(scratch);
             await prepared.close();
         }, /patched entrypoint hash/u);
-        await rejects(access(join(scratch, "dist/clodex-capsules")));
+        await rejects(access(join(scratch, ".runtime/clodex-capsules")));
     }
     finally { await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
