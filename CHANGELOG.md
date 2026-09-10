@@ -7,6 +7,15 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: B09 runtime capsule written inside the content-addressed release (2026-09-10)
+
+- Reported by the operator: `claude-oauth` refused to start with
+  `release_contents_do_not_match_release_id`. The OpenAI lane's patched Clodex capsule lived at
+  `dist/clodex-capsules/session-*`; a session killed before `close()` left it behind, and `dist` is
+  hashed into the release id, so the detector correctly refused an edited release. Capsules now
+  live under `<release>/.runtime/clodex-capsules/`, below the module root and outside every hashed
+  directory. Regression in `test/clodex-capsule-entrypoint.test.ts`.
+
 ### Fixed: B06 discovery input capacity (2026-09-08)
 
 - **Repaired 2026-09-08.** Discovery separates the presentation `context_window` from
