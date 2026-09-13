@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { AdapterRequest, AdapterResponse, HttpTransport, ProviderAdapter, ProviderReadiness } from "../domain/contracts.js";
+import type { AdapterRequest, AdapterResponse, HttpTransport, MessageEnvelope, ProviderAdapter, ProviderReadiness } from "../domain/contracts.js";
 import { RouterError } from "../domain/errors.js";
 
 /**
@@ -54,11 +54,15 @@ const REFUSED_TOP_LEVEL = ["mcp_servers", "container", "context_management", "ou
 export class WebBridgeAdapter implements ProviderAdapter {
     readonly provider: "web" = "web";
     readonly #probe: typeof fetch;
-    // One bridge session per adapter instance, not per HTTP request. The bridge keys its
-    // ledger on x-hwb-session: a tool_result under a different session is refused as
-    // foreign_result (gateway.py:81-89), so a per-request id would break every tool
-    // round-trip (denetim 2026-09-13, A1). Its own launcher keeps one id per process.
-    readonly #session = `claude-oauth-${randomUUID()}`;
+    // One bridge session per CONVERSATION, not per HTTP request and not per process. The
+    // bridge keys its ledger on x-hwb-session: a tool_result under a different session is
+    // refused as foreign_result (gateway.py:81-89), so a per-request id broke every tool
+    // round-trip (denetim 2026-09-13, A1); and one session holds one active conversation,
+    // so a per-process id made Claude Code's side request (session title) collide with the
+    // main turn (measured: 409 "Active session cannot be replaced"). The first message of a
+    // conversation is stable across a tool round-trip and differs between conversations,
+    // so its digest is the session; a body without messages falls back to the instance id.
+    readonly #instance = `claude-oauth-${randomUUID()}`;
     readonly #origin: string;
     constructor(private readonly transport: HttpTransport, private readonly options: WebBridgeAdapterOptions) {
         this.#probe = options.probe ?? fetch;
@@ -125,7 +129,7 @@ export class WebBridgeAdapter implements ProviderAdapter {
         const headers = new Headers();
         headers.set("content-type", "application/json");
         headers.set("authorization", `Bearer ${bearer}`);
-        headers.set("x-hwb-session", this.#session);
+        headers.set("x-hwb-session", this.#sessionFor(request.envelope));
         const response = await this.transport.send({
             path: "/v1/messages",
             method: "POST",
@@ -148,6 +152,14 @@ export class WebBridgeAdapter implements ProviderAdapter {
             throw new RouterError("invalid_request", "The ChatGPT Web bridge refused the request as too large (bridge max_body_bytes / max_prompt_bytes; ChatGPT window 111,193 tokens). FIX: run a leaner session (claude --disable-slash-commands --tools \"\") or raise the limits in ~/.hermes-web-bridge/config.json.", 400);
         }
         return { status: response.status, headers: response.headers, body: response.body };
+    }
+
+    #sessionFor(envelope: MessageEnvelope): string {
+        const first = Array.isArray(envelope.messages) ? envelope.messages[0] : undefined;
+        if (first === undefined) {
+            return this.#instance;
+        }
+        return `claude-oauth-${createHash("sha256").update(JSON.stringify(first)).digest("hex").slice(0, 32)}`;
     }
 
     #conform(request: AdapterRequest): Record<string, unknown> {

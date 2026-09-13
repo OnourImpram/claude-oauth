@@ -92,13 +92,17 @@ describe("WebBridgeAdapter send", () => {
         const first = sink.sent?.headers.get("x-hwb-session");
         ok(first?.startsWith("claude-oauth-"));
         strictEqual(sentBody(sink)["model"], "chatgpt-web-high");
-        // The bridge refuses a tool_result under another session (foreign_result), so the
-        // id must be stable across the requests of one adapter, not minted per request.
-        await adapter.send({ ...request({ model: "x", max_tokens: 1, messages: [] }), requestId: "req-2" });
-        strictEqual(sink.sent?.headers.get("x-hwb-session"), first);
-        const other = await adapterWith({});
-        await other.send(request({ model: "x", max_tokens: 1, messages: [] }));
-        ok(other !== adapter);
+        // The bridge refuses a tool_result under another session (foreign_result) and holds one
+        // conversation per session: the id follows the conversation's first message, so a tool
+        // round-trip keeps it and a side request (different first message) gets its own.
+        const turn = [{ role: "user", content: "read hedef.txt" }];
+        await adapter.send({ ...request({ model: "x", max_tokens: 1, messages: turn }), requestId: "req-2" });
+        const conversation = sink.sent?.headers.get("x-hwb-session");
+        await adapter.send({ ...request({ model: "x", max_tokens: 1, messages: [...turn, { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] }, { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "BETA-IKI" }] }] }), requestId: "req-3" });
+        strictEqual(sink.sent?.headers.get("x-hwb-session"), conversation);
+        await adapter.send({ ...request({ model: "x", max_tokens: 1, messages: [{ role: "user", content: "name this session" }] }), requestId: "req-4" });
+        ok(sink.sent?.headers.get("x-hwb-session") !== conversation);
+        ok(first !== conversation);
     });
 
     it("strips every top-level field the bridge refuses and forces tool_choice auto", async () => {
