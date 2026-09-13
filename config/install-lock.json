@@ -4,9 +4,9 @@
     "version": "24.14.0"
   },
   "claude": {
-    "version": "2.1.257",
+    "version": "2.1.270",
     "executable": "%USERPROFILE%\\.local\\bin\\claude.exe",
-    "sha256": "190A5FE1A2A0C76176CD4E387A2C3555220CA7ACADDA295D2D45CDBC562BD400"
+    "sha256": "FD7F35EC7761195AB5BA4EFF423E48A78A7849E78F60D93EC31256CDB1A9EC7E"
   },
   "claudeShadow": {
     "version": "2.1.251",
