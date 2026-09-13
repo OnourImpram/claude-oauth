@@ -7,6 +7,23 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: B12 tool results of another lane refused after a model switch (2026-09-10)
+
+- Google and xAI registries are separate; after `/model` the previous lane's `tool_result` ids
+  were refused as 409 "no live agent session", `/compact` included. A result set the registry
+  never parked now runs as a fresh turn (`agent_tool_result_foreign`).
+
+### Fixed: B11 permission denial shown as a login prompt (2026-09-10)
+
+- The B07 denial travelled as 403, which Claude Code presents as "Please run /login". It is
+  now 400: terminal, not retried, not an authentication failure.
+
+### Fixed: B10 GPT models assumed at 200k by Claude Code (2026-09-10)
+
+- Claude Code ignores discovery's `context_window` and keys the window on the `[1m]` suffix
+  alone. The suffix now follows the advertised window: Astra is `[1m]` (1,000,000, compaction
+  at the 650k `autoCompactWindow`); Sol, Terra and Grok deliberately stay at the 200k assumption.
+
 ### Fixed: B09 runtime capsule written inside the content-addressed release (2026-09-10)
 
 - Reported by the operator: `claude-oauth` refused to start with
