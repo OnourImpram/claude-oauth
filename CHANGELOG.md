@@ -28,6 +28,21 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   2026-09-13 22:07 in a vault session: `Skill` had no bridge rule, sat in PROPOSED for ten
   minutes while the remote tool call timed out twice, and the turn died of
   completion_contract_missing. A bridge without the field leaves the list unfiltered.
+- Claude Code's session-title side request (system "You are naming a coding session", one
+  user message wrapping the prompt in `<session>`, no tools) is answered locally from the
+  prompt's first line in the `{"title": ...}` shape the model was returning. Measured
+  2026-09-13 22:37: through the bridge it was a second ChatGPT conversation started in the
+  same second as the real turn; the title completed and the real turn's page load met HTTP
+  429, which paused the bridge. Tools present, more than one user message, or no `<session>`
+  block: forwarded unchanged.
+
+### Changed: grok pin 1.0.25 to 1.0.30, grok self-update off (2026-09-13)
+
+- The grok CLI's own `auto_update = true` replaced the pinned binary at 21:22 (1.0.25 ->
+  1.0.30, `04b7ffed98c6`) while the operator was signing in; every launch after that logged
+  `grok:drift:locked_hash_mismatch` and the xai row left the picker. The detector did its job;
+  the class remedy is the CLI's `auto_update = false` in its config.toml, the lock is
+  re-pinned from the binary on disk, and the row returns through a fresh release.
 
 ### Changed: claude pin 2.1.257 to 2.1.270 (2026-09-13)
 
