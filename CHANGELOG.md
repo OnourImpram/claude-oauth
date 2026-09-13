@@ -36,6 +36,14 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   429, which paused the bridge. Tools present, more than one user message, or no `<session>`
   block: forwarded unchanged.
 
+### Added: live text on the agent lanes (xai, google) (2026-09-14)
+
+- The text an agent has produced so far is streamed as it grows (session registry polls the
+  run handle every 250 ms; the adapter opens the message on the first character). Measured
+  2026-09-13: grok steps of 17 to 118 s showed nothing until they ended. The tail and the
+  tool_use block close the same message; a bare tool call or a non-streaming client keeps
+  the old shape. No provider bridge changes.
+
 ### Changed: grok pin 1.0.25 to 1.0.30, grok self-update off (2026-09-13)
 
 - The grok CLI's own `auto_update = true` replaced the pinned binary at 21:22 (1.0.25 ->
