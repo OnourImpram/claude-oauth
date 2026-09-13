@@ -7,6 +7,16 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Measured: the Gemini native-tool attribution in B11 did not hold (2026-09-13)
+
+- B11's row said a native `read_file` outside the call-scoped allow list stopped the
+  turn. Three probes ran real agy 1.1.27 in the routed configuration against a real MCP
+  endpoint: a plain file read, a call to a tool named `mcp__playwright__browser_navigate`,
+  and an instruction to avoid MCP and use a native file tool. All three succeeded through
+  the MCP surface and the model never reached for a native tool.
+- No allow-list entry was added. An unmeasured reason does not widen a permission surface.
+- Whether a routed Gemini drives Playwright end to end in a live session stays NOT_RUN.
+
 ### Fixed: B12 tool results of another lane refused after a model switch (2026-09-10)
 
 - Google and xAI registries are separate; after `/model` the previous lane's `tool_result` ids
