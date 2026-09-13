@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { AdapterRequest, AdapterResponse, HttpTransport, ProviderAdapter, ProviderReadiness } from "../domain/contracts.js";
 import { RouterError } from "../domain/errors.js";
@@ -15,12 +16,18 @@ import { RouterError } from "../domain/errors.js";
  *      (chatgpt-web-instant, -medium, -high, -xhigh, -pro). That is model.upstreamModel.
  *   2. auth: the bridge requires its own local bearer (secrets.json -> api_key). Read from
  *      disk per call, never cached in a field that could end up in a log or receipt.
- *   3. fields the bridge refuses outright are removed before forwarding, because a refusal
+ *   3. fields the bridge refuses or ignores are removed before forwarding, because a refusal
  *      there is a hard 400 that Claude Code would show as an API error: `mcp_servers`,
- *      `container`, `context_management`, `output_config`, `thinking`, and any tool that
- *      carries `defer_loading`. `tool_choice` is forced to `{type:"auto"}`; anything else
- *      is refused by the bridge. `max_tokens` must be a positive integer, so a missing one
- *      gets the Claude Code default rather than a 400.
+ *      `container`, `context_management`, `output_config` (refused when `.format` is set),
+ *      `thinking` (noted, never applied), any tool that carries `defer_loading`, any tool
+ *      whose `type` is set and is not `custom` (bridge: unsupported_tool_type), and any
+ *      `mcp__*` tool: measured 2026-09-13 in a vault session, a plugin tool's input_schema
+ *      failed the bridge's Draft 2020-12 check_schema (400 invalid_schema) and the whole
+ *      turn died; the operator's bridge policy auto-approves only Claude Code's built-in
+ *      tools anyway, so an MCP tool would stall on manual approval even if its schema
+ *      passed. `tool_choice` is forced to `{type:"auto"}`; anything else is refused by the
+ *      bridge. `max_tokens` must be a positive integer, so a missing one gets the Claude
+ *      Code default rather than a 400.
  *   4. count_tokens: the bridge's own endpoint answers with a local estimate too
  *      (protocols/__init__.py count_tokens, header x-hwb-usage: local-estimate-not-billing),
  *      so nothing is lost by answering here with the chars/4 estimate the other agent lanes
@@ -38,6 +45,8 @@ export interface WebBridgeAdapterOptions {
     readonly chromeCdpUrl: string;
     /** Fetch for the readiness probes only; the message path uses the transport. */
     readonly probe?: typeof fetch;
+    /** Bridge origin for the readiness probe; must equal the transport's origin. */
+    readonly origin?: string;
 }
 
 const REFUSED_TOP_LEVEL = ["mcp_servers", "container", "context_management", "output_config", "thinking"] as const;
@@ -45,28 +54,59 @@ const REFUSED_TOP_LEVEL = ["mcp_servers", "container", "context_management", "ou
 export class WebBridgeAdapter implements ProviderAdapter {
     readonly provider: "web" = "web";
     readonly #probe: typeof fetch;
+    // One bridge session per adapter instance, not per HTTP request. The bridge keys its
+    // ledger on x-hwb-session: a tool_result under a different session is refused as
+    // foreign_result (gateway.py:81-89), so a per-request id would break every tool
+    // round-trip (denetim 2026-09-13, A1). Its own launcher keeps one id per process.
+    readonly #session = `claude-oauth-${randomUUID()}`;
+    readonly #origin: string;
     constructor(private readonly transport: HttpTransport, private readonly options: WebBridgeAdapterOptions) {
         this.#probe = options.probe ?? fetch;
+        this.#origin = (options.origin ?? "http://127.0.0.1:8765").replace(/\/$/u, "");
     }
 
     async readiness(): Promise<ProviderReadiness> {
-        // 1. bridge daemon: /health answers 401 when it is up (bearer required), anything
-        //    else, including a refused connection, means it is not listening.
-        const bridge = await this.#status(`http://127.0.0.1:8765/health`);
-        if (bridge !== 401 && bridge !== 200) {
-            return this.#down("web_bridge_daemon_down", "Start the bridge: agent-web-bridge serve");
+        // 1. bridge daemon: /health answers 401 without a bearer and, with one, a JSON body
+        //    carrying `paused`. Measured 2026-09-13: the daemon's CDP link drops after
+        //    ~25 min and the engine pauses the account (driver_failure); a bare 401 probe
+        //    then says "up" while every request 503s (denetim A2). So the probe carries the
+        //    bearer and reads the pause flag, which also proves the bearer at refresh time.
+        let bearer: string;
+        try {
+            bearer = await this.#bearer();
         }
-        // 2. tunnel-client: the url_file holds the health base; /readyz must say ready.
+        catch (error) {
+            return this.#down("web_bridge_secrets_missing", error instanceof RouterError ? error.message : "Run hwb init.");
+        }
+        const health = await this.#json(`${this.#origin}/health`, bearer);
+        if (health.status === 0) {
+            return this.#down("web_bridge_daemon_down", "Start the bridge: agent-web-bridge up");
+        }
+        if (health.status === 401 || health.status === 403) {
+            return this.#down("web_bridge_bearer_rejected", "The bridge rejected the local bearer. FIX: hwb init (secrets.json), then restart the bridge.");
+        }
+        if (health.status !== 200) {
+            return this.#down("web_bridge_daemon_unhealthy", `Bridge /health answered ${health.status}. FIX: hwb status; restart the bridge.`);
+        }
+        if (health.body?.["paused"] === true) {
+            return this.#down("web_bridge_paused", "The bridge is paused. FIX: hwb status, then hwb reconcile <generation> --remote-stopped --note <why> and hwb resume --note <why>.");
+        }
+        // 2. tunnel-client: the url_file holds the health base; /readyz must say ready. The
+        //    base must be loopback: this probe never leaves the machine by construction, not
+        //    by today's file content.
         let healthBase: string;
         try {
             healthBase = (await readFile(this.options.tunnelHealthUrlFile, "utf8")).trim();
         }
         catch {
-            return this.#down("web_bridge_tunnel_not_started", "Start the tunnel: tunnel-client run --profile hermes-web-bridge");
+            return this.#down("web_bridge_tunnel_not_started", "Start the tunnel: agent-web-bridge up");
         }
-        const ready = await this.#text(`${healthBase}/readyz`);
+        if (!isLoopbackUrl(healthBase)) {
+            return this.#down("web_bridge_tunnel_not_ready", "The tunnel health url_file does not point at loopback; restart tunnel-client.");
+        }
+        const ready = await this.#text(`${healthBase.replace(/\/$/u, "")}/readyz`);
         if (ready !== "ready") {
-            return this.#down("web_bridge_tunnel_not_ready", "Wait for /readyz or restart: tunnel-client run --profile hermes-web-bridge");
+            return this.#down("web_bridge_tunnel_not_ready", "Wait for /readyz or restart: agent-web-bridge up");
         }
         // 3. Chrome CDP: the bridge attaches to a browser the operator runs.
         const chrome = await this.#status(`${this.options.chromeCdpUrl}/json/version`);
@@ -85,7 +125,7 @@ export class WebBridgeAdapter implements ProviderAdapter {
         const headers = new Headers();
         headers.set("content-type", "application/json");
         headers.set("authorization", `Bearer ${bearer}`);
-        headers.set("x-hwb-session", `claude-oauth-${request.requestId}`);
+        headers.set("x-hwb-session", this.#session);
         const response = await this.transport.send({
             path: "/v1/messages",
             method: "POST",
@@ -97,6 +137,9 @@ export class WebBridgeAdapter implements ProviderAdapter {
             // The bridge holds uncertain remote work and refuses new turns until the operator
             // reconciles. Surface the one command that clears it.
             throw new RouterError("adapter_unavailable", "The ChatGPT Web bridge is paused. FIX: hwb status, then hwb reconcile <generation> --remote-stopped --note <why> and hwb resume --note <why>.", 503);
+        }
+        if (response.status === 401) {
+            throw new RouterError("provider_auth_required", "The ChatGPT Web bridge rejected the local bearer. FIX: hwb init (secrets.json), then restart the bridge.", 401);
         }
         if (response.status === 413) {
             // Measured 2026-09-13: a vault session's first request exceeds the bridge's
@@ -120,6 +163,8 @@ export class WebBridgeAdapter implements ProviderAdapter {
         if (Array.isArray(envelope["tools"])) {
             envelope["tools"] = (envelope["tools"] as Record<string, unknown>[])
                 .filter((tool) => tool["defer_loading"] !== true)
+                .filter((tool) => tool["type"] === undefined || tool["type"] === "custom")
+                .filter((tool) => !(typeof tool["name"] === "string" && tool["name"].startsWith("mcp__")))
                 .map((tool) => {
                     const copy = { ...tool };
                     delete copy["defer_loading"];
@@ -166,6 +211,24 @@ export class WebBridgeAdapter implements ProviderAdapter {
         }
     }
 
+    async #json(url: string, bearer: string): Promise<{ status: number; body?: Record<string, unknown> }> {
+        try {
+            const response = await this.#probe(url, { headers: { authorization: `Bearer ${bearer}` }, signal: AbortSignal.timeout(3_000) });
+            let body: Record<string, unknown> | undefined;
+            try {
+                const parsed: unknown = await response.json();
+                body = typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : undefined;
+            }
+            catch {
+                body = undefined;
+            }
+            return body === undefined ? { status: response.status } : { status: response.status, body };
+        }
+        catch {
+            return { status: 0 };
+        }
+    }
+
     async #text(url: string): Promise<string> {
         try {
             const response = await this.#probe(url, { signal: AbortSignal.timeout(3_000) });
@@ -178,5 +241,15 @@ export class WebBridgeAdapter implements ProviderAdapter {
 
     #down(detailCode: string, remedy: string): ProviderReadiness {
         return { provider: this.provider, oauthReady: false, adapterReady: false, status: "unavailable", detailCode, remedy };
+    }
+}
+
+function isLoopbackUrl(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return (url.protocol === "http:" || url.protocol === "https:") && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    }
+    catch {
+        return false;
     }
 }

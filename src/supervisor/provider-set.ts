@@ -48,7 +48,9 @@ export interface ExternalAgentRuntime {
  * which files and ports make the lane "ready".
  */
 export function defaultWebBridgeAdapter(home: string = homedir()): WebBridgeAdapter {
-    return new WebBridgeAdapter(new FixedOriginFetchTransport(new URL("http://127.0.0.1:8765")), {
+    const origin = "http://127.0.0.1:8765";
+    return new WebBridgeAdapter(new FixedOriginFetchTransport(new URL(origin)), {
+        origin,
         secretsPath: join(home, ".hermes-web-bridge", "secrets.json"),
         tunnelHealthUrlFile: join(home, ".local", "state", "tunnel-client", "health", "hermes-web-bridge.url"),
         chromeCdpUrl: "http://127.0.0.1:9222",

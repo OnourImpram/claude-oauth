@@ -201,7 +201,10 @@ async function droppedModelIds(snapshotPath: string, next: ModelSnapshot): Promi
         return [];
     }
     const nextIds = new Set(next.models.map((model) => model.id));
-    return current.models.map((model) => model.id).filter((id) => !nextIds.has(id));
+    // Web rows depend on a browser window and two session-bound processes; they leave and
+    // return with the lane and must not hold a refresh of the other providers hostage
+    // (denetim 2026-09-13, A6). They re-enter on the next ready refresh.
+    return current.models.filter((model) => model.provider !== "web").map((model) => model.id).filter((id) => !nextIds.has(id));
 }
 async function catalogSnapshot(ctx: CliContext, write: boolean, allowShrink = false): Promise<CatalogSnapshotResult> {
     assertNoApiKeySelectors(ctx.environment);

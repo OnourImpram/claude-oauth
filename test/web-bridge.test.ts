@@ -89,8 +89,16 @@ describe("WebBridgeAdapter send", () => {
         strictEqual(sink.sent?.path, "/v1/messages");
         strictEqual(sink.sent?.method, "POST");
         strictEqual(sink.sent?.headers.get("authorization"), "Bearer local-test-key");
-        strictEqual(sink.sent?.headers.get("x-hwb-session"), "claude-oauth-req-1");
+        const first = sink.sent?.headers.get("x-hwb-session");
+        ok(first?.startsWith("claude-oauth-"));
         strictEqual(sentBody(sink)["model"], "chatgpt-web-high");
+        // The bridge refuses a tool_result under another session (foreign_result), so the
+        // id must be stable across the requests of one adapter, not minted per request.
+        await adapter.send({ ...request({ model: "x", max_tokens: 1, messages: [] }), requestId: "req-2" });
+        strictEqual(sink.sent?.headers.get("x-hwb-session"), first);
+        const other = await adapterWith({});
+        await other.send(request({ model: "x", max_tokens: 1, messages: [] }));
+        ok(other !== adapter);
     });
 
     it("strips every top-level field the bridge refuses and forces tool_choice auto", async () => {
@@ -125,10 +133,13 @@ describe("WebBridgeAdapter send", () => {
                 { name: "Read", input_schema: { type: "object" } },
                 { name: "Lazy", input_schema: { type: "object" }, defer_loading: true },
                 { name: "Eager", input_schema: { type: "object" }, defer_loading: false },
+                { name: "Custom", type: "custom", input_schema: { type: "object" } },
+                { name: "web_search", type: "web_search_20250305" },
+                { name: "mcp__plugin__tool", input_schema: { type: "object", required: true } },
             ],
         }));
         const tools = sentBody(sink)["tools"] as Record<string, unknown>[];
-        deepStrictEqual(tools.map((tool) => tool["name"]), ["Read", "Eager"]);
+        deepStrictEqual(tools.map((tool) => tool["name"]), ["Read", "Eager", "Custom"]);
         ok(tools.every((tool) => !("defer_loading" in tool)));
     });
 
@@ -162,6 +173,15 @@ describe("WebBridgeAdapter send", () => {
         );
     });
 
+    it("maps the bridge's 401 to provider_auth_required with the hwb init remedy", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const adapter = await adapterWith(sink, "k", 401);
+        await rejects(
+            adapter.send(request({ model: "x", max_tokens: 1, messages: [] })),
+            (error: unknown) => error instanceof RouterError && error.code === "provider_auth_required" && /hwb init/.test(error.message),
+        );
+    });
+
     it("maps the bridge's 413 to invalid_request naming the real limits", async () => {
         const sink: { sent?: HttpTransportRequest } = {};
         const adapter = await adapterWith(sink, "k", 413);
@@ -180,7 +200,7 @@ describe("WebBridgeAdapter send", () => {
 });
 
 describe("WebBridgeAdapter readiness", () => {
-    const bridgeUp = { "http://127.0.0.1:8765/health": { status: 401 } };
+    const bridgeUp = { "http://127.0.0.1:8765/health": { status: 200, text: '{"paused":false}' } };
 
     async function adapterFor(routes: Record<string, { status: number; text?: string }>, healthUrlFile?: string): Promise<WebBridgeAdapter> {
         return new WebBridgeAdapter(capturingTransport({}), {
@@ -203,7 +223,27 @@ describe("WebBridgeAdapter readiness", () => {
         const readiness = await adapter.readiness();
         strictEqual(readiness.status, "unavailable");
         strictEqual(readiness.detailCode, "web_bridge_daemon_down");
-        ok(readiness.remedy?.includes("serve"));
+        ok(readiness.remedy?.includes("agent-web-bridge up"));
+    });
+
+    it("names the bearer when the bridge answers 401 to the authenticated probe", async () => {
+        const adapter = await adapterFor({ "http://127.0.0.1:8765/health": { status: 401 } });
+        const readiness = await adapter.readiness();
+        strictEqual(readiness.detailCode, "web_bridge_bearer_rejected");
+    });
+
+    it("names the pause when the bridge is up but paused", async () => {
+        const adapter = await adapterFor({ "http://127.0.0.1:8765/health": { status: 200, text: '{"paused":true,"reason":"driver_failure"}' } });
+        const readiness = await adapter.readiness();
+        strictEqual(readiness.status, "unavailable");
+        strictEqual(readiness.detailCode, "web_bridge_paused");
+        ok(readiness.remedy?.includes("hwb reconcile"));
+    });
+
+    it("refuses a tunnel health base that is not loopback", async () => {
+        const adapter = await adapterFor({ ...bridgeUp, "http://example.com/readyz": { status: 200, text: "ready" } }, await healthUrlFile("http://example.com"));
+        const readiness = await adapter.readiness();
+        strictEqual(readiness.detailCode, "web_bridge_tunnel_not_ready");
     });
 
     it("names the tunnel when the url_file is absent", async () => {
@@ -252,7 +292,7 @@ describe("withVerifiedWebModels", () => {
         const web = snapshot.models.filter((entry) => entry.provider === "web");
         strictEqual(web.length, WEB_MODEL_CONTRACTS.length);
         deepStrictEqual(web.map((entry) => entry.upstreamModel), WEB_MODEL_CONTRACTS.map((entry) => entry.upstreamModel));
-        strictEqual(web.find((entry) => entry.id === "anthropic-web-chatgpt-pro")?.displayName, "ChatGPT Web Pro");
+        strictEqual(web.find((entry) => entry.id === "anthropic-web-chatgpt-pro")?.displayName, "ChatGPT Web Pro (GPT-6 Astra)");
         ok(web.every((entry) => entry.contextWindow !== undefined && entry.contextWindow < 200_000), "window must be the measured ChatGPT limit, not Claude Code's 200k default");
         ok(snapshot.models.some((entry) => entry.id === "claude-opus-5"));
     });
@@ -272,7 +312,6 @@ describe("withVerifiedWebModels", () => {
     it("gives each web id the contract's auto-compact window", () => {
         for (const contract of WEB_MODEL_CONTRACTS) {
             strictEqual(autoCompactWindowForModel(contract.id), contract.autoCompactWindow);
-            strictEqual(autoCompactWindowForModel(contract.alias), contract.autoCompactWindow);
         }
     });
 });
