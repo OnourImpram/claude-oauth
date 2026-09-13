@@ -24,10 +24,10 @@
     "capsuleEntrypointSha256": "408F96F52A41B45F19944119CCC93C74B11F27364FD12B9CC138B5D75E25ED0F"
   },
   "grok": {
-    "version": "1.0.25",
-    "sourceCommit": "f7e67d6988e2",
+    "version": "1.0.30",
+    "sourceCommit": "04b7ffed98c6",
     "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\grok\\bin\\grok.exe",
-    "sha256": "387B2B192FD5C82919D8302EBF46FB4A369D14D8BDE1C629C815B0B0C5A40EFC",
+    "sha256": "CA24EA63272BA7881261F4A52498D1F5BD884B01DA25845990422A10DD315266",
     "installerSha256": "12F665D4FE58A043AA7BA19A6BFA1C455DBD400E05F3146A791963268FEAD552"
   },
   "gemini": {
