@@ -2,6 +2,7 @@ import type { ModelRecord, ModelSnapshot, ProviderModelRecord, ProviderReadiness
 import {
     AGENT_MODEL_CONTRACTS,
     OPENAI_MODEL_CONTRACTS,
+    WEB_MODEL_CONTRACTS,
     openAiCatalogEntry,
     verifiedGrok46CatalogEntry,
 } from "./model-contracts.js";
@@ -198,4 +199,34 @@ export function requireAllProvidersReady(catalog: RequireAllProviderInput | unde
     return openAiGateReady(catalog.openAiModels) &&
         catalog.grokEnabled &&
         googleGateReady(catalog.googleModels);
+}
+
+/**
+ * ChatGPT Web rows enter the snapshot only when the lane's three readiness checks passed
+ * (bridge daemon, tunnel-client, Chrome CDP). Same shape as withVerifiedGoogleModels: the
+ * contract is the source of truth, the live check decides membership, and an absent lane
+ * drops its rows instead of leaving picker entries that cannot answer.
+ */
+export function withVerifiedWebModels(baseline: ModelSnapshot, laneReady: boolean): ModelSnapshot {
+    const externalIds = new Set(WEB_MODEL_CONTRACTS.map((entry) => entry.id));
+    const retained = baseline.models.filter((model) => !externalIds.has(model.id));
+    const verified = laneReady
+        ? WEB_MODEL_CONTRACTS.map((entry): ModelRecord => ({
+            id: entry.id,
+            provider: "web",
+            upstreamModel: entry.upstreamModel,
+            displayName: entry.displayName,
+            oauthType: "chatgpt-web",
+            executionMode: "native-message-loop",
+            discoverable: true,
+            contextWindow: entry.contextWindow,
+            capabilities: ["messages", "streaming", "tools"],
+        }))
+        : [];
+    return {
+        ...baseline,
+        generatedAt: new Date().toISOString(),
+        source: "live-provider-refresh",
+        models: [...retained, ...verified],
+    };
 }

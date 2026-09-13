@@ -3,8 +3,11 @@ import type { RuntimePaths } from "../runtime/paths.js";
 import { AnthropicAdapter } from "../adapters/anthropic.js";
 import { AgentModelAdapter } from "../adapters/agent-model.js";
 import { ClodexAdapter } from "../adapters/clodex.js";
+import { WebBridgeAdapter } from "../adapters/web-bridge.js";
 import { runAntigravityHeadless } from "../antigravity/headless-bridge.js";
 import { FixedOriginFetchTransport } from "../ports/fetch-transport.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { startClodexCapsule, type RunningClodexCapsule } from "../workers/clodex-capsule.js";
 import { isVerifiedAgentSnapshotRoute, isVerifiedOpenAiSnapshotRoute, openAiCatalogDriftReadiness } from "../domain/model-contracts.js";
 import { runGrokAcp } from "../grok/acp-bridge.js";
@@ -39,6 +42,18 @@ export interface ExternalAgentRuntime {
     /** A4: side providers with a lock violation -- no adapter is built, drop their models. */
     readonly disabledProviders?: ReadonlySet<ProviderId>;
 }
+/**
+ * ChatGPT Web lane adapter with the operator's fixed loopback layout. One constructor for
+ * the refresh path (cli.ts) and the serving path (below), so the two cannot disagree on
+ * which files and ports make the lane "ready".
+ */
+export function defaultWebBridgeAdapter(home: string = homedir()): WebBridgeAdapter {
+    return new WebBridgeAdapter(new FixedOriginFetchTransport(new URL("http://127.0.0.1:8765")), {
+        secretsPath: join(home, ".hermes-web-bridge", "secrets.json"),
+        tunnelHealthUrlFile: join(home, ".local", "state", "tunnel-client", "health", "hermes-web-bridge.url"),
+        chromeCdpUrl: "http://127.0.0.1:9222",
+    });
+}
 export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePaths, clodexNonce: string, externalRuntime?: ExternalAgentRuntime): Promise<ProviderSet> {
     const adapters = new Map<ProviderId, ProviderAdapter>();
     const readiness: ProviderReadiness[] = [];
@@ -47,6 +62,13 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
     adapters.set("anthropic", anthropic);
     readiness.push(await anthropic.readiness());
     const requestedProviders = new Set(snapshot.models.map((model) => model.provider));
+    if (requestedProviders.has("web") && externalRuntime?.disabledProviders?.has("web") !== true) {
+        // Loopback only. A lane that is down keeps its adapter registered: a request against
+        // it then fails with the detailCode remedy instead of a bare "adapter unavailable".
+        const web = defaultWebBridgeAdapter();
+        adapters.set("web", web);
+        readiness.push(await web.readiness());
+    }
     if (requestedProviders.has("openai")) {
         try {
             const capsule = await startClodexCapsule({ home: paths.clodexHome }, clodexNonce);

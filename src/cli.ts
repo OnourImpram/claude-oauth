@@ -14,6 +14,7 @@ import {
     type OpenAiModelReadiness,
     withPinnedNativeModels,
     withVerifiedGoogleModels,
+    withVerifiedWebModels,
     withVerifiedGrokModel,
     withVerifiedOpenAiModels,
 } from "./domain/model-refresh.js";
@@ -56,7 +57,7 @@ import {
 import { createSessionNonce } from "./security/nonce.js";
 import { readActiveSupervisorStatuses } from "./supervisor/ipc.js";
 import { launchClaudeOAuth } from "./supervisor/launcher.js";
-import { startCatalogProviders } from "./supervisor/provider-set.js";
+import { defaultWebBridgeAdapter, startCatalogProviders } from "./supervisor/provider-set.js";
 interface CliContext {
     readonly root: string;
     readonly installLock: InstallLock;
@@ -251,6 +252,10 @@ async function catalogSnapshot(ctx: CliContext, write: boolean, allowShrink = fa
             .map(async (entry) => await probeAntigravityModel(ctx, entry.upstreamModel)));
         snapshot = withVerifiedGoogleModels(snapshot, catalogVerifiedGoogleModelIds(googleModels));
         readiness.push(...googleModels);
+        // ChatGPT Web lane: three loopback facts; nothing leaves the machine.
+        const webReadiness = await defaultWebBridgeAdapter().readiness();
+        snapshot = withVerifiedWebModels(snapshot, webReadiness.status === "ready");
+        readiness.push(webReadiness);
         try {
             const catalog = await inspectGrokModels({
                 binary: expandLockedPath(ctx.installLock.grok.executable, ctx.environment),
