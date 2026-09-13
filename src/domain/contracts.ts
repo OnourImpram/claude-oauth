@@ -1,4 +1,4 @@
-export const PROVIDER_IDS = ["anthropic", "openai", "xai", "google"] as const;
+export const PROVIDER_IDS = ["anthropic", "openai", "xai", "google", "web"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const ROUTER_ERROR_CODES = [
     "provider_auth_required",
@@ -35,7 +35,7 @@ export interface ModelRecord {
     readonly provider: ProviderId;
     readonly upstreamModel: string;
     readonly displayName: string;
-    readonly oauthType: "claude.ai" | "chatgpt" | "xai-cli" | "google-cli";
+    readonly oauthType: "claude.ai" | "chatgpt" | "xai-cli" | "google-cli" | "chatgpt-web";
     readonly executionMode: ModelExecutionMode;
     readonly discoverable: boolean;
     readonly contextWindow?: number;

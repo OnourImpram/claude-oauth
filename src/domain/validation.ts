@@ -48,9 +48,10 @@ function parseModel(value: unknown): ModelRecord {
         !PROVIDER_IDS.includes(provider as ProviderId) ||
         !isNonEmptyString(value["upstreamModel"]) ||
         !isNonEmptyString(value["displayName"]) ||
-        !["claude.ai", "chatgpt", "xai-cli", "google-cli"].includes(String(oauthType)) ||
+        !["claude.ai", "chatgpt", "xai-cli", "google-cli", "chatgpt-web"].includes(String(oauthType)) ||
         !["native-message-loop", "agent-readonly"].includes(String(executionMode)) ||
-        ((provider === "anthropic" || provider === "openai") && executionMode !== "native-message-loop") ||
+        // web: the bridge speaks Messages itself, so it runs the same loop as anthropic/openai.
+        ((provider === "anthropic" || provider === "openai" || provider === "web") && executionMode !== "native-message-loop") ||
         ((provider === "google" || provider === "xai") && executionMode !== "agent-readonly") ||
         typeof value["discoverable"] !== "boolean" ||
         (contextWindow !== undefined && (!Number.isSafeInteger(contextWindow) || (contextWindow as number) <= 0)) ||
