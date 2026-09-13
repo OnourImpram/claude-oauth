@@ -457,6 +457,18 @@ export class AgentSessionRegistry {
         if (toolUseIds.some((id) => this.#calls.has(id))) return false;
         return toolUseIds.some((id) => this.#delivered.has(id));
     }
+    /**
+     * B12: true when at least one id is a call this registry parked for a session that is still
+     * live. Only such a result set is a continuation. Ids minted by another lane's registry (a
+     * `/model` switch mid-conversation) or lost to a restart belong to no session here; the
+     * adapter runs those turns afresh instead of refusing them with 409.
+     */
+    ownsLiveSession(toolUseIds: readonly string[]): boolean {
+        return toolUseIds.some((id) => {
+            const sessionKey = this.#calls.get(id);
+            return sessionKey !== undefined && this.#sessions.has(sessionKey);
+        });
+    }
     async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = "", tools?: readonly McpToolDescriptor[]): Promise<BeginResult> {
         if (signal?.aborted) {
             throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);

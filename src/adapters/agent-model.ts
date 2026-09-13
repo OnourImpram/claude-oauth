@@ -694,12 +694,25 @@ export class AgentModelAdapter implements ProviderAdapter {
         // B08: Claude Code's compaction request replays the last user turn, tool results included.
         // Results the registry already delivered are not orphans and not a continuation; the request
         // is a fresh turn (the compaction instruction) over the compiled history.
-        const replayed = extracted.length > 0 && sessions.isReplay(extracted.map((result) => result.toolUseId));
+        const toolUseIds = extracted.map((result) => result.toolUseId);
+        const owned = extracted.length > 0 && sessions.ownsLiveSession(toolUseIds);
+        const replayed = extracted.length > 0 && !owned && sessions.isReplay(toolUseIds);
         if (replayed) {
             writeSafeLog({ event: "agent_tool_result_replayed", level: "info", route: "mcp", code: String(extracted.length),
                 remedy: "No action needed: an already delivered tool result came back (compaction or client retry); the turn runs as a fresh request." });
         }
-        const results = replayed ? [] : extracted;
+        // B12 (reported 2026-09-10 on the xAI lane): after a `/model` switch the conversation still
+        // carries the previous lane's tool_result blocks, and their ids were minted by that lane's
+        // registry. Refusing them as "no live agent session" (409) left Claude Code with nothing it
+        // could send (it cannot strip tool_result blocks), so /compact and every later turn failed.
+        // A result set this registry never parked is not a continuation: the turn runs afresh over
+        // the compiled history, exactly like a compaction replay.
+        const foreign = extracted.length > 0 && !owned && !replayed;
+        if (foreign) {
+            writeSafeLog({ event: "agent_tool_result_foreign", level: "info", route: "mcp", code: String(extracted.length),
+                remedy: "No action needed: the tool results belong to another lane's session or to a session lost to a restart; the turn runs as a fresh request over the compiled history." });
+        }
+        const results = owned ? extracted : [];
         // Validate continuations through the same compiler before releasing any call.
         const compiled = compilePrompt(request, true);
         const tools = deriveMcpTools(anthropicTools(request.envelope.tools));
