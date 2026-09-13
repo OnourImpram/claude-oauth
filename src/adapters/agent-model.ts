@@ -468,6 +468,27 @@ function streamEvents(controller: ReadableStreamDefaultController<Uint8Array>, r
     controller.enqueue(sseEvent("message_stop", { type: "message_stop" }));
 }
 
+/**
+ * A complete assistant text message built locally, in the shape Claude Code asked for
+ * (SSE when `stream` is true, one JSON body otherwise). Used by lanes that answer a request
+ * without any provider (the web lane's session-title request, measured 2026-09-13).
+ */
+export function syntheticTextResponse(request: AdapterRequest, text: string): AdapterResponse {
+    const usage = { input_tokens: Math.max(1, Math.ceil(JSON.stringify(request.envelope).length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) };
+    const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
+    if (request.envelope.stream === true) {
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                streamEvents(controller, request, text, usage, messageId);
+                controller.close();
+            },
+        });
+        return { status: 200, headers: responseHeaders("text/event-stream", false), body };
+    }
+    const bytes = Buffer.from(JSON.stringify(messagePayload(request, text, usage, messageId)), "utf8");
+    return { status: 200, headers: responseHeaders("application/json", false), body: readableBytes(bytes) };
+}
+
 // Phase 9. The response returned to Claude Code when the agent calls a tool. The text
 // block is added ONLY if it is non-empty: an empty text block draws an empty bubble in
 // some clients.

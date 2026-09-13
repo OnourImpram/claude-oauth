@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { WebBridgeAdapter } from "../src/adapters/web-bridge.js";
+import { WebBridgeAdapter, sessionTitleFor } from "../src/adapters/web-bridge.js";
 import type { AdapterRequest, HttpTransport, HttpTransportRequest, MessageEnvelope, ModelRecord, ModelSnapshot } from "../src/domain/contracts.js";
 import { RouterError } from "../src/domain/errors.js";
 import { WEB_MODEL_CONTRACTS, autoCompactWindowForModel } from "../src/domain/model-contracts.js";
@@ -182,6 +182,47 @@ describe("WebBridgeAdapter send", () => {
         const bad = await adapterWith(sink, "local-test-key", 200, { "http://127.0.0.1:8765/health": { status: 200, text: '{"paused":false,"auto_approved_tools":["Read",1]}' } });
         await bad.send(request({ model: "x", max_tokens: 1, messages: [], tools }));
         deepStrictEqual((sentBody(sink)["tools"] as Record<string, unknown>[]).map((tool) => tool["name"]), ["Read", "RemoteTrigger"]);
+    });
+
+    it("answers Claude Code's session-title side request locally, in the JSON shape the model used", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const adapter = await adapterWith(sink);
+        const naming = "You are Claude Code.\nYou are naming a coding session so the user can pick it out of a long list.";
+        const response = await adapter.send(request({
+            model: "x",
+            messages: [
+                { role: "system", content: naming },
+                { role: "user", content: "<session>\n  selamlar dostum  \nikinci satir\n</session>\n\nWrite the title in Türkçe." },
+            ],
+        }));
+        strictEqual(response.status, 200);
+        strictEqual(sink.sent, undefined, "the title request must not reach the bridge");
+        const payload = JSON.parse(await new Response(response.body).text()) as { content: { text: string }[] };
+        deepStrictEqual(JSON.parse(payload.content[0]?.text ?? ""), { title: "selamlar dostum" });
+        // Streaming shape when asked for it.
+        const streamed = await adapter.send(request({ model: "x", stream: true, system: naming, messages: [{ role: "user", content: [{ type: "text", text: "<session>x</session>" }] }] }));
+        const sse = await new Response(streamed.body).text();
+        ok(sse.includes("event: message_start") && sse.includes("event: message_stop"));
+        ok(sse.includes(JSON.stringify(JSON.stringify({ title: "x" }))));
+    });
+
+    it("forwards a real turn even when it quotes the naming instruction", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const adapter = await adapterWith(sink);
+        const naming = "You are naming a coding session";
+        // Tools present: a real turn, never a title.
+        await adapter.send(request({ model: "x", max_tokens: 1, system: naming, tools: [{ name: "Read", input_schema: { type: "object" } }], messages: [{ role: "user", content: "<session>a</session>" }] }));
+        ok(sink.sent !== undefined);
+        delete sink.sent;
+        // Two user messages: a conversation, never a title.
+        await adapter.send(request({ model: "x", max_tokens: 1, system: naming, messages: [{ role: "user", content: "<session>a</session>" }, { role: "assistant", content: "ok" }, { role: "user", content: "more" }] }));
+        ok(sink.sent !== undefined);
+        delete sink.sent;
+        // No <session> block: forwarded.
+        await adapter.send(request({ model: "x", max_tokens: 1, system: naming, messages: [{ role: "user", content: "name it" }] }));
+        ok(sink.sent !== undefined);
+        strictEqual(sessionTitleFor({ model: "x", messages: [{ role: "user", content: "<session>" + "a".repeat(80) + "</session>" }], system: naming }), `${"a".repeat(57)}...`);
+        strictEqual(sessionTitleFor({ model: "x", messages: [{ role: "user", content: "<session>\n\n</session>" }], system: naming }), "Session");
     });
 
     it("supplies a positive integer max_tokens when Claude Code sent none or a bad one", async () => {

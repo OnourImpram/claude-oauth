@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { syntheticTextResponse } from "./agent-model.js";
 import { readFile } from "node:fs/promises";
 import type { AdapterRequest, AdapterResponse, HttpTransport, MessageEnvelope, ProviderAdapter, ProviderReadiness } from "../domain/contracts.js";
 import { RouterError } from "../domain/errors.js";
@@ -34,7 +35,14 @@ import { RouterError } from "../domain/errors.js";
  *      field gets the unfiltered list, as before. `tool_choice` is forced to
  *      `{type:"auto"}`; anything else is refused by the bridge. `max_tokens` must be a
  *      positive integer, so a missing one gets the Claude Code default rather than a 400.
- *   4. count_tokens: the bridge's own endpoint answers with a local estimate too
+ *   4. session title: Claude Code names every new session with a side request (system
+ *      "You are naming a coding session", one user message wrapping the first prompt in
+ *      <session>, no tools). Through the bridge that is a whole extra ChatGPT conversation
+ *      per session, started in the same second as the real turn. Measured 2026-09-13 22:37:
+ *      the title conversation completed and the real turn's page load then met HTTP 429
+ *      from ChatGPT, which paused the bridge. The title is answered here from the prompt's
+ *      first line, in the JSON shape the model was returning; nothing leaves the machine.
+ *   5. count_tokens: the bridge's own endpoint answers with a local estimate too
  *      (protocols/__init__.py count_tokens, header x-hwb-usage: local-estimate-not-billing),
  *      so nothing is lost by answering here with the chars/4 estimate the other agent lanes
  *      use; it saves a round trip and Claude Code's context accounting keeps working.
@@ -132,6 +140,10 @@ export class WebBridgeAdapter implements ProviderAdapter {
     async send(request: AdapterRequest): Promise<AdapterResponse> {
         if (request.path === "/v1/messages/count_tokens") {
             return this.#countTokensLocally(request);
+        }
+        const title = sessionTitleFor(request.envelope);
+        if (title !== undefined) {
+            return syntheticTextResponse(request, JSON.stringify({ title }));
         }
         const bearer = await this.#bearer();
         if (this.#approved === undefined) {
@@ -274,6 +286,49 @@ export class WebBridgeAdapter implements ProviderAdapter {
     #down(detailCode: string, remedy: string): ProviderReadiness {
         return { provider: this.provider, oauthReady: false, adapterReady: false, status: "unavailable", detailCode, remedy };
     }
+}
+
+const TITLE_SYSTEM_MARKER = "You are naming a coding session";
+
+/**
+ * Returns a title when the envelope is Claude Code's session-naming side request, else
+ * undefined. Recognised by the system marker, the absence of tools and one user message
+ * carrying a <session> block; anything looser would swallow real turns.
+ */
+export function sessionTitleFor(envelope: MessageEnvelope): string | undefined {
+    const tools = envelope.tools;
+    if (Array.isArray(tools) && tools.length > 0) {
+        return undefined;
+    }
+    const system = envelope.system;
+    const systemText = typeof system === "string" ? system : Array.isArray(system) ? system.map((block) => (typeof block === "object" && block !== null && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "")).join("\n") : "";
+    const messages = (Array.isArray(envelope.messages) ? envelope.messages : []).flatMap((message) => (typeof message === "object" && message !== null ? [message as { role?: unknown; content?: unknown }] : []));
+    const userTexts = messages.filter((message) => message.role === "user").map((message) => contentText(message.content));
+    const systemInMessages = messages.filter((message) => message.role !== "user").map((message) => contentText(message.content)).join("\n");
+    if (!systemText.includes(TITLE_SYSTEM_MARKER) && !systemInMessages.includes(TITLE_SYSTEM_MARKER)) {
+        return undefined;
+    }
+    if (userTexts.length !== 1) {
+        return undefined;
+    }
+    const match = /<session>\s*([\s\S]*?)\s*<\/session>/u.exec(userTexts[0] ?? "");
+    if (match === null) {
+        return undefined;
+    }
+    const firstLine = (match[1] ?? "").split(/\r?\n/u).map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+    const collapsed = firstLine.replace(/\s+/gu, " ");
+    const title = collapsed.length > 60 ? `${collapsed.slice(0, 57).trimEnd()}...` : collapsed;
+    return title.length > 0 ? title : "Session";
+}
+
+function contentText(content: unknown): string {
+    if (typeof content === "string") {
+        return content;
+    }
+    if (Array.isArray(content)) {
+        return content.map((block) => (typeof block === "object" && block !== null && typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "")).join("\n");
+    }
+    return "";
 }
 
 function isLoopbackUrl(value: string): boolean {
