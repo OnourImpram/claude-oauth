@@ -689,8 +689,12 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
             // B07 (measured 2026-09-08, Agent inheritance arm): a denial returned as 502 was
             // retried by Claude Code ten times with exponential backoff, each retry meeting the
             // same policy. A denial is this turn's terminal answer, not a transient upstream
-            // fault: it travels as 403 and is not retried.
-            permissionDenied ? 403 : 502,
+            // fault, so it must not be a 5xx.
+            // B11 (reported 2026-09-10): 403 was the wrong terminal code. Claude Code reads 401/403
+            // as an authentication failure and shows "Please run /login"; the operator ran /login
+            // against a lane whose OAuth session was fine. A denial is a bad request for this lane
+            // (the tool is not grantable here): 400, terminal, no login prompt, no retry.
+            permissionDenied ? 400 : 502,
         );
     }
     return parsed.usage === undefined

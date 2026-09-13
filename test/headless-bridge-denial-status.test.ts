@@ -34,10 +34,14 @@ async function failure(stderr: string): Promise<RouterError> {
 }
 
 describe("B07 headless permission denial status", () => {
-    it("a permission denial is 403, a terminal answer for the turn", async () => {
+    // B11: 403 made Claude Code print "Please run /login" for a lane whose session was fine.
+    // The terminal code for an ungrantable tool is 400: shown as an API error, not retried,
+    // and never mistaken for an expired login.
+    it("a permission denial is 400, a terminal answer for the turn that is not a login prompt", async () => {
         const error = await failure("jetski: no output produced -- the permission was auto-denied in headless mode");
         strictEqual(error.code, "provider_tool_permission_denied");
-        strictEqual(error.status, 403);
+        strictEqual(error.status, 400);
+        strictEqual([401, 403].includes(error.status), false, "Claude Code treats 401/403 as a login failure");
     });
     it("negative arm: an empty response without denial evidence stays 502", async () => {
         const error = await failure("");
