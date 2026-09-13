@@ -67,11 +67,13 @@ function probeReturning(routes: Record<string, { status: number; text?: string }
     }) as typeof fetch;
 }
 
-async function adapterWith(sink: { sent?: HttpTransportRequest }, apiKey: unknown = "local-test-key", status = 200): Promise<WebBridgeAdapter> {
+async function adapterWith(sink: { sent?: HttpTransportRequest }, apiKey: unknown = "local-test-key", status = 200, routes: Record<string, { status: number; text?: string }> = {}): Promise<WebBridgeAdapter> {
     return new WebBridgeAdapter(capturingTransport(sink, status), {
         secretsPath: await secretsFile(apiKey),
         tunnelHealthUrlFile: join(tmpdir(), "does-not-exist.url"),
         chromeCdpUrl: "http://127.0.0.1:1",
+        // No route by default: the adapter must never reach a real daemon from a unit test.
+        probe: probeReturning(routes),
     });
 }
 
@@ -145,6 +147,41 @@ describe("WebBridgeAdapter send", () => {
         const tools = sentBody(sink)["tools"] as Record<string, unknown>[];
         deepStrictEqual(tools.map((tool) => tool["name"]), ["Read", "Eager", "Custom"]);
         ok(tools.every((tool) => !("defer_loading" in tool)));
+    });
+
+    it("advertises only the tools the bridge auto-approves once /health has named them", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const health = { "http://127.0.0.1:8765/health": { status: 200, text: '{"paused":false,"auto_approved_tools":["Read","Skill"],"denied_tools":["Agent"]}' } };
+        const adapter = await adapterWith(sink, "local-test-key", 200, health);
+        const tools = [
+            { name: "Read", input_schema: { type: "object" } },
+            { name: "Skill", input_schema: { type: "object" } },
+            { name: "Agent", input_schema: { type: "object" } },
+            { name: "RemoteTrigger", input_schema: { type: "object" } },
+        ];
+        // Lazy: send() learns the set from /health before the first body leaves.
+        await adapter.send(request({ model: "x", max_tokens: 1, messages: [], tools }));
+        deepStrictEqual((sentBody(sink)["tools"] as Record<string, unknown>[]).map((tool) => tool["name"]), ["Read", "Skill"]);
+        // readiness() learns it too, on a fresh adapter.
+        const second = await adapterWith(sink, "local-test-key", 200, health);
+        await second.readiness();
+        await second.send(request({ model: "x", max_tokens: 1, messages: [], tools }));
+        deepStrictEqual((sentBody(sink)["tools"] as Record<string, unknown>[]).map((tool) => tool["name"]), ["Read", "Skill"]);
+    });
+
+    it("forwards the unfiltered tool list when /health is unreachable or predates the field", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const tools = [{ name: "Read", input_schema: { type: "object" } }, { name: "RemoteTrigger", input_schema: { type: "object" } }];
+        const down = await adapterWith(sink);
+        await down.send(request({ model: "x", max_tokens: 1, messages: [], tools }));
+        deepStrictEqual((sentBody(sink)["tools"] as Record<string, unknown>[]).map((tool) => tool["name"]), ["Read", "RemoteTrigger"]);
+        const old = await adapterWith(sink, "local-test-key", 200, { "http://127.0.0.1:8765/health": { status: 200, text: '{"paused":false}' } });
+        await old.send(request({ model: "x", max_tokens: 1, messages: [], tools }));
+        deepStrictEqual((sentBody(sink)["tools"] as Record<string, unknown>[]).map((tool) => tool["name"]), ["Read", "RemoteTrigger"]);
+        // A malformed field (non-string entries) is ignored, not half-applied.
+        const bad = await adapterWith(sink, "local-test-key", 200, { "http://127.0.0.1:8765/health": { status: 200, text: '{"paused":false,"auto_approved_tools":["Read",1]}' } });
+        await bad.send(request({ model: "x", max_tokens: 1, messages: [], tools }));
+        deepStrictEqual((sentBody(sink)["tools"] as Record<string, unknown>[]).map((tool) => tool["name"]), ["Read", "RemoteTrigger"]);
     });
 
     it("supplies a positive integer max_tokens when Claude Code sent none or a bad one", async () => {

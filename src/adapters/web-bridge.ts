@@ -25,9 +25,15 @@ import { RouterError } from "../domain/errors.js";
  *      failed the bridge's Draft 2020-12 check_schema (400 invalid_schema) and the whole
  *      turn died; the operator's bridge policy auto-approves only Claude Code's built-in
  *      tools anyway, so an MCP tool would stall on manual approval even if its schema
- *      passed. `tool_choice` is forced to `{type:"auto"}`; anything else is refused by the
- *      bridge. `max_tokens` must be a positive integer, so a missing one gets the Claude
- *      Code default rather than a 400.
+ *      passed. Then, when the bridge says which tools it auto-approves (`/health` ->
+ *      `auto_approved_tools`), every other tool is dropped too: measured 2026-09-13 22:07,
+ *      a vault turn proposed `Skill`, no bridge rule matched, the operation sat in
+ *      PROPOSED for ten minutes while the model's tool call timed out twice, and the turn
+ *      died of completion_contract_missing. A tool the bridge would hold for a manual
+ *      approval nobody is watching is never advertised. An older bridge without that
+ *      field gets the unfiltered list, as before. `tool_choice` is forced to
+ *      `{type:"auto"}`; anything else is refused by the bridge. `max_tokens` must be a
+ *      positive integer, so a missing one gets the Claude Code default rather than a 400.
  *   4. count_tokens: the bridge's own endpoint answers with a local estimate too
  *      (protocols/__init__.py count_tokens, header x-hwb-usage: local-estimate-not-billing),
  *      so nothing is lost by answering here with the chars/4 estimate the other agent lanes
@@ -64,6 +70,8 @@ export class WebBridgeAdapter implements ProviderAdapter {
     // so its digest is the session; a body without messages falls back to the instance id.
     readonly #instance = `claude-oauth-${randomUUID()}`;
     readonly #origin: string;
+    /** Tool names the bridge auto-approves; undefined until /health has said (or if it cannot). */
+    #approved: ReadonlySet<string> | undefined;
     constructor(private readonly transport: HttpTransport, private readonly options: WebBridgeAdapterOptions) {
         this.#probe = options.probe ?? fetch;
         this.#origin = (options.origin ?? "http://127.0.0.1:8765").replace(/\/$/u, "");
@@ -92,6 +100,7 @@ export class WebBridgeAdapter implements ProviderAdapter {
         if (health.status !== 200) {
             return this.#down("web_bridge_daemon_unhealthy", `Bridge /health answered ${health.status}. FIX: hwb status; restart the bridge.`);
         }
+        this.#learnPolicy(health.body);
         if (health.body?.["paused"] === true) {
             return this.#down("web_bridge_paused", "The bridge is paused. FIX: hwb status, then hwb reconcile <generation> --remote-stopped --note <why> and hwb resume --note <why>.");
         }
@@ -125,6 +134,9 @@ export class WebBridgeAdapter implements ProviderAdapter {
             return this.#countTokensLocally(request);
         }
         const bearer = await this.#bearer();
+        if (this.#approved === undefined) {
+            this.#learnPolicy((await this.#json(`${this.#origin}/health`, bearer)).body);
+        }
         const body = this.#conform(request);
         const headers = new Headers();
         headers.set("content-type", "application/json");
@@ -177,6 +189,7 @@ export class WebBridgeAdapter implements ProviderAdapter {
                 .filter((tool) => tool["defer_loading"] !== true)
                 .filter((tool) => tool["type"] === undefined || tool["type"] === "custom")
                 .filter((tool) => !(typeof tool["name"] === "string" && tool["name"].startsWith("mcp__")))
+                .filter((tool) => this.#approved === undefined || (typeof tool["name"] === "string" && this.#approved.has(tool["name"])))
                 .map((tool) => {
                     const copy = { ...tool };
                     delete copy["defer_loading"];
@@ -184,6 +197,13 @@ export class WebBridgeAdapter implements ProviderAdapter {
                 });
         }
         return envelope;
+    }
+
+    #learnPolicy(body: Record<string, unknown> | undefined): void {
+        const names = body?.["auto_approved_tools"];
+        if (Array.isArray(names) && names.every((name) => typeof name === "string")) {
+            this.#approved = new Set(names as string[]);
+        }
     }
 
     async #countTokensLocally(request: AdapterRequest): Promise<AdapterResponse> {
