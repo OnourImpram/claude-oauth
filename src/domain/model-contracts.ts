@@ -357,7 +357,8 @@ export function verifiedGrok46CatalogEntry(catalog: readonly ProviderModelRecord
 // The five profile names are the bridge's own (config.py model_defaults) and are what the
 // adapter sends as `model`. The router ids follow the reference's slugs (extra-high, pro).
 // The model names in the display strings are the operator's statement for this Pro account
-// (2026-09-13: instant..extra-high run GPT-5.6 Sol, the Pro stop runs GPT-6 Astra in pro
+// (2026-09-13: instant..extra-high use the "Latest" model entry of the ChatGPT picker (the
+// operator corrected an earlier "GPT-5.6 Sol" label), the Pro stop runs GPT-6 Astra in pro
 // mode); the bridge reports the UI route, not a backend identity, so this is a label.
 export const CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS = 111_193;
 export const CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW_TOKENS = 112_193;
@@ -372,10 +373,10 @@ export interface WebModelContract {
     readonly requiresPro: boolean;
 }
 export const WEB_MODEL_CONTRACTS: readonly WebModelContract[] = [
-    { id: "anthropic-web-chatgpt-instant", upstreamModel: "chatgpt-web-instant", displayName: "ChatGPT Web Instant (GPT-5.6 Sol)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
-    { id: "anthropic-web-chatgpt-medium", upstreamModel: "chatgpt-web-medium", displayName: "ChatGPT Web Medium (GPT-5.6 Sol)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
-    { id: "anthropic-web-chatgpt-high", upstreamModel: "chatgpt-web-high", displayName: "ChatGPT Web High (GPT-5.6 Sol)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
-    { id: "anthropic-web-chatgpt-extra-high", upstreamModel: "chatgpt-web-xhigh", displayName: "ChatGPT Web Extra High (GPT-5.6 Sol)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: true },
+    { id: "anthropic-web-chatgpt-instant", upstreamModel: "chatgpt-web-instant", displayName: "ChatGPT Web Instant (Latest)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
+    { id: "anthropic-web-chatgpt-medium", upstreamModel: "chatgpt-web-medium", displayName: "ChatGPT Web Medium (Latest)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
+    { id: "anthropic-web-chatgpt-high", upstreamModel: "chatgpt-web-high", displayName: "ChatGPT Web High (Latest)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
+    { id: "anthropic-web-chatgpt-extra-high", upstreamModel: "chatgpt-web-xhigh", displayName: "ChatGPT Web Extra High (Latest)", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: true },
     { id: "anthropic-web-chatgpt-pro", upstreamModel: "chatgpt-web-pro", displayName: "ChatGPT Web Pro (GPT-6 Astra)", contextWindow: CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: true },
 ];
 export function webModelContract(modelId: string): WebModelContract | undefined {
