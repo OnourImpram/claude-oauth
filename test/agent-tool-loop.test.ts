@@ -88,9 +88,10 @@ async function readBody(response: { body: ReadableStream<Uint8Array> | null }): 
     return Buffer.concat(chunks.map((p) => Buffer.from(p))).toString("utf8");
 }
 
-function createAdapter(agent: FakeAgent, setup: (a: FakeAgent) => void): AgentModelAdapter {
+function createAdapter(agent: FakeAgent, setup: (a: FakeAgent) => void, progressIntervalMs?: number): AgentModelAdapter {
     const sessions = new AgentSessionRegistry({
         mcpBaseUrl: "http://127.0.0.1:65000",
+        ...(progressIntervalMs === undefined ? {} : { progressIntervalMs }),
         startAgent: (options) => {
             agent.bridge = options.bridge;
             setup(agent);
@@ -226,6 +227,44 @@ describe("the tool loop through the adapter", () => {
         const payload = JSON.parse(await readBody(second)) as { stop_reason: string; content: { text: string }[] };
         strictEqual(payload.stop_reason, "end_turn");
         strictEqual(payload.content[0]?.text, "Done, the file is edited.");
+    });
+
+    it("streams the agent's text while the turn runs, then the tool_use block in the same message", async () => {
+        const agent = new FakeAgent();
+        let bridgeReady: (() => void) | undefined;
+        const ready = new Promise<void>((resolve) => { bridgeReady = resolve; });
+        const adapter = createAdapter(agent, () => bridgeReady?.(), 20);
+        const response = await adapter.send(createRequest({ model: model.id, stream: true, messages: [{ role: "user", content: "edit b.ts" }], tools: TOOLS }));
+        const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+        const seen: string[] = [];
+        const readUntil = async (needle: string): Promise<void> => {
+            // A bounded wait: without live text the old shape arrives only when the turn ends,
+            // and the negative arm must fail in seconds, not at the test timeout.
+            const deadline = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`no ${needle} within 3 s`)), 3_000).unref());
+            for (;;) {
+                if (seen.join("").includes(needle)) return;
+                const result = await Promise.race([reader.read(), deadline]);
+                if (result.done) throw new Error(`stream ended before ${needle}`);
+                seen.push(Buffer.from(result.value).toString("utf8"));
+            }
+        };
+        await ready;
+        agent.say("Looking at");
+        // The first characters arrive BEFORE the turn ends: that is the whole point.
+        await readUntil('"text":"Looking at"');
+        ok(seen.join("").includes("message_start"));
+        agent.say(" b.ts now.");
+        await readUntil('"text":" b.ts now."');
+        agent.callTool("Edit", { path: "b.ts" });
+        await readUntil("message_stop");
+        const streamText = seen.join("");
+        strictEqual(streamText.split("event: message_start").length - 1, 1, "one message_start");
+        strictEqual(streamText.split('"type":"content_block_start"').length - 1, 2, "text block then tool block");
+        ok(streamText.indexOf('"text":"Looking at"') < streamText.indexOf('"type":"tool_use"'));
+        ok(streamText.includes('"index":1,"content_block":{"type":"tool_use"'));
+        ok(streamText.includes('"stop_reason":"tool_use"'));
+        // Negative control: the text is not repeated at the end.
+        strictEqual(streamText.split("Looking at").length - 1, 1);
     });
 
     it("streaming emits input_json_delta and closes on tool_use", async () => {

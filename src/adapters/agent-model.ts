@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AdapterRequest, AdapterResponse, ModelRecord, ProviderAdapter, ProviderReadiness } from "../domain/contracts.js";
 import { RouterError } from "../domain/errors.js";
 import { numericUsage } from "../domain/validation.js";
-import type { AgentSessionRegistry, ToolResultDelivery, TurnOutcome } from "../mcp/session-registry.js";
+import type { AgentSessionRegistry, ToolResultDelivery, TurnOutcome, TurnProgress } from "../mcp/session-registry.js";
 import { deriveMcpTools, type AnthropicToolDefinition, type McpToolResultContent, type ParkedToolCall } from "../mcp/tool-bridge.js";
 import { writeSafeLog } from "../runtime/log.js";
 type AgentModelProvider = "google" | "xai";
@@ -548,6 +548,42 @@ function toolUseStreamEvents(controller: ReadableStreamDefaultController<Uint8Ar
     }));
     controller.enqueue(sseEvent("message_stop", { type: "message_stop" }));
 }
+/** message_start plus an open text block at index 0; the live path's first emission. */
+function openTextStream(controller: ReadableStreamDefaultController<Uint8Array>, request: AdapterRequest, inputTokenUpperBound: number, messageId: string): void {
+    controller.enqueue(sseEvent("message_start", {
+        type: "message_start",
+        message: {
+            id: messageId,
+            type: "message",
+            role: "assistant",
+            model: request.envelope.model,
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: inputTokenUpperBound, output_tokens: 0 },
+        },
+    }));
+    controller.enqueue(sseEvent("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+}
+/** Closes a stream opened by openTextStream: the unstreamed tail, then the tool_use block if any. */
+function finishOpenedStream(controller: ReadableStreamDefaultController<Uint8Array>, outcome: TurnOutcome, usage: Record<string, number>, streamedChars: number): void {
+    const tail = outcome.text.slice(streamedChars);
+    if (tail !== "") {
+        controller.enqueue(sseEvent("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: tail } }));
+    }
+    controller.enqueue(sseEvent("content_block_stop", { type: "content_block_stop", index: 0 }));
+    if (outcome.kind === "tool_use") {
+        controller.enqueue(sseEvent("content_block_start", { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: outcome.call.id, name: outcome.call.name, input: {} } }));
+        controller.enqueue(sseEvent("content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: JSON.stringify(outcome.call.input) } }));
+        controller.enqueue(sseEvent("content_block_stop", { type: "content_block_stop", index: 1 }));
+    }
+    controller.enqueue(sseEvent("message_delta", {
+        type: "message_delta",
+        delta: { stop_reason: outcome.kind === "tool_use" ? "tool_use" : "end_turn", stop_sequence: null },
+        usage: { output_tokens: usage["output_tokens"] ?? 0 },
+    }));
+    controller.enqueue(sseEvent("message_stop", { type: "message_stop" }));
+}
 function validatedResult(result: AgentModelRunResult): AgentModelRunResult {
     if (typeof result.text !== "string" || result.text.trim() === "") {
         throw new RouterError("upstream_protocol_error", "The provider agent returned no assistant text.", 502);
@@ -740,16 +776,17 @@ export class AgentModelAdapter implements ProviderAdapter {
         // History compilation truncates tool summaries; MCP receives the full payload.
         const inputTokenUpperBound = results.length === 0 ? compiled.inputTokenUpperBound
             : Math.max(compiled.inputTokenUpperBound, Math.ceil(request.body.length / 3));
-        const runTurn = async (): Promise<TurnOutcome> => {
+        const runTurn = async (onProgress?: TurnProgress): Promise<TurnOutcome> => {
             // FINDING 1. Without this signal the router's 300 s request timeout and the
             // client disconnect do nothing on this route: the only thing that would end a
             // running ACP turn would be the agent finishing on its own.
-            if (results.length > 0) return (await sessions.resume(results, request.signal, compiled.continuationText, tools)).outcome;
+            if (results.length > 0) return (await sessions.resume(results, request.signal, compiled.continuationText, tools, onProgress)).outcome;
             return (await sessions.begin(
                 compiled.text,
                 tools,
                 request.model.upstreamModel,
                 request.signal,
+                onProgress,
             )).outcome;
         };
         if (request.envelope.stream === true) return this.#streamWithTools(request, inputTokenUpperBound, runTurn);
@@ -765,9 +802,18 @@ export class AgentModelAdapter implements ProviderAdapter {
             body: readableBytes(Buffer.from(JSON.stringify(payload), "utf8")),
         };
     }
-    #streamWithTools(request: AdapterRequest, inputTokenUpperBound: number, runTurn: () => Promise<TurnOutcome>): AdapterResponse {
+    #streamWithTools(request: AdapterRequest, inputTokenUpperBound: number, runTurn: (onProgress?: TurnProgress) => Promise<TurnOutcome>): AdapterResponse {
         let streamOpen = true;
         let ping: NodeJS.Timeout | undefined;
+        // Live text. Measured 2026-09-13: a grok step took 40 to 118 s and the client
+        // showed nothing until it ended ("it freezes while working"). The text the agent
+        // has produced so far is streamed as it grows; the outcome's text is a superset of
+        // it (same handle, same cursor), so the tail and the tool_use block follow in the
+        // same message. Nothing is opened until the first character exists, so a turn
+        // that ends in a bare tool call keeps the old shape.
+        const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
+        let streamedChars = 0;
+        let settled = false;
         const stop = (): void => {
             streamOpen = false;
             if (ping !== undefined) clearInterval(ping);
@@ -786,12 +832,28 @@ export class AgentModelAdapter implements ProviderAdapter {
                         stop();
                     }
                 }, this.#pingIntervalMs);
-                void runTurn()
+                const onProgress: TurnProgress = (text) => {
+                    if (!streamOpen || settled || text.length <= streamedChars) return;
+                    try {
+                        if (streamedChars === 0) {
+                            openTextStream(controller, request, inputTokenUpperBound, messageId);
+                        }
+                        controller.enqueue(sseEvent("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: text.slice(streamedChars) } }));
+                        streamedChars = text.length;
+                    }
+                    catch {
+                        stop();
+                    }
+                };
+                void runTurn(onProgress)
                     .then((outcome) => {
+                        settled = true;
                         if (!streamOpen) return;
                         const usage = localUsage(inputTokenUpperBound, outcome.text);
-                        const messageId = `msg_${randomUUID().replaceAll("-", "")}`;
-                        if (outcome.kind === "tool_use") {
+                        if (streamedChars > 0) {
+                            finishOpenedStream(controller, outcome, usage, streamedChars);
+                        }
+                        else if (outcome.kind === "tool_use") {
                             toolUseStreamEvents(controller, request, outcome.text, outcome.call, usage, messageId);
                         }
                         else {

@@ -76,9 +76,20 @@ type TurnEvent =
     | { readonly kind: "tool_use"; readonly call: ParkedToolCall }
     | { readonly kind: "end_turn" };
 
+/**
+ * Called while a turn is in flight with the text produced so far in THIS turn (a
+ * growing prefix of the outcome's text). Measured 2026-09-13: a grok step took 40 to
+ * 118 s and the client saw nothing until it ended; the text existed the whole time in
+ * handle.text(). Polled, not pushed: the run handle is the one surface every agent
+ * already has, so no provider bridge changes.
+ */
+export type TurnProgress = (textSoFar: string) => void;
+
 export interface SessionRegistryOptions {
     /** How long a session may sit without a turn before it is swept. */
     readonly idleTimeoutMs?: number;
+    /** Poll period for TurnProgress callbacks. DEFAULT 250 ms. */
+    readonly progressIntervalMs?: number;
     /** Injected so tests do not depend on wall-clock time. */
     readonly now?: () => number;
     /**
@@ -149,6 +160,11 @@ class AgentSession {
             () => this.#agentSettled(undefined),
             (error: unknown) => this.#agentSettled(error),
         );
+    }
+
+    /** Text of the turn in flight so far; does not move the cursor. */
+    peekText(): string {
+        return (this.#handle?.text() ?? "").slice(this.#textCursor);
     }
 
     /** Text the agent produced since the previous turn, never the whole log. */
@@ -276,6 +292,7 @@ export class AgentSessionRegistry {
     readonly #mcpHeaders: () => Readonly<Record<string, string>>;
     readonly #callTimeoutMs: number;
     readonly #maxLiveSessions: number;
+    readonly #progressIntervalMs: number;
     /** Calls the router itself dropped on its own timeout. Counted SEPARATELY. */
     #timedOutResults = 0;
     readonly #timedOutCalls = new Set<string>();
@@ -288,6 +305,7 @@ export class AgentSessionRegistry {
         this.#mcpHeaders = options.mcpHeaders ?? (() => ({}));
         this.#callTimeoutMs = options.callTimeoutMs ?? 0;
         this.#maxLiveSessions = options.maxLiveSessions ?? 4;
+        this.#progressIntervalMs = options.progressIntervalMs ?? 250;
         this.#startAgent = options.startAgent;
     }
 
@@ -353,6 +371,7 @@ export class AgentSessionRegistry {
         tools: readonly McpToolDescriptor[],
         model = "",
         signal?: AbortSignal,
+        onProgress?: TurnProgress,
     ): Promise<BeginResult> {
         if (this.#closed)
             throw new RouterError("adapter_unavailable", "The agent session registry is shutting down.", 503);
@@ -433,7 +452,7 @@ export class AgentSessionRegistry {
             this.#retire(sessionKey, "agent_startup_failed");
             throw error;
         }
-        const outcome = await this.#settle(sessionKey, session, signal);
+        const outcome = await this.#settle(sessionKey, session, signal, onProgress);
         return { sessionKey, outcome };
     }
 
@@ -469,7 +488,7 @@ export class AgentSessionRegistry {
             return sessionKey !== undefined && this.#sessions.has(sessionKey);
         });
     }
-    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = "", tools?: readonly McpToolDescriptor[]): Promise<BeginResult> {
+    async resume(results: readonly ToolResultDelivery[], signal?: AbortSignal, continuationText = "", tools?: readonly McpToolDescriptor[], onProgress?: TurnProgress): Promise<BeginResult> {
         if (signal?.aborted) {
             throw new RouterError("upstream_timeout", "The agent request was cancelled before it resumed.", 504);
         }
@@ -534,12 +553,12 @@ export class AgentSessionRegistry {
                 409,
             );
         }
-        const outcome = await this.#awaitSettled(sessionKey, session, turn, signal);
+        const outcome = await this.#awaitSettled(sessionKey, session, turn, signal, onProgress);
         return { sessionKey, outcome };
     }
 
-    async #settle(sessionKey: string, session: AgentSession, signal?: AbortSignal): Promise<TurnOutcome> {
-        return await this.#awaitSettled(sessionKey, session, session.awaitTurn(), signal);
+    async #settle(sessionKey: string, session: AgentSession, signal?: AbortSignal, onProgress?: TurnProgress): Promise<TurnOutcome> {
+        return await this.#awaitSettled(sessionKey, session, session.awaitTurn(), signal, onProgress);
     }
 
     async #awaitSettled(
@@ -547,7 +566,21 @@ export class AgentSessionRegistry {
         session: AgentSession,
         turn: Promise<TurnOutcome>,
         signal?: AbortSignal,
+        onProgress?: TurnProgress,
     ): Promise<TurnOutcome> {
+        // Progress is polled from the handle while the turn runs and stopped BEFORE the
+        // outcome is returned, so no callback can fire after the consumer has the text.
+        let poll: NodeJS.Timeout | undefined;
+        if (onProgress !== undefined) {
+            let last = "";
+            poll = setInterval(() => {
+                const text = session.peekText();
+                if (text.length > last.length) {
+                    last = text;
+                    onProgress(text);
+                }
+            }, this.#progressIntervalMs);
+        }
         // FINDING 1. Without this wiring the router's 300 s request timeout and the two
         // client-disconnect aborts stay DEAD ON THIS ROUTE: the only thing that would end
         // a running ACP turn is the agent finishing on its own. On top of that a #running
@@ -566,6 +599,7 @@ export class AgentSessionRegistry {
             this.#retire(sessionKey, "settle_failed");
             throw error;
         } finally {
+            if (poll !== undefined) clearInterval(poll);
             signal?.removeEventListener("abort", onAbort);
         }
     }
