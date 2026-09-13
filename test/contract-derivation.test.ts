@@ -262,11 +262,19 @@ describe("the window advertised to Claude Code is derived from the contract", ()
     // not attached" and "the instrument is broken" would look identical. Keeping the
     // advertisement at 1_000_000 is another arm's job ("Astra advertises 1_000_000"),
     // because its rationale is not the picker: a round number and headroom under the ceiling.
-    it("picker identity derives from the SNAPSHOT window, NOT the advertised one", () => {
+    // B10 (2026-09-10) inverts the earlier claim: Claude Code never reads discovery's
+    // context_window (B08 measurement), so an advertised 1_000_000 that stays out of the id is
+    // invisible to the client. The picker id now carries `[1m]` when the ADVERTISED window
+    // reaches 1_000_000; a row without an advertised override still derives from the snapshot.
+    it("picker identity carries [1m] when the ADVERTISED window reaches 1_000_000 (B10)", () => {
         const identities = discoveryRows(verifiedSnapshot).map((entry) => String(entry["id"]));
-        strictEqual(identities.includes("anthropic-openai-gpt-6-astra"), true);
-        strictEqual(identities.includes("anthropic-openai-gpt-6-astra[1m]"), false);
-        strictEqual(claudeClientDiscoveryId(astraRow()), "anthropic-openai-gpt-6-astra");
+        strictEqual(identities.includes("anthropic-openai-gpt-6-astra[1m]"), true);
+        strictEqual(identities.includes("anthropic-openai-gpt-6-astra"), false);
+        strictEqual(claudeClientDiscoveryId(astraRow()), "anthropic-openai-gpt-6-astra[1m]");
+        // NEGATIVE ARM: Sol advertises no override, its 872_000 snapshot stays below 1_000_000,
+        // and Claude Code keeps its 200k assumption for it (the 272K pricing boundary).
+        strictEqual(identities.includes("anthropic-openai-gpt-5.6-sol[1m]"), false);
+        strictEqual(identities.includes("anthropic-openai-gpt-5.6-sol"), true);
 
         // POSITIVE ARM -- the suffix CAN in fact be attached, and its trigger is the
         // snapshot window becoming equal to the contract ceiling. If this arm does not fall,

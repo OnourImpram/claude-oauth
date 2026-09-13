@@ -3,10 +3,17 @@ import { RouterError } from "./errors.js";
 import { agentModelContract, openAiModelContract } from "./model-contracts.js";
 export function claudeClientDiscoveryId(model: ModelRecord): string {
     const contract = openAiModelContract(model.id);
+    // B10 (measured 2026-09-08 under B08 and reported 2026-09-10): Claude Code does not read
+    // discovery's context_window; it assumes 200k for any id without the `[1m]` suffix. The
+    // suffix therefore follows the window this router ADVERTISES (the contract's documented
+    // override when there is one, else the snapshot), not the snapshot alone. Astra advertises
+    // 1_000_000 and gets the suffix; Sol and Terra advertise their 872_000 snapshot and stay at
+    // Claude Code's 200k assumption, which keeps them under the 272K pricing boundary.
     const reviewedLongContext = contract !== undefined &&
         model.provider === "openai" &&
         model.upstreamModel === contract.upstreamModel &&
-        model.contextWindow === contract.contextWindow;
+        (model.contextWindow === contract.contextWindow ||
+            (advertisedContextWindow(model) ?? 0) >= 1_000_000);
     const reviewedAgentLongContext = model.executionMode === "agent-readonly" &&
         model.contextWindow !== undefined &&
         model.contextWindow >= 1_000_000;

@@ -49,11 +49,17 @@ export const OPENAI_AUTO_COMPACT_WINDOW_TOKENS = 220_000;
 //
 // 1_000_000 rather than the model card's own 1,050,000, and the reason is NOT the picker id.
 //
+// B10 (2026-09-10): this constant NOW DOES reach the picker id. B08 measured that Claude Code
+// ignores discovery's context_window and assumes 200k without the `[1m]` suffix, so the
+// advertised window that only lived in GET /v1/models was never seen by the client: Astra ran
+// at 200k. claudeClientDiscoveryId attaches the suffix when the advertised window reaches
+// 1_000_000. The history below is kept as the record of the earlier, refuted assumption.
+//
 // CORRECTED 2026-09-05 (independent audit FINDING 1, reproduced in this run). This comment used
-// to claim the value stayed clear of claudeClientDiscoveryId's `[1m]` suffix rule. It cannot:
-// that rule reads model.contextWindow -- the SNAPSHOT number -- and this constant never reaches
-// it. MEASURED by raising the constant to 1_050_000 in the staging tree: the picker id stayed
-// `anthropic-openai-gpt-6-astra`, no suffix. The suffix fires only when the SNAPSHOT itself
+// to claim the value stayed clear of claudeClientDiscoveryId's `[1m]` suffix rule. It could not
+// then: that rule read model.contextWindow -- the SNAPSHOT number -- and this constant never
+// reached it. MEASURED by raising the constant to 1_050_000 in the staging tree: the picker id
+// stayed `anthropic-openai-gpt-6-astra`, no suffix. The suffix fired only when the SNAPSHOT itself
 // reaches 1_050_000 (measured in the same run), which is a different lever with its own branch
 // in test/contract-derivation.test.ts.
 //
