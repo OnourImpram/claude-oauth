@@ -23,6 +23,11 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   with the bridge ledger at `COMPLETED`, `send_attempts=1`. A full vault session does not fit:
   its first request exceeds the bridge's 2,000,000-byte body limit, so the lane is usable from
   lean sessions until a context-fit step exists on the bridge side (open).
+- The adapter advertises only the tools the bridge auto-approves, read from the bridge's
+  `/health` (`auto_approved_tools`) at readiness and lazily before the first send. Measured
+  2026-09-13 22:07 in a vault session: `Skill` had no bridge rule, sat in PROPOSED for ten
+  minutes while the remote tool call timed out twice, and the turn died of
+  completion_contract_missing. A bridge without the field leaves the list unfiltered.
 
 ### Changed: claude pin 2.1.257 to 2.1.270 (2026-09-13)
 
