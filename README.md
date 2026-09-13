@@ -117,10 +117,15 @@ claude-oauth  ─▶  Claude Code process  ─▶  loopback router  ─┬─▶
 | Google | Antigravity CLI `agy`, headless, one process per call | Google | `antigravity.version` |
 | xAI | `grok` over ACP (Agent Client Protocol), long-lived sessions, at most four live at once, so a tool loop can cross Claude Code's per-turn HTTP requests | xAI | `grok.version` |
 | OpenAI | **Clodex** (`@bman654/clodex`), a third-party bridge, run as a local capsule with the `openai-oauth` provider | [bman654/clodex](https://github.com/bman654/clodex), MIT-licensed npm package, with repository-owned shadow and capsule patches | `clodex.version`, `clodex.localPatchSha256`, `clodex.capsuleEntrypointSha256` |
+| ChatGPT Web | **Agent Web Bridge**, a loopback daemon that drives your signed-in ChatGPT tab in your own Chrome (CDP) and exposes a Messages subset; tools reach ChatGPT through its own plugin over the OpenAI tunnel-client | [miuuyy/Agent-Web-Bridge](https://github.com/miuuyy/Agent-Web-Bridge), the same author's project, installed separately | not pinned; readiness is three live checks (daemon, tunnel, Chrome CDP) and the lane is listed only when all three pass |
 
 Each lane authenticates as **you**, on your own plan: the Google and xAI lanes run those vendors'
 own CLIs; the OpenAI lane does **not** run OpenAI's `codex` CLI, it runs Clodex, which speaks to
-OpenAI over your ChatGPT/Codex-plan OAuth session. Earlier drafts of this project described all
+OpenAI over your ChatGPT/Codex-plan OAuth session. The ChatGPT Web lane is different in kind: no
+API at all, it is your browser session, and the five picker rows (`anthropic-web-chatgpt-instant`,
+`-medium`, `-high`, `-extra-high`, `-pro`) are ChatGPT's own reasoning-effort stops. Their context
+window is what ChatGPT enforces on a Pro account (111,193 tokens, auto-compact at 95,000), read
+from the codex-chatgpt-web reference source, not from Claude Code's 200k default. Earlier drafts of this project described all
 three lanes as "the provider's own official CLI"; that was wrong for OpenAI and is corrected here.
 
 ### Selecting a model, including mid-session

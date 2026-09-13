@@ -372,6 +372,7 @@ footer p { max-width: var(--measure); }
           <div class="lane"><div class="tag"><b>Antigravity <code>agy</code></b><small>your Google OAuth</small></div></div>
           <div class="lane"><div class="tag"><b><code>grok</code></b><small>your xAI OAuth</small></div></div>
           <div class="lane"><div class="tag"><b>Clodex</b><small>your ChatGPT OAuth</small></div></div>
+          <div class="lane"><div class="tag"><b>Agent Web Bridge</b><small>your ChatGPT tab, your Chrome</small></div></div>
         </div>
 
         <figcaption id="panel-cap">
@@ -437,6 +438,7 @@ footer p { max-width: var(--measure); }
             <tr><td data-l="lane">Google</td><td data-l="runs">Antigravity CLI <code>agy</code>, headless, one process per call</td><td data-l="software by">Google</td><td data-l="session">Google OAuth</td></tr>
             <tr><td data-l="lane">xAI</td><td data-l="runs"><code>grok</code> over ACP (Agent Client Protocol), long-lived sessions, at most four live at once</td><td data-l="software by">xAI</td><td data-l="session">xAI OAuth</td></tr>
             <tr><td data-l="lane">OpenAI</td><td data-l="runs"><b>Clodex</b>, a third-party bridge (<code>@bman654/clodex</code> 2.11.1, MIT), run as a local capsule with its <code>openai-oauth</code> provider and local patches from <code>config/</code></td><td data-l="software by">bman654 (not OpenAI)</td><td data-l="session">ChatGPT / Codex-plan OAuth</td></tr>
+            <tr><td data-l="lane">ChatGPT Web</td><td data-l="runs"><b>Agent Web Bridge</b>, a loopback daemon that drives your signed-in ChatGPT tab in your own Chrome over CDP; five effort profiles as picker rows; listed only when daemon, tunnel and Chrome all answer</td><td data-l="software by">miuuyy (the same author), installed separately</td><td data-l="session">your ChatGPT browser session (Pro)</td></tr>
           </tbody>
         </table>
       </div>

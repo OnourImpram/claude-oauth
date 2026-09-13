@@ -7,6 +7,28 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Added: ChatGPT Web lane through Agent Web Bridge (2026-09-13)
+
+- New provider `web`: a proxy adapter in front of Agent Web Bridge, a loopback daemon that
+  drives the operator's signed-in ChatGPT tab in their own Chrome. Five picker rows keyed to
+  the bridge's effort profiles (instant, medium, high, extra-high, pro) with the window
+  ChatGPT enforces on a Pro account (111,193 tokens, auto-compact 95,000), read from the
+  codex-chatgpt-web reference source rather than assumed.
+- Readiness is three named facts, each with a remedy: bridge daemon on 8765, tunnel-client
+  `/readyz`, Chrome CDP on 9222. Rows enter the snapshot only when all three pass.
+- The adapter strips the fields the bridge refuses, forces `tool_choice: auto`, answers
+  `count_tokens` locally, maps the bridge's 423 pause to a reconcile remedy and its 413 to a
+  400 naming the real limits (`max_body_bytes`, `max_prompt_bytes`, the ChatGPT window).
+- Measured: a print-mode `Return exactly PONG` through the router returned `PONG` in 40.2 s
+  with the bridge ledger at `COMPLETED`, `send_attempts=1`. A full vault session does not fit:
+  its first request exceeds the bridge's 2,000,000-byte body limit, so the lane is usable from
+  lean sessions until a context-fit step exists on the bridge side (open).
+
+### Changed: claude pin 2.1.257 to 2.1.270 (2026-09-13)
+
+- Claude Code updated itself; the lock refused every launch, as designed. The sha256 was
+  recomputed from the binary on disk.
+
 ### Measured: the Gemini native-tool attribution in B11 did not hold (2026-09-13)
 
 - B11's row said a native `read_file` outside the call-scoped allow list stopped the
