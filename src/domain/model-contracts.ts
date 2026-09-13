@@ -342,11 +342,52 @@ export function verifiedGrok46CatalogEntry(catalog: readonly ProviderModelRecord
 // CLAUDE_CODE_AUTO_COMPACT_WINDOW unset, because that variable OVERRIDES the
 // autoCompactWindow setting -- setting it for a Claude model would silently
 // disable the operator's own configured threshold.
+// ChatGPT Web lane (Agent Web Bridge, operator's own project; 2026-09-13).
+//
+// Window and compaction numbers come from the working reference codex-chatgpt-web, read from
+// its source on 2026-09-13 (tasks/claude-oauth-web-koprusu-20260913/okuma-3 §5): on a Pro
+// account every reasoning effort carries a 111,193-token window (Pro itself 112,193) with
+// auto-compact at 95,000; the bridge does not advertise any of this, and Claude Code assumes
+// 200k for an id without the `[1m]` suffix (B08), so without these rows the client would
+// overrun ChatGPT's own limit before compaction ever fired. This machine is a Pro account
+// (measured: effort slider 0..4, five stops, the reference's own Pro test at
+// chatgpt-session.ts:239). A Plus-only account would need the Plus rows (41,000 / 90,000)
+// and the two Pro-gated profiles removed; that is a refresh-time check, not done yet.
+//
+// The five profile names are the bridge's own (config.py model_defaults) and are what the
+// adapter sends as `model`. The router ids follow the reference's slugs (extra-high, pro).
+export const CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS = 111_193;
+export const CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW_TOKENS = 112_193;
+export const CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS = 95_000;
+export interface WebModelContract {
+    readonly alias: "web-instant" | "web-medium" | "web-high" | "web-extra-high" | "web-pro";
+    readonly id: string;
+    readonly upstreamModel: string;
+    readonly displayName: string;
+    readonly contextWindow: number;
+    readonly autoCompactWindow: number;
+    /** The reference gates these on the account exposing Pro; the bridge's slider probe agrees. */
+    readonly requiresPro: boolean;
+}
+export const WEB_MODEL_CONTRACTS: readonly WebModelContract[] = [
+    { alias: "web-instant", id: "anthropic-web-chatgpt-instant", upstreamModel: "chatgpt-web-instant", displayName: "ChatGPT Web Instant", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
+    { alias: "web-medium", id: "anthropic-web-chatgpt-medium", upstreamModel: "chatgpt-web-medium", displayName: "ChatGPT Web Medium", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
+    { alias: "web-high", id: "anthropic-web-chatgpt-high", upstreamModel: "chatgpt-web-high", displayName: "ChatGPT Web High", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: false },
+    { alias: "web-extra-high", id: "anthropic-web-chatgpt-extra-high", upstreamModel: "chatgpt-web-xhigh", displayName: "ChatGPT Web Extra High", contextWindow: CHATGPT_WEB_PRO_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: true },
+    { alias: "web-pro", id: "anthropic-web-chatgpt-pro", upstreamModel: "chatgpt-web-pro", displayName: "ChatGPT Web Pro", contextWindow: CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW_TOKENS, autoCompactWindow: CHATGPT_WEB_PRO_AUTO_COMPACT_WINDOW_TOKENS, requiresPro: true },
+];
+export function webModelContract(modelId: string): WebModelContract | undefined {
+    return WEB_MODEL_CONTRACTS.find((entry) => entry.id === modelId);
+}
 export function autoCompactWindowForModel(modelArgument: string): number | undefined {
     const normalized = modelArgument.trim().toLowerCase().replace(/\[1m\]$/u, "");
     if (normalized === "")
         return undefined;
     for (const contract of AGENT_MODEL_CONTRACTS) {
+        if (normalized === contract.alias.toLowerCase() || normalized === contract.id.toLowerCase())
+            return contract.autoCompactWindow;
+    }
+    for (const contract of WEB_MODEL_CONTRACTS) {
         if (normalized === contract.alias.toLowerCase() || normalized === contract.id.toLowerCase())
             return contract.autoCompactWindow;
     }
