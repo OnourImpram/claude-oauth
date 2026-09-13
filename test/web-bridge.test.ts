@@ -162,6 +162,15 @@ describe("WebBridgeAdapter send", () => {
         );
     });
 
+    it("maps the bridge's 413 to invalid_request naming the real limits", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const adapter = await adapterWith(sink, "k", 413);
+        await rejects(
+            adapter.send(request({ model: "x", max_tokens: 1, messages: [] })),
+            (error: unknown) => error instanceof RouterError && error.code === "invalid_request" && error.status === 400 && /max_body_bytes/.test(error.message),
+        );
+    });
+
     it("refuses to send without a usable local bearer", async () => {
         const sink: { sent?: HttpTransportRequest } = {};
         const missing = await adapterWith(sink, null);

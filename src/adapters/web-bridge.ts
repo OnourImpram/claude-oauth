@@ -98,6 +98,12 @@ export class WebBridgeAdapter implements ProviderAdapter {
             // reconciles. Surface the one command that clears it.
             throw new RouterError("adapter_unavailable", "The ChatGPT Web bridge is paused. FIX: hwb status, then hwb reconcile <generation> --remote-stopped --note <why> and hwb resume --note <why>.", 503);
         }
+        if (response.status === 413) {
+            // Measured 2026-09-13: a vault session's first request exceeds the bridge's
+            // max_body_bytes (2,000,000) and Claude Code then prints its own "max 32MB" text,
+            // which names the wrong limit. A 400 with the real limits is what the user can act on.
+            throw new RouterError("invalid_request", "The ChatGPT Web bridge refused the request as too large (bridge max_body_bytes / max_prompt_bytes; ChatGPT window 111,193 tokens). FIX: run a leaner session (claude --disable-slash-commands --tools \"\") or raise the limits in ~/.hermes-web-bridge/config.json.", 400);
+        }
         return { status: response.status, headers: response.headers, body: response.body };
     }
 
