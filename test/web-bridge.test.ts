@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { WebBridgeAdapter, sessionTitleFor } from "../src/adapters/web-bridge.js";
+import { WebBridgeAdapter, isQuotaProbe, sessionTitleFor } from "../src/adapters/web-bridge.js";
 import type { AdapterRequest, HttpTransport, HttpTransportRequest, MessageEnvelope, ModelRecord, ModelSnapshot } from "../src/domain/contracts.js";
 import { RouterError } from "../src/domain/errors.js";
 import { WEB_MODEL_CONTRACTS, autoCompactWindowForModel } from "../src/domain/model-contracts.js";
@@ -204,6 +204,21 @@ describe("WebBridgeAdapter send", () => {
         const sse = await new Response(streamed.body).text();
         ok(sse.includes("event: message_start") && sse.includes("event: message_stop"));
         ok(sse.includes(JSON.stringify(JSON.stringify({ title: "x" }))));
+    });
+
+    it("answers Claude Code's quota probe locally and forwards anything looser", async () => {
+        const sink: { sent?: HttpTransportRequest } = {};
+        const adapter = await adapterWith(sink);
+        const response = await adapter.send(request({ model: "x", messages: [{ role: "user", content: "quota" }] }));
+        strictEqual(response.status, 200);
+        strictEqual(sink.sent, undefined, "the probe must not reach the bridge");
+        ok(isQuotaProbe({ model: "x", messages: [{ role: "user", content: [{ type: "text", text: " quota " }] }] }));
+        // A real question containing the word, a system prompt, tools or a second message: forwarded.
+        await adapter.send(request({ model: "x", max_tokens: 1, messages: [{ role: "user", content: "what is my quota" }] }));
+        ok(sink.sent !== undefined);
+        strictEqual(isQuotaProbe({ model: "x", system: "s", messages: [{ role: "user", content: "quota" }] }), false);
+        strictEqual(isQuotaProbe({ model: "x", tools: [{ name: "Read" }], messages: [{ role: "user", content: "quota" }] }), false);
+        strictEqual(isQuotaProbe({ model: "x", messages: [{ role: "user", content: "quota" }, { role: "assistant", content: "ok" }] }), false);
     });
 
     it("forwards a real turn even when it quotes the naming instruction", async () => {

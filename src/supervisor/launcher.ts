@@ -454,12 +454,11 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         if (!shouldWriteGatewayModelsCache(router.port, pinnedPort)) {
             // A3: a session on an ephemeral port must not overwrite the picker of the session on
             // the fixed port.
-            writeSafeLog({
-                event: "gateway_models_cache_skipped",
-                level: "warn",
-                code: `port=${router.port}`,
-                remedy: `Router is on an ephemeral port, not ${pinnedPort} (another claude session holds it): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`,
-            });
+            const remedy = `Router is on an ephemeral port, not ${pinnedPort} (another claude session holds it): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`;
+            writeSafeLog({ event: "gateway_models_cache_skipped", level: "warn", code: `port=${router.port}`, remedy });
+            // Measured 2026-09-14: an operator with two windows read the missing picker as a
+            // bug in one of them; the log line alone never reached the terminal.
+            process.stderr.write(`claude-oauth: second window on port ${router.port}. ${remedy}\n`);
         }
         else {
             try {

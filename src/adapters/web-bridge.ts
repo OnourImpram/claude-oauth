@@ -145,6 +145,12 @@ export class WebBridgeAdapter implements ProviderAdapter {
         if (title !== undefined) {
             return syntheticTextResponse(request, JSON.stringify({ title }));
         }
+        if (isQuotaProbe(request.envelope)) {
+            // Claude Code's quota probe: one user message "quota", no tools, no system, max_tokens
+            // dropped. Measured 2026-09-14 06:21: it became a 16 s ChatGPT conversation of its own.
+            // Only the status matters to the client; the answer stays local.
+            return syntheticTextResponse(request, "ok");
+        }
         const bearer = await this.#bearer();
         if (this.#approved === undefined) {
             this.#learnPolicy((await this.#json(`${this.#origin}/health`, bearer)).body);
@@ -289,6 +295,22 @@ export class WebBridgeAdapter implements ProviderAdapter {
 }
 
 const TITLE_SYSTEM_MARKER = "You are naming a coding session";
+
+/** Claude Code's quota probe: exactly one user message whose content is the word "quota". */
+export function isQuotaProbe(envelope: MessageEnvelope): boolean {
+    if (Array.isArray(envelope.tools) && envelope.tools.length > 0) {
+        return false;
+    }
+    if (envelope.system !== undefined && envelope.system !== null && envelope.system !== "") {
+        return false;
+    }
+    const messages = Array.isArray(envelope.messages) ? envelope.messages : [];
+    if (messages.length !== 1) {
+        return false;
+    }
+    const only = messages[0] as { role?: unknown; content?: unknown } | undefined;
+    return only?.role === "user" && contentText(only.content).trim() === "quota";
+}
 
 /**
  * Returns a title when the envelope is Claude Code's session-naming side request, else
