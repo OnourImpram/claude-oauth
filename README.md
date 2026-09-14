@@ -151,6 +151,22 @@ three lanes as "the provider's own official CLI"; that was wrong for OpenAI and 
 Switching back to a Claude model in the same session is the same `/model` command. There is no
 mode to remember: the native `claude` command never enters any of this.
 
+- **Inside a Workflow script:** `agent(prompt, { model: "grok" })` and `{ model: "gemini" }` reach
+  the router's alias table directly and run the subagent on that lane; measured 2026-09-14
+  (Workflow journal `modelId: "grok"`, router receipts `gemini-3.8-flash-high`). The `Agent`
+  tool's `model` field is Claude Code's own enum (sonnet, opus, haiku, fable) and does not take a
+  vendor alias; use the delegate agents or a Workflow there. Multi-step tasks on this path are not
+  yet measured against the 2026-08-31 double-orchestrator finding.
+- **Concurrent subagents:** every live subagent turn on the Google and xAI lanes is one provider
+  process; the cap is 6 by default and `CLAUDE_OAUTH_MAX_AGENT_SESSIONS=<n>` (1..32) before
+  `claude-oauth` raises or lowers it. Past the cap a subagent gets `503 Too many agent turns in
+  flight` naming the variable.
+- **Context gauge on Grok 4.6:** Claude Code knows two window sizes, 200k (plain id) and 1M
+  (`[1m]` suffix), and ignores what discovery advertises. Grok's 500k window is shown as `[1m]`
+  so the gauge stays proportional; the router compacts at 350k when launched with `--model grok`,
+  and Grok's own 85% compaction is the backstop for a mid-session `/model` switch, where the
+  operator's `autoCompactWindow` setting applies instead.
+
 ## What it does not do
 
 - It does **not** modify, patch, or proxy the native Claude path. `claude` talks to

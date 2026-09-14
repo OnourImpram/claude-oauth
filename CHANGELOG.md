@@ -49,6 +49,20 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   tool_use block close the same message; a bare tool call or a non-streaming client keeps
   the old shape. No provider bridge changes.
 
+### Fixed: Grok context gauge; subagent cap configurable (2026-09-14)
+
+- `anthropic-xai-grok-4.6` is advertised as `anthropic-xai-grok-4.6[1m]`. Claude Code knows only
+  the 200k and 1M buckets and ignores discovery's `context_window`; measured 2026-09-14, the
+  same conversation read 17% on a 1M lane and 85% on Grok, and a 500k model was compacted at
+  ~140k real tokens. Any agent lane above 200k now takes the suffix; the router's 350k
+  auto-compaction (at launch) and Grok's own 85% trigger bound the 1M bucket.
+- The live-subagent cap (one provider process each) is 6 by default and
+  `CLAUDE_OAUTH_MAX_AGENT_SESSIONS` overrides it; the 503 names the variable. A five-agent
+  Workflow fan-out hit the old fixed 4.
+- Documented: Workflow `agent({ model: "grok" | "gemini" })` runs the subagent on that lane
+  through the router alias table (measured by the operator's sessions); the `Agent` tool's
+  `model` enum does not take vendor aliases.
+
 ### Fixed: library console output on the TUI; system prompt repeated on every tool result (2026-09-14)
 
 - grok 1.0.30 answers with JSON-RPC ids it invents (`skills-reload`, `workflows-reload`) and

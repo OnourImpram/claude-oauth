@@ -266,6 +266,18 @@ describe("the window advertised to Claude Code is derived from the contract", ()
     // context_window (B08 measurement), so an advertised 1_000_000 that stays out of the id is
     // invisible to the client. The picker id now carries `[1m]` when the ADVERTISED window
     // reaches 1_000_000; a row without an advertised override still derives from the snapshot.
+    it("an agent lane above 200k carries [1m]; one at 200k does not (grok gauge, 2026-09-14)", () => {
+        const grok: ModelRecord = {
+            id: "anthropic-xai-grok-4.6", provider: "xai", upstreamModel: "grok-4.6", displayName: "Grok 4.6 via xAI OAuth",
+            oauthType: "xai-cli", executionMode: "agent-readonly", discoverable: true, contextWindow: 500_000, capabilities: ["messages"],
+        };
+        strictEqual(claudeClientDiscoveryId(grok), "anthropic-xai-grok-4.6[1m]");
+        // Negative arm: exactly the 200k bucket keeps its bare id.
+        strictEqual(claudeClientDiscoveryId({ ...grok, contextWindow: 200_000 }), "anthropic-xai-grok-4.6");
+        // A non-agent lane is governed by the other rule and is untouched by this one.
+        strictEqual(claudeClientDiscoveryId({ ...grok, executionMode: "native-message-loop" as ModelRecord["executionMode"] }), "anthropic-xai-grok-4.6");
+    });
+
     it("picker identity carries [1m] when the ADVERTISED window reaches 1_000_000 (B10)", () => {
         const identities = discoveryRows(verifiedSnapshot).map((entry) => String(entry["id"]));
         strictEqual(identities.includes("anthropic-openai-gpt-6-astra[1m]"), true);

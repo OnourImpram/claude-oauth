@@ -118,6 +118,21 @@ export interface SessionRegistryOptions {
 }
 
 const defaultIdleTimeoutMs = 30 * 60 * 1000;
+/** Env override for the live-session cap; each live session is one provider process. */
+export const MAX_LIVE_SESSIONS_ENV = "CLAUDE_OAUTH_MAX_AGENT_SESSIONS";
+const defaultMaxLiveSessions = 6;
+/**
+ * Measured 2026-09-14: a five-agent Workflow fan-out on the xai lane hit the old cap of 4
+ * with `503 Too many agent turns in flight` while Claude Code's own Workflow runs up to 16.
+ * Six is the default because each session is a provider process on a machine that was
+ * measured low on memory the same night; the operator raises it per launch through the env.
+ */
+export function maxLiveSessionsFromEnvironment(environment: NodeJS.ProcessEnv = process.env): number {
+    const raw = environment[MAX_LIVE_SESSIONS_ENV];
+    if (raw === undefined || raw.trim() === "") return defaultMaxLiveSessions;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 32 ? parsed : defaultMaxLiveSessions;
+}
 
 class AgentSession {
     readonly key: string;
@@ -304,7 +319,7 @@ export class AgentSessionRegistry {
         this.#mcpBaseUrl = options.mcpBaseUrl;
         this.#mcpHeaders = options.mcpHeaders ?? (() => ({}));
         this.#callTimeoutMs = options.callTimeoutMs ?? 0;
-        this.#maxLiveSessions = options.maxLiveSessions ?? 4;
+        this.#maxLiveSessions = options.maxLiveSessions ?? maxLiveSessionsFromEnvironment();
         this.#progressIntervalMs = options.progressIntervalMs ?? 250;
         this.#startAgent = options.startAgent;
     }
@@ -398,7 +413,7 @@ export class AgentSessionRegistry {
                 // opening one more fills the machine.
                 throw new RouterError(
                     "adapter_unavailable",
-                    `Too many agent turns in flight (${this.#sessions.size}). FIX: wait for a turn to finish or cancel one; each live session holds a provider process.`,
+                    `Too many agent turns in flight (${this.#sessions.size}, cap ${this.#maxLiveSessions}). FIX: wait for a turn to finish or cancel one; each live session holds a provider process. Raise the cap with ${MAX_LIVE_SESSIONS_ENV}=<n> before launching.`,
                     503,
                 );
             }

@@ -1,10 +1,8 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-    AgentSessionRegistry,
+import { AgentSessionRegistry,
     type AgentRunHandle,
-    type SessionRegistryOptions,
-} from "../src/mcp/session-registry.js";
+    type SessionRegistryOptions, MAX_LIVE_SESSIONS_ENV, maxLiveSessionsFromEnvironment } from "../src/mcp/session-registry.js";
 import { McpToolBridge, deriveMcpTools } from "../src/mcp/tool-bridge.js";
 import { RouterError } from "../src/domain/errors.js";
 
@@ -471,3 +469,14 @@ describe("tool surface", () => {
         registry.closeAll("test teardown");
     });
 });
+
+describe("maxLiveSessionsFromEnvironment", () => {
+    it("reads the cap from the environment and falls back to the default on nonsense", () => {
+        strictEqual(maxLiveSessionsFromEnvironment({}), 6);
+        strictEqual(maxLiveSessionsFromEnvironment({ [MAX_LIVE_SESSIONS_ENV]: "8" }), 8);
+        strictEqual(maxLiveSessionsFromEnvironment({ [MAX_LIVE_SESSIONS_ENV]: "0" }), 6);
+        strictEqual(maxLiveSessionsFromEnvironment({ [MAX_LIVE_SESSIONS_ENV]: "many" }), 6);
+        strictEqual(maxLiveSessionsFromEnvironment({ [MAX_LIVE_SESSIONS_ENV]: "99" }), 6);
+    });
+});
+

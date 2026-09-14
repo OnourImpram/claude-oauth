@@ -14,9 +14,16 @@ export function claudeClientDiscoveryId(model: ModelRecord): string {
         model.upstreamModel === contract.upstreamModel &&
         (model.contextWindow === contract.contextWindow ||
             (advertisedContextWindow(model) ?? 0) >= 1_000_000);
+    // Agent lanes: Claude Code knows two buckets, 200k (no suffix) and 1M (`[1m]`). A 500k
+    // model in the 200k bucket fills its gauge at 200k reported tokens: measured 2026-09-14,
+    // the same conversation read 17% on a 1M lane and 85% on Grok 4.6, and Claude Code
+    // compacted a 500k model at ~140k real tokens. The 1M bucket with the router's own
+    // auto-compaction (GROK_AUTO_COMPACT_WINDOW_TOKENS at launch, the provider's internal
+    // trigger as backstop) is the closer of the two, so any agent window above 200k takes
+    // the suffix; exactly 200k or less stays in the 200k bucket.
     const reviewedAgentLongContext = model.executionMode === "agent-readonly" &&
         model.contextWindow !== undefined &&
-        model.contextWindow >= 1_000_000;
+        model.contextWindow > 200_000;
     return reviewedLongContext || reviewedAgentLongContext ? `${model.id}[1m]` : model.id;
 }
 /**
