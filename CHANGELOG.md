@@ -35,6 +35,11 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   same second as the real turn; the title completed and the real turn's page load met HTTP
   429, which paused the bridge. Tools present, more than one user message, or no `<session>`
   block: forwarded unchanged.
+- Claude Code's quota probe (one user message `quota`, no tools, no system) is answered locally
+  too; measured 2026-09-14 it was a 16 s ChatGPT conversation of its own.
+- A second claude-oauth window (router on an ephemeral port) keeps not overwriting the first
+  window's /model picker cache (A3); the launcher now prints that remedy to the terminal as well,
+  since the log line alone read as a bug in the second window.
 
 ### Added: live text on the agent lanes (xai, google) (2026-09-14)
 
