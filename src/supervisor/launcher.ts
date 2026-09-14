@@ -25,7 +25,7 @@ import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, autoCompactWindowForMode
 import type { ClaudeClientMode } from "../runtime/install-lock.js";
 import { preferredLoopbackPort } from "../runtime/loopback-port.js";
 import { gatewayModelsCachePath, projectDiscoveryPayload, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
-import { writeSafeLog } from "../runtime/log.js";
+import { routeConsoleToLog, writeSafeLog } from "../runtime/log.js";
 import type { McpToolBridge } from "../mcp/tool-bridge.js";
 
 /** Shared production wiring for the two provider registries and their shutdown. */
@@ -339,6 +339,9 @@ function runningStatus(startedAt: string, baseUrl: string, models: readonly stri
     };
 }
 export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Promise<number> {
+    // From here on the terminal belongs to the Claude Code TUI; library console output goes
+    // to router.log (see routeConsoleToLog).
+    routeConsoleToLog();
     const root = moduleRoot();
     const environment = options.environment ?? process.env;
     assertNoApiKeySelectors(environment);

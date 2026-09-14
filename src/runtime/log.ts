@@ -66,3 +66,45 @@ export function writeSafeLog(entry: SafeLogEntry): void {
         // diagnostics must still route. Errors already reached stderr above.
     }
 }
+
+/**
+ * Sends every `console.*` call made inside the router process to the file sink instead of
+ * the terminal. The router's own diagnostics learned this in writeSafeLog; third-party code
+ * did not: measured 2026-09-14, grok 1.0.30 answers with a JSON-RPC id it invented
+ * ("skills-reload", "workflows-reload") and the ACP SDK's console.error("Got response to
+ * unknown request", id) landed on the bottom line of the operator's Claude Code TUI. The
+ * text is kept, truncated, under event `library_console`; nothing is dropped, nothing is
+ * shouted. Returns a restore function for tests.
+ */
+export function routeConsoleToLog(sink: (entry: SafeLogEntry) => void = writeSafeLog): () => void {
+    const original = { log: console.log, info: console.info, warn: console.warn, error: console.error, debug: console.debug };
+    const forward = (level: LogLevel) => (...args: unknown[]): void => {
+        const text = args.map((arg) => (typeof arg === "string" ? arg : safeStringify(arg))).join(" ");
+        sink({ event: "library_console", level, code: text.slice(0, 300) });
+    };
+    console.log = forward("info");
+    console.info = forward("info");
+    console.debug = forward("info");
+    console.warn = forward("warn");
+    // "error" would reach stderr through writeSafeLog by design; a library's console.error is
+    // a diagnostic, not an operator-facing failure, so it is filed at warn.
+    console.error = forward("warn");
+    return () => {
+        console.log = original.log;
+        console.info = original.info;
+        console.warn = original.warn;
+        console.error = original.error;
+        console.debug = original.debug;
+    };
+}
+
+function safeStringify(value: unknown): string {
+    if (value instanceof Error) return `${value.name}: ${value.message}`;
+    try {
+        return JSON.stringify(value) ?? String(value);
+    }
+    catch {
+        return String(value);
+    }
+}
+
