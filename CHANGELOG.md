@@ -49,6 +49,16 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   tool_use block close the same message; a bare tool call or a non-streaming client keeps
   the old shape. No provider bridge changes.
 
+### Fixed: library console output on the TUI; system prompt repeated on every tool result (2026-09-14)
+
+- grok 1.0.30 answers with JSON-RPC ids it invents (`skills-reload`, `workflows-reload`) and
+  the ACP SDK's `console.error` reached the terminal under the Claude Code TUI. The launcher
+  now files every library console call in router.log as `library_console`; nothing reaches
+  the terminal.
+- A continuation (tool result) no longer re-sends the whole system prompt to the agent session
+  that already holds it; only trailing system records and the instruction blocks around the
+  tool result travel (B03). Measured on grok: "a full system dump rides on the Skill response".
+
 ### Changed: grok pin 1.0.25 to 1.0.30, grok self-update off (2026-09-13)
 
 - The grok CLI's own `auto_update = true` replaced the pinned binary at 21:22 (1.0.25 ->
