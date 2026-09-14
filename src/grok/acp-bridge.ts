@@ -1,13 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { RouterError } from "../domain/errors.js";
 import { assertNoApiKeySelectors, sanitizedWorkerEnvironment } from "../security/environment.js";
 import { spawnFailureGuard } from "../runtime/child-process.js";
 import { ensurePrivateDirectory } from "../runtime/paths.js";
+import { writeSafeLog, type SafeLogEntry } from "../runtime/log.js";
 import { selectTextLines } from "../runtime/text-lines.js";
 import { readBoundedWorkspaceText } from "../security/workspace-read.js";
 import {
@@ -527,11 +528,21 @@ export async function inspectGrokModels(options: GrokCatalogOptions): Promise<re
         await stopChild(child);
     }
 }
-class ReadOnlyGrokClient {
+// The router serves grok's OWN file reads (fs/read_text_file) and only collects its text.
+// Measured 2026-09-14 11:53-11:59: two grok turns of 85 s and 108 s announced "scanning the
+// large files", parked no bridged tool call, and Claude Code's context gauge did not move.
+// The reads had happened here, in this class, and went into grok's session, which Claude
+// Code never sees. Without a record of them the router log reads as "the model did nothing"
+// and the operator reads it as "grok cannot sustain a task". Every native read and every
+// tool call grok reports are therefore filed: the path relative to the workspace and the
+// bytes served for a read, the ACP kind for a tool call; never content, never a command.
+export class ReadOnlyGrokClient {
     #chunks: string[] = [];
     #workspace: string;
-    constructor(workspace: string) {
+    #log: (entry: SafeLogEntry) => void;
+    constructor(workspace: string, log: (entry: SafeLogEntry) => void = writeSafeLog) {
         this.#workspace = workspace;
+        this.#log = log;
     }
     async requestPermission(params: RequestPermissionParams): Promise<RequestPermissionResponse> {
         const rejected = params.options.find((option) => option.kind === "reject_once" || option.kind === "reject_always");
@@ -543,6 +554,15 @@ class ReadOnlyGrokClient {
         if (params.update.sessionUpdate === "agent_message_chunk" && params.update.content.type === "text") {
             this.#chunks.push(params.update.content.text);
         }
+        else if (params.update.sessionUpdate === "tool_call") {
+            this.#log({
+                event: "agent_native_tool_call",
+                level: "info",
+                provider: "xai",
+                code: params.update.kind ?? "other",
+                remedy: "No action needed: grok used one of its own tools inside its session. What it read or ran never enters Claude Code's context; only the text grok answers with does.",
+            });
+        }
     }
     async readTextFile(params: ReadTextFileParams): Promise<ReadTextFileResponse> {
         const text = await readBoundedWorkspaceText({
@@ -550,9 +570,16 @@ class ReadOnlyGrokClient {
             requestedPath: params.path,
             maximumBytes: maximumReadableFileBytes,
         });
-        return {
-            content: selectTextLines(text, params.line, params.limit),
-        };
+        const content = selectTextLines(text, params.line, params.limit);
+        this.#log({
+            event: "agent_native_read",
+            level: "info",
+            provider: "xai",
+            code: relative(this.#workspace, resolve(this.#workspace, params.path)).replaceAll("\\", "/"),
+            contentBytes: Buffer.byteLength(content, "utf8"),
+            remedy: "No action needed: the router served this file to grok's own session. It fills grok's context (grok compacts itself at 85%), not Claude Code's gauge.",
+        });
+        return { content };
     }
     text(): string {
         return this.#chunks.join("");

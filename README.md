@@ -166,6 +166,16 @@ mode to remember: the native `claude` command never enters any of this.
   so the gauge stays proportional; the router compacts at 350k when launched with `--model grok`,
   and Grok's own 85% compaction is the backstop for a mid-session `/model` switch, where the
   operator's `autoCompactWindow` setting applies instead.
+- **Two contexts on the xAI lane:** Claude Code's gauge measures its own transcript. Grok runs
+  in a long-lived session of its own, where its native file reads (served by the router over
+  ACP `fs/read_text_file`) and its own shell calls land; none of that reaches Claude Code's
+  transcript, only the text Grok answers with does. Measured 2026-09-14: two Grok turns that
+  "scanned the large files" moved the gauge by nothing, while the same task on Gemini, which
+  reads through the bridged `Read` tool, filled it to 596k. `router.log` files each native
+  read as `agent_native_read` (path, bytes) and each native call as `agent_native_tool_call`
+  (kind); a bridged call is `agent_tool_call_parked`. The `input_tokens` the router reports
+  on this lane is `ceil(bytes / 3)` of Claude Code's transcript, an upper bound: a reading of
+  600k there is a 1.8 MB transcript, not a count from xAI's tokenizer.
 
 ## What it does not do
 

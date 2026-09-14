@@ -63,6 +63,18 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   through the router alias table (measured by the operator's sessions); the `Agent` tool's
   `model` enum does not take vendor aliases.
 
+### Added: Grok's native reads and tool calls in router.log (2026-09-14)
+
+- The router serves Grok's own `fs/read_text_file` requests and, until now, recorded nothing
+  about them. Measured 2026-09-14 11:53-11:59: two Grok turns of 85 s and 108 s announced a
+  file scan, parked no bridged call, and Claude Code's gauge did not move; the reads had gone
+  into Grok's own session. Each native read is now `agent_native_read` (path relative to the
+  workspace, bytes served) and each native tool call `agent_native_tool_call` (ACP kind);
+  never content, never a command. The `agent_tool_call_parked` remedy no longer reads a
+  missing parked call as "the lane is not connected". README: the two contexts on the xAI
+  lane and what the reported `input_tokens` on it measures. Test:
+  `test/grok-native-activity.test.ts`; mutation control (event renamed) fails it.
+
 ### Fixed: library console output on the TUI; system prompt repeated on every tool result (2026-09-14)
 
 - grok 1.0.30 answers with JSON-RPC ids it invents (`skills-reload`, `workflows-reload`) and

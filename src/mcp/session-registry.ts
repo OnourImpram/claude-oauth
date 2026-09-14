@@ -440,7 +440,7 @@ export class AgentSessionRegistry {
                     level: "info",
                     route: "mcp",
                     code: call.name,
-                    remedy: "No action needed: this is the provider agent reaching Claude Code's tool surface. Its ABSENCE while a routed model claims to have used a tool means the model used its own, and the lane is not connected.",
+                    remedy: "No action needed: this is the provider agent reaching Claude Code's tool surface. Its ABSENCE while a routed model claims to have used a tool means the model used its own; on the xai lane those show up as agent_native_read and agent_native_tool_call, and their result never enters Claude Code's context.",
                 });
                 session.parkedToolCall(call);
             },
