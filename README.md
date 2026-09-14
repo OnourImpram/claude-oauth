@@ -173,7 +173,9 @@ mode to remember: the native `claude` command never enters any of this.
   "scanned the large files" moved the gauge by nothing, while the same task on Gemini, which
   reads through the bridged `Read` tool, filled it to 596k. `router.log` files each native
   read as `agent_native_read` (path, bytes) and each native call as `agent_native_tool_call`
-  (kind); a bridged call is `agent_tool_call_parked`. The `input_tokens` the router reports
+  (the xAI tool name, else the ACP kind); a bridged call is `agent_tool_call_parked`. Measured
+  2026-09-14 13:05-13:23: Grok reads with its own tools (264 native calls, 0 router-served
+  reads), so its reads never show on the gauge at all. The `input_tokens` the router reports
   on this lane is `ceil(bytes / 3)` of Claude Code's transcript, an upper bound: a reading of
   600k there is a 1.8 MB transcript, not a count from xAI's tokenizer.
 

@@ -74,6 +74,12 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
   missing parked call as "the lane is not connected". README: the two contexts on the xAI
   lane and what the reported `input_tokens` on it measures. Test:
   `test/grok-native-activity.test.ts`; mutation control (event renamed) fails it.
+- Measured live 13:05-13:23 on the first release carrying the event: a four-agent Workflow on
+  Grok logged 264 native tool calls and 0 `agent_native_read`; grok reads with its own tools,
+  not through the router's ACP file handler, and 262 of the 264 carried ACP kind `other`. The
+  record now names the tool from xAI's `x.ai/tool` descriptor (`read_file`, `bash`, ...) and
+  falls back to the ACP kind; title and rawInput still never reach the log. Mutation control
+  (descriptor lookup removed) fails the test.
 
 ### Fixed: library console output on the TUI; system prompt repeated on every tool result (2026-09-14)
 

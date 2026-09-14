@@ -29,17 +29,27 @@ it("files grok's native reads and tool calls in the log, never their content (20
         });
         await client.sessionUpdate({
             sessionId: "s",
+            update: {
+                sessionUpdate: "tool_call", toolCallId: "t2", title: "Read notes.md", kind: "other", status: "pending",
+                rawInput: { variant: "UseTool", tool_name: "read_file", path: "notes.md" },
+                _meta: { "x.ai/tool": { version: 1, name: "read_file", kind: "read_file", namespace: "grok_build", read_only: true } },
+            },
+        });
+        await client.sessionUpdate({
+            sessionId: "s",
             update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" } },
         });
 
-        deepStrictEqual(entries.map((entry) => entry.event), ["agent_native_read", "agent_native_tool_call"]);
+        deepStrictEqual(entries.map((entry) => entry.event), ["agent_native_read", "agent_native_tool_call", "agent_native_tool_call"]);
         const [readEntry, callEntry] = entries;
         strictEqual(readEntry?.code, "notes.md");
         strictEqual(readEntry?.contentBytes, Buffer.byteLength("line one\nline two\n", "utf8"));
         strictEqual(callEntry?.code, "execute");
+        strictEqual(entries[2]?.code, "read_file", "xAI descriptor name outranks the generic ACP kind");
         const serialized = JSON.stringify(entries);
         ok(!serialized.includes("secret-looking"), "file content must not reach the log");
         ok(!serialized.includes("cat notes.md"), "a tool call's title (the command) must not reach the log");
+        ok(!serialized.includes("Read notes.md") && !serialized.includes("UseTool"), "neither title nor rawInput reaches the log");
         strictEqual(client.text(), "done");
     }
     finally {

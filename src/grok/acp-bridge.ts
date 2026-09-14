@@ -555,11 +555,15 @@ export class ReadOnlyGrokClient {
             this.#chunks.push(params.update.content.text);
         }
         else if (params.update.sessionUpdate === "tool_call") {
+            // Measured 2026-09-14 13:05-13:23: 262 of 264 grok tool calls carried kind "other";
+            // the identity sits in xAI's descriptor (x.ai/tool name: read_file, bash, ...).
+            const descriptor = params.update._meta?.["x.ai/tool"];
+            const toolName = isRecord(descriptor) && typeof descriptor["name"] === "string" ? descriptor["name"] : undefined;
             this.#log({
                 event: "agent_native_tool_call",
                 level: "info",
                 provider: "xai",
-                code: params.update.kind ?? "other",
+                code: toolName ?? params.update.kind ?? "other",
                 remedy: "No action needed: grok used one of its own tools inside its session. What it read or ran never enters Claude Code's context; only the text grok answers with does.",
             });
         }
