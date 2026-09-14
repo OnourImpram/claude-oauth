@@ -379,8 +379,13 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
     const instruction = Array.isArray(currentContent)
         ? toleratedBlocks(currentContent.filter((block: unknown) => !isRecord(block) || block["type"] !== "tool_result"), "continuation").join("\n\n")
         : "";
+    // A continuation goes to the SAME agent session that already holds the compiled prompt,
+    // binding context included (the session key is the parked tool_use id). Re-sending the
+    // whole system prompt on every tool result made each result carry the operator's full
+    // system text: measured 2026-09-14 on grok, the model reported "a full system dump rides
+    // on the Skill response". Only what is new since the prompt travels: trailing system
+    // records and the instruction blocks around the tool_result (B03).
     const continuationText = [
-        ...(bindingContext.length === 0 ? [] : ["BINDING SYSTEM AND PROJECT CONTEXT:", ...bindingContext]),
         ...(trailingSystemContext.length === 0 ? [] : ["SESSION CAPABILITY CONTEXT:", ...trailingSystemContext]),
         ...(instruction.trim() === "" ? [] : ["CURRENT USER INSTRUCTION:", instruction]),
     ].join("\n\n");

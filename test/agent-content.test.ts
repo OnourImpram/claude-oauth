@@ -95,6 +95,9 @@ for (const trailingSystem of [false, true]) {
             ok(text.includes("Explain the result in Turkish."));
             ok(text.indexOf("CURRENT USER INSTRUCTION") > text.indexOf("tool finished"));
             if (trailingSystem) ok(text.includes("New session capability rule"));
+            // The session already holds the system prompt: a tool result must not carry it again.
+            ok(!text.includes("BINDING SYSTEM AND PROJECT CONTEXT"), "the system prompt rode on the tool result");
+            ok(!text.includes("operator binding rule from the system prompt"), "the system text rode on the tool result");
             continued = true;
         });
         try {
@@ -107,7 +110,8 @@ for (const trailingSystem of [false, true]) {
                 ] },
                 ...(trailingSystem ? [{ role: "system", content: "New session capability rule" }] : []),
             ]);
-            const response = await h.adapter.send(continuation);
+            const withSystem = { ...continuation, envelope: { ...continuation.envelope, system: "operator binding rule from the system prompt" } };
+            const response = await h.adapter.send(withSystem);
             strictEqual(response.status, 200);
             strictEqual(h.starts(), 1, "system records must not start a new agent");
             strictEqual(continued, true, "the parked MCP call must receive the new instruction");
