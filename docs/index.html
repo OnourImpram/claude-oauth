@@ -279,6 +279,7 @@ footer p { max-width: var(--measure); }
       <a href="#inside">Where Claude Code sits</a>
       <a href="#switch">Changing model</a>
       <a href="#lanes">What each lane runs</a>
+      <a href="#keys">Your own API key</a>
       <a href="#claim">The claim and its measurement</a>
       <a href="#target">The target, and the distance to it</a>
       <a href="#defects">Open defects</a>
@@ -458,6 +459,51 @@ footer p { max-width: var(--measure); }
         Versions and digests of all three are pinned in <code>config/install-lock.json</code>. Nothing here grants an
         entitlement: if your plan does not include a model, the router cannot conjure it, and quota exhaustion surfaces
         as quota exhaustion.
+      </p>
+    </section>
+
+    <section id="keys" aria-labelledby="keys-h">
+      <h2 id="keys-h">Using your own API key</h2>
+      <p>
+        Three more lanes are not OAuth sessions. Each uses an API key that is yours, billed by that provider to that
+        key. The router process reads the key itself, on every call; Claude Code and the provider worker processes
+        never receive it.
+      </p>
+      <div class="tablewrap">
+        <table class="data">
+          <thead><tr><th>lane</th><th>key</th><th>key file variable</th><th>what the router sends</th></tr></thead>
+          <tbody>
+            <tr><td data-l="lane">OpenAI API</td><td data-l="key"><code>OPENAI_API_KEY</code>, read from the file only</td><td data-l="key file"><code>OPENAI_API_KEY_FILE</code></td><td data-l="sends">OpenAI chat completions, <code>authorization: Bearer</code> header</td></tr>
+            <tr><td data-l="lane">Alibaba Token Plan</td><td data-l="key"><code>ALIBABA_TOKEN_PLAN_API_KEY</code>, from the router's environment or the file</td><td data-l="key file"><code>ALIBABA_TOKEN_PLAN_API_KEY_FILE</code></td><td data-l="sends">Anthropic Messages, passed through, <code>x-api-key</code> header</td></tr>
+            <tr><td data-l="lane">Z.AI</td><td data-l="key"><code>ZAI_API_KEY</code>, from the router's environment or the file</td><td data-l="key file"><code>ZAI_API_KEY_FILE</code></td><td data-l="sends">Anthropic Messages, passed through, <code>x-api-key</code> header</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="cmds"><span class="c"># keys.env, at any path you choose; the router only reads it</span>
+OPENAI_API_KEY=&lt;your OpenAI platform key&gt;
+ALIBABA_TOKEN_PLAN_API_KEY=&lt;your Alibaba Token Plan key&gt;
+ZAI_API_KEY=&lt;your Z.AI key&gt;
+
+<span class="c"># PowerShell: point each lane at the file, then list models</span>
+$keys = "$HOME\.config\claude-oauth\keys.env"
+$env:OPENAI_API_KEY_FILE = $keys
+$env:ALIBABA_TOKEN_PLAN_API_KEY_FILE = $keys
+$env:ZAI_API_KEY_FILE = $keys
+claude-oauth models refresh</pre>
+      <p style="margin-top:0.9rem">
+        One file can hold all three lines; each lane still needs its own <code>&lt;KEY&gt;_FILE</code> variable pointing
+        at it. <code>claude-oauth models refresh</code> asks each lane for its model list with your key and admits only
+        the rows that list names. They then appear in Claude Code's <code>/model</code> picker as
+        <code>… (OpenAI API)</code>, <code>… (Alibaba)</code> and <code>… (Z.AI)</code>. No lane is shown green without a
+        working key: a missing key, a rejected key and an exhausted balance each report a named state
+        (<code>*_key_missing</code>, <code>*_key_rejected</code>, <code>zai_balance_insufficient</code>,
+        <code>openaiapi_credit_exhausted</code>) together with its remedy.
+      </p>
+      <p class="muted" style="margin-top:0.9rem">
+        Data rule: <code>mcp__*</code> tools and <code>mcp__*</code> history are withheld on all three lanes, and private
+        or sensitive data does not belong on them. How the key is kept out of child processes and out of quoted error
+        messages, and what each named state means, is in the README section
+        <a href="https://github.com/OnourImpram/claude-oauth#using-your-own-api-key">Using your own API key</a>.
       </p>
     </section>
 

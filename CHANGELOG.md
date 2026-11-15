@@ -7,6 +7,13 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Docs: the site explains the own-API-key lanes (2026-11-15)
+
+- `docs/index.html` gains the section "Using your own API key" (OpenAI API, Alibaba Token Plan,
+  Z.AI): which variable names the key file, what the router sends, how the rows enter the
+  `/model` picker, the named states a lane reports without a working key, and the data rule.
+  Until now the site described the OAuth lanes only and this account lived in the README alone.
+
 ### Fixed: `--model haiku` was refused on Claude Code 2.1.325 (2026-11-15)
 
 - Found by the live tour through the public launcher (one small prompt per model): `haiku`
