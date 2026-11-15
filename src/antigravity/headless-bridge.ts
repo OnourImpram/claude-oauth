@@ -68,8 +68,11 @@ interface TerminalResult {
     readonly usage?: Readonly<Record<string, number>>;
 }
 const requiredUsageFields = ["input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens"];
+// One-shot default. A caller that needs longer names its budget (`--timeout <seconds>` on
+// the one-shot commands, `timeoutMs` here); it is honoured up to the backstop below. Until
+// 2026-11-15 the one-shot lane had its own ten-minute ceiling and its command took no
+// budget, so a delegated task that asked for 1800 s was killed at 302.6 s.
 const defaultTimeoutMs = 300_000;
-const maximumTimeoutMs = 600_000;
 // D2-02 (2026-11-15). A routed session is ONE agy process for a whole agentic task; it blocks
 // in the router's tool bridge while Claude Code runs a tool or waits on a permission prompt.
 // The one-shot five minutes killed such a session mid-task. What ends a stuck turn there is
@@ -595,8 +598,7 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
         throw new RouterError("upstream_timeout", "Antigravity request was cancelled.", 504);
     const routedSession = options.toolEndpoint !== undefined;
     const timeoutMs = options.timeoutMs ?? (routedSession ? sessionProcessTimeoutMs : defaultTimeoutMs);
-    const timeoutCeilingMs = routedSession ? sessionProcessTimeoutMs : maximumTimeoutMs;
-    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > timeoutCeilingMs || timeoutMs % 1_000 !== 0) {
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > sessionProcessTimeoutMs || timeoutMs % 1_000 !== 0) {
         throw new RouterError("invalid_request", "Antigravity timeout must be a positive bounded integer.", 400);
     }
     const source = options.environment ?? process.env;

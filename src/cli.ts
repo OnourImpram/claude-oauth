@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { ANTIGRAVITY_PROBE_ABORT_MS, ANTIGRAVITY_PROBE_TIMEOUT_MS } from "./antigravity/probe-budget.js";
+import { parseAntigravityTaskArguments } from "./antigravity/task-arguments.js";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -668,27 +669,7 @@ function agentUpstreamModel(alias: AgentModelAlias): string {
 async function antigravityTask(ctx: CliContext, args: readonly string[], fixedModel?: string): Promise<number> {
     assertNoApiKeySelectors(ctx.environment);
     requireComponents(ctx, ["antigravity"]);
-    let model = fixedModel;
-    const taskArguments: string[] = [];
-    for (let index = 0; index < args.length; index += 1) {
-        const argument = args[index];
-        if (argument === "--model") {
-            const value = args[index + 1];
-            if (value === undefined)
-                throw new RouterError("invalid_request", "--model requires an exact model ID.", 400);
-            if (fixedModel !== undefined && value !== fixedModel) {
-                throw new RouterError("invalid_request", "The command has a fixed Antigravity model.", 400);
-            }
-            model = value;
-            index += 1;
-        }
-        else {
-            taskArguments.push(argument ?? "");
-        }
-    }
-    if (model === undefined) {
-        throw new RouterError("invalid_request", "Antigravity requires --model.", 400);
-    }
+    const { model, timeoutMs, taskArguments } = parseAntigravityTaskArguments(args, fixedModel);
     const parsed = parseTaskArguments(taskArguments);
     const abort = new AbortController();
     const onSignal = (): void => abort.abort();
@@ -702,6 +683,7 @@ async function antigravityTask(ctx: CliContext, args: readonly string[], fixedMo
             model,
             environment: ctx.environment,
             signal: abort.signal,
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
         });
         process.stdout.write(result.response.endsWith("\n") ? result.response : `${result.response}\n`);
         return 0;
@@ -774,10 +756,10 @@ function help(): void {
         "claude-oauth models refresh [--allow-shrink]",
         "claude-oauth receipt",
         "claude-oauth receipts [--hours <n>]",
-        "claude-oauth gemini --task <task> [--cwd <path>]",
-        "claude-oauth opus-google --task <task> [--cwd <path>]",
-        "claude-oauth sonnet-google --task <task> [--cwd <path>]",
-        `claude-oauth antigravity --model <${antigravityAllowedModels.join("|")}> --task <task> [--cwd <path>]`,
+        "claude-oauth gemini --task <task> [--cwd <path>] [--timeout <seconds>]",
+        "claude-oauth opus-google --task <task> [--cwd <path>] [--timeout <seconds>]",
+        "claude-oauth sonnet-google --task <task> [--cwd <path>] [--timeout <seconds>]",
+        `claude-oauth antigravity --model <${antigravityAllowedModels.join("|")}> --task <task> [--cwd <path>] [--timeout <seconds>]`,
         "claude-oauth grok --task <task> [--cwd <path>]",
         "claude-oauth gemini-acp --task <task> [--cwd <path>]",
         "",

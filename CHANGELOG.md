@@ -7,6 +7,24 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: a one-shot Google task gets the time its caller asked for (2026-11-15)
+
+- The one-shot commands `gemini`, `opus-google`, `sonnet-google` and `antigravity --model` take
+  `--timeout <seconds>` and hand it to the bridge as the process budget (the kill timer and
+  agy's own print timeout). Without the flag the default stays 300 s.
+- The one-shot lane no longer has its own ten-minute ceiling. A named budget is honoured up to
+  the same six-hour process backstop the routed session lane uses; anything beyond it, and
+  anything that is not whole positive seconds, is refused with `invalid_request` instead of
+  being replaced by a default.
+- Why: a delegated task on a slow reasoning tier was killed at 302.6 s with `upstream_timeout`
+  although its caller had asked for 1800 s. The command took no budget, so the number only
+  steered the caller's own watchdog. D2-02 had lifted the default for routed sessions only.
+- The values of `--task` and `--cwd` are no longer inspected for flags, so a task whose whole
+  text is `--model` or `--timeout` stays a task.
+- Held by tests: `test/antigravity-task-arguments.test.ts` (the flag, its refusals, the task
+  text arm) and `test/antigravity-session-timeout.test.ts` (a named one-shot budget reaches the
+  runner and agy; neither lane may pass the backstop; the default is unchanged).
+
 ### Changed: OpenAI model names follow the latest version (2026-11-15)
 
 - `sol`, `terra`, `luna` and `astra` are the names of the OpenAI model families, not aliases of one

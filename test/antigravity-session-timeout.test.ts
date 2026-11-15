@@ -70,7 +70,31 @@ describe("antigravity process timeout by lane", () => {
         strictEqual(seen === undefined ? undefined : printTimeout(seen), "300s");
     });
 
-    it("NEGATIVE: a one-shot call still cannot ask for more than ten minutes", async () => {
+    // CASE RECORD (2026-11-15). A delegated one-shot task was killed at 302.6 s although its
+    // caller had asked for 1800 s. The one-shot lane had a ten-minute ceiling and its command
+    // took no budget, so every one-shot call ran on the five-minute default. A caller that
+    // names a budget now gets it; the default and the backstop stay.
+    it("a one-shot call that names its budget gets it", async () => {
+        let seen: HeadlessProcessRequest | undefined;
+        await runAntigravityHeadless({
+            binary: "agy.exe",
+            cwd: home,
+            prompt: "Reply with exactly: OK",
+            model: "gemini-3.8-flash-high",
+            home,
+            environment: { PATH: "C:\\Windows", USERPROFILE: home },
+            timeoutMs: 1_800_000,
+            processRunner: async (request) => {
+                seen = request;
+                return success;
+            },
+        });
+        strictEqual(seen?.timeoutMs, 1_800_000, "the runner's kill timer is the caller's budget");
+        strictEqual(seen === undefined ? undefined : printTimeout(seen), "1800s", "agy's own print timeout matches it");
+    });
+
+    it("NEGATIVE: neither lane may ask for more than the process backstop", async () => {
+        const beyond = 6 * 60 * 60 * 1000 + 1_000;
         await rejects(runAntigravityHeadless({
             binary: "agy.exe",
             cwd: home,
@@ -78,7 +102,19 @@ describe("antigravity process timeout by lane", () => {
             model: "gemini-3.8-flash-high",
             home,
             environment: { PATH: "C:\\Windows", USERPROFILE: home },
-            timeoutMs: 6 * 60 * 60 * 1000,
+            timeoutMs: beyond,
+            processRunner: async () => success,
+        }), /timeout must be a positive bounded integer/u);
+        await rejects(runAntigravityHeadless({
+            binary: "agy.exe",
+            cwd: home,
+            prompt: "x",
+            model: "gemini-3.8-flash-high",
+            home,
+            environment: { PATH: "C:\\Windows", USERPROFILE: home },
+            toolEndpoint: { url: "http://127.0.0.1:8791/mcp/session-b", headers: {} },
+            configHomeRoot: join(home, "call-homes"),
+            timeoutMs: beyond,
             processRunner: async () => success,
         }), /timeout must be a positive bounded integer/u);
     });
