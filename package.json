@@ -49,8 +49,9 @@
     "test": "npm run build && node --test dist/test/*.test.js",
     "coverage": "npm run build && node --test --experimental-test-coverage dist/test/*.test.js",
     "secret-scan": "node scripts/secret-scan.mjs",
-    "check": "npm run lint && npm run test && npm run secret-scan",
-    "self-check": "node scripts/lint.mjs --ozdenetim && node scripts/secret-scan.mjs --ozdenetim && node scripts/release-id.mjs --ozdenetim",
+    "docs-drift": "node scripts/docs-drift.mjs",
+    "check": "npm run lint && npm run docs-drift && npm run test && npm run secret-scan",
+    "self-check": "node scripts/lint.mjs --ozdenetim && node scripts/secret-scan.mjs --ozdenetim && node scripts/release-id.mjs --ozdenetim && node scripts/docs-drift.mjs --ozdenetim",
     "start": "node dist/src/cli.js"
   },
   "dependencies": {

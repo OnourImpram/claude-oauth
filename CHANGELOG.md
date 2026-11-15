@@ -7,7 +7,19 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
-## [2.0.0], pre-release, 2026-11-15
+### Docs: the status statements follow the defect ledger (2026-11-15)
+
+The README banner, `SECURITY.md`, the project page and `docs/llms.txt` still said "pre-release, not
+ready to use". That sentence dated from September and predated the repairs: 23 of the 26 ledger
+rows are closed, and the three open ones (N07, N08, N09) are now named wherever the status is
+stated. The status reads ready to use on Windows. `SECURITY.md` listed B01 as open although it
+was repaired and measured on 2026-09-08; the row now says so, and N08 and N09 are added. The
+project page gains the three open rows and loses four sentences that still described B05 as
+open. `scripts/docs-drift.mjs` is new and runs in `npm run check`: the README's Known gaps table
+is the source, and a surface that disagrees with it fails the check (its `--ozdenetim` arm runs
+in `npm run self-check`). The 2.0.0 heading below no longer carries the pre-release label.
+
+## [2.0.0], 2026-11-15
 
 First tagged release, numbered 2.0.0. The entries below were recorded as unreleased until this
 tag.

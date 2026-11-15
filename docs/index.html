@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>claude-oauth: other models inside Claude Code, native path untouched</title>
-<meta name="description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Pre-release; open defects listed by id.">
+<meta name="description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Ready to use on Windows; open defects listed by id.">
 <link rel="canonical" href="https://onourimpram.github.io/claude-oauth/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="claude-oauth: other models inside Claude Code, native path untouched">
-<meta property="og:description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Pre-release; open defects listed by id.">
+<meta property="og:description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Ready to use on Windows; open defects listed by id.">
 <meta property="og:url" content="https://onourimpram.github.io/claude-oauth/">
 <meta property="og:image" content="https://onourimpram.github.io/claude-oauth/og.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="claude-oauth: other models inside Claude Code, native path untouched">
-<meta name="twitter:description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Pre-release; open defects listed by id.">
+<meta name="twitter:description" content="A router that starts a real Claude Code process and puts a loopback router behind it, so Google, xAI and OpenAI models run over your own OAuth sessions. The native claude command is never touched. Ready to use on Windows; open defects listed by id.">
 <meta name="twitter:image" content="https://onourimpram.github.io/claude-oauth/og.png">
 <meta name="color-scheme" content="light dark">
 <style>
@@ -272,10 +272,10 @@ footer p { max-width: var(--measure); }
 
   <aside class="rail" aria-label="Project identity">
     <h1 class="rail-name">claude-oauth</h1>
-    <p class="rail-version">2.0.0 · pre-release · Apache-2.0</p>
+    <p class="rail-version">2.0.0 · Apache-2.0</p>
     <div class="rail-status" role="note">
-      <b>Not ready to use.</b>
-      You can read it, build it and run every test. You cannot yet install it the way the maintainer runs it (B05). Open defects are listed by id below.
+      <b>Ready to use on Windows.</b>
+      Build it from the tree and start it through the shipped shims (B05, repaired). There is no packaged installer yet and macOS is unsupported. Three defects are open (N07, N08, N09); every defect is listed by id below.
     </div>
     <dl>
       <dt>repository</dt>
@@ -294,7 +294,7 @@ footer p { max-width: var(--measure); }
       <a href="#keys">Your own API key</a>
       <a href="#claim">The claim and its measurement</a>
       <a href="#target">The target, and the distance to it</a>
-      <a href="#defects">Open defects</a>
+      <a href="#defects">Defects</a>
       <a href="#built">How it is built</a>
       <a href="#anthropic">Anthropic's path, untouched</a>
     </nav>
@@ -391,7 +391,7 @@ footer p { max-width: var(--measure); }
         <figcaption id="panel-cap">
           The top wire is drawn in ink because nothing was added to it. The lower wires are the only colour on this page:
           they are the part this repository builds. The dashed line between them is the claim measured further down:
-          and the reason B05 is a release blocker.
+          the native path stays separate (B05, repaired and measured).
         </figcaption>
       </figure>
     </section>
@@ -574,9 +574,10 @@ claude-oauth models refresh</pre>
       <p>
         Found by review, by independent passes on 2026-09-07 and 2026-09-08, and by operator reports on 2026-09-10 and 2026-09-14, mostly by models that had not written
         the code, then measured one by one. Ids are the repository's own and are stable across the README,
-        <code>SECURITY.md</code> and <code>CHANGELOG.md</code>. As of 2026-09-10 every row carries a measured repair;
-        where a repair has a residual scope, the row says exactly what it does not establish. This table is generated
-        from the README's <i>Known gaps</i> table so the two cannot drift apart.
+        <code>SECURITY.md</code> and <code>CHANGELOG.md</code>. Every row up to P01 carries a measured repair;
+        where a repair has a residual scope, the row says exactly what it does not establish. The three rows added on
+        2026-11-15 (N07, N08, N09) are open. The README's <i>Known gaps</i> table is the source, and
+        <code>scripts/docs-drift.mjs</code> fails the check when this table disagrees with it.
       </p>
       <div class="tablewrap">
         <table class="data">
@@ -626,6 +627,12 @@ claude-oauth models refresh</pre>
               <td><b>Repaired 2026-09-08.</b> The capsule runs a hash-pinned patched copy of Clodex and receives its session nonce only through the child environment. Measured with an anonymous scratch home, missing/wrong/correct <code>x-api-key</code>: catalog and health <b>401/401/200</b>, malformed JSON messages <b>401/401/400</b>. Empty nonce, missing patch anchors and patched hash drift prevent startup.</td></tr>
             <tr><td class="cell-id"><span class="id">N06</span></td><td class="sev">fixed</td>
               <td><b>Repaired 2026-09-08.</b> Captured helpers receive SIGTERM, then SIGKILL after configurable <code>terminationGraceMs</code> (default 100 ms), and reject with a timeout even without <code>exit</code>; Windows tests cover the deadline and missing-exit case, while the meaningful SIGTERM-resistant Linux arm is NOT_RUN locally (Windows host).</td></tr>
+            <tr><td class="cell-id"><span class="id">N07</span></td><td class="sev">open</td>
+              <td><b>Open, recorded 2026-11-15 with the Clodex 2.21.7 merge.</b> Rated low because only the non-default patched-shadow mode is affected. The patched-shadow mode cannot patch Claude Code 2.1.325: Clodex's own proof check fails, and it failed with Clodex 2.11.1 as well, so the bump did not cause it. The default native-gateway mode does not use the patched shadow. Not repaired.</td></tr>
+            <tr><td class="cell-id"><span class="id">N08</span></td><td class="sev">open</td>
+              <td><b>Open, found 2026-11-15 by the independent comparison audit (code reading, not reproduced).</b> In the non-default <code>patched-shadow</code> mode the launcher replaces the Claude Code pin with the hash it measures on disk (<code>src/runtime/claude-shadow.ts</code>), so in that mode a binary the vendor-signature policy refuses can still be launched unpinned. The default <code>native-gateway</code> mode keeps the pin. Not repaired.</td></tr>
+            <tr><td class="cell-id"><span class="id">N09</span></td><td class="sev">open</td>
+              <td><b>Open, adapter audit finding D2-04 (2026-11-15): plausible, measured, not reproduced.</b> The Google lane's call-scoped configuration home hard-links the operator's Antigravity identity files. A hard link is the same file, so an in-place write by <code>agy</code> would change the operator's real file, and concurrent Google sessions share it. Measured with agy 1.5.9: the seven files were unchanged before the first run, after five live probes and after 20 completed Google-lane requests. A token refresh was not observed, and that is the case the finding is about. Not repaired.</td></tr>
             <tr><td class="cell-id"><span class="id">P01</span></td><td class="sev">fixed</td>
               <td><b>Repaired 2026-09-08.</b> Found while measuring N05 on Linux: the install lock is written with Windows variables (<code>%USERPROFILE%</code>, <code>%LOCALAPPDATA%</code>, <code>%APPDATA%</code>), and on POSIX <code>doctor</code> died in path expansion before reporting a single component. On POSIX those variables now resolve to <code>HOME</code>, <code>XDG_DATA_HOME</code> (else <code>~/.local/share</code>) and <code>XDG_CONFIG_HOME</code> (else <code>~/.config</code>), backslashes become separators, and a binary that is not there is reported as missing instead of aborting the diagnosis. Measured: WSL2 <code>doctor</code> lists components; unit arms in <code>test/install-lock-posix-paths.test.ts</code>, mutation control fails 3 tests. Linux binaries are still not pinned by the lock, so on Linux <code>doctor</code> reports them missing until a POSIX lock exists.</td></tr>
           </tbody>
@@ -674,8 +681,9 @@ npm run check
 npm run self-check</pre>
       <p class="muted" style="margin-top:0.9rem">
         What a clone gives you: the build, every test, the gates and their negative controls, the request compiler and
-        the lane bridges to read, and offline probes behind several findings. What it does not give you yet: an
-        installation. There is no shim (B05), no documented release builder, and the install lock pins binaries at
+        the lane bridges to read, and offline probes behind several findings. What it does not give you yet: a
+        packaged installation. The shims ship in <code>shim/</code> (B05, repaired), but there is no documented release
+        builder, and the install lock pins binaries at
         Windows locations. <code>node dist/src/cli.js doctor</code> will list, component by component, what it cannot
         find. That is the intended behaviour.
       </p>
@@ -687,7 +695,7 @@ npm run self-check</pre>
         This project does not proxy, wrap or intercept Anthropic's endpoint, does not share or resell access, and does
         not change what any account is entitled to. The native <code>claude</code> command is left exactly as
         installed and remains the recommended way to use Claude Code. The measurement above is how that sentence is
-        checked; B05 is what still stands between the sentence and a reader's ability to check it themselves.
+        checked, and since B05 was repaired the probe ships in this tree, so a reader can run it themselves.
       </p>
       <p>
         The intent is the one stated at the top of this page: a student or researcher who can reach a provider plan
@@ -704,7 +712,7 @@ npm run self-check</pre>
         Google's and xAI's own CLIs and a third-party bridge for OpenAI, and grants no rights to any of them.
       </p>
       <p>
-        The repository is public and still pre-release. This page states the goals, the claims and the open defects
+        The repository is public. This page states the goals, the claims and the defects, open and repaired,
         so they can be read before the code is.
       </p>
     </footer>

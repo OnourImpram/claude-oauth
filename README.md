@@ -31,8 +31,12 @@ Claude path.** `claude` stays native. `claude-oauth` opens the router.
   [Known gaps](#known-gaps) and in [CHANGELOG.md](CHANGELOG.md); the router itself has only been
   exercised on Windows, macOS is unsupported, and no release builder is documented yet.
 
-> **Status: pre-release. Not ready to use, and deliberately not pretending otherwise.**
-> Several capability claims below are gated on open defects (see [Known gaps](#known-gaps)).
+> **Status: version 2.0.0, ready to use on Windows.**
+> The defects that kept this README saying "not ready" since September are repaired and measured:
+> 23 of the 26 rows under [Known gaps](#known-gaps) are closed, B04 with a documented residual scope.
+> Three are open: N07 and N08 (Low, only in the non-default `patched-shadow` mode) and N09 (Medium,
+> Google lane, measured but not reproduced). The router has only been exercised on Windows, macOS is
+> unsupported, and there is no packaged installer yet: you build from this tree.
 > This README documents what is measured, what is not, and what is broken.
 > Project page: <https://onourimpram.github.io/claude-oauth/> · Security: [SECURITY.md](SECURITY.md) ·
 > Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · Changes: [CHANGELOG.md](CHANGELOG.md)
@@ -473,8 +477,8 @@ sh shim/claude-oauth.sh --hezarfen-entrypoint=claude remote-control --help
 
 ## Known gaps
 
-These are open defects, found by review and independent measurement. They are listed because a
-pre-release README that hides them is worthless. Ids are stable across this file,
+These are the defects found by review and independent measurement, open and repaired. They are
+listed because a README that hides them is worthless. Ids are stable across this file,
 `SECURITY.md`, `CHANGELOG.md` and the project page. Repair status is marked in the rows below and recorded in the changelog.
 
 | Id | Severity | What is wrong |

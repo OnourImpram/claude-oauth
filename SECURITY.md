@@ -1,15 +1,17 @@
 # Security
 
-## Status: pre-release, with known open defects
+## Status: version 2.0.0, with three known open defects
 
-This repository is a **pre-release**. It is published so that the design, the claims and the
-open defects can be read and reproduced, not because it is ready to run on a machine you care
-about. Security-relevant defects and their repair status are listed here first:
+Version 2.0.0 is ready to use on Windows. The design, the claims and the defects, open and
+repaired, are published so that they can be read and reproduced. Security-relevant defects and
+their repair status are listed here first; the README's Known gaps table is the complete ledger:
 
 | Id | Severity | What is wrong | Where |
 |---|---|---|---|
-| **B01** | Critical | The parent Claude Code session's permission boundary is **not applied** to the Google and xAI subagents. The Google lane forces write/bypass flags on; the xAI lane accepts the first permission option and serves its own file-write handler. `executionMode: "agent-readonly"` therefore misdescribes the effective authority. A routed model can write to disk where the parent session would have asked. | `src/supervisor/provider-set.ts`, `src/antigravity/headless-bridge.ts`, `src/grok/acp-bridge.ts` |
+| **~~B01~~** | Repaired | **Repaired and measured 2026-09-08, Agent arm included.** The parent Claude Code session's permission boundary used to be skipped on the Google and xAI subagents. Google direct route: call-scoped settings now allow only the bridge MCP server and deny native `write_file`, `command`, `browser`, `execute_url` and `unsandboxed` actions; a live Claude Code Write denial leaves no file. xAI rejects native ACP writes and admits only identified bridge MCP permission requests. With `Write` disallowed on the parent, an `Agent` child session on the Google lane could not create the file. The full row is in the README. | `src/supervisor/provider-set.ts`, `src/antigravity/headless-bridge.ts`, `src/grok/acp-bridge.ts` |
 | **N05** | Repaired | **Repaired 2026-09-08.** A repository-owned patched copy of pinned Clodex requires the session nonce, supplied only in the child environment, for every HTTP route including `/health`. Anonymous scratch-home measurements for missing/wrong/correct `x-api-key`: catalog and health **401/401/200**, malformed JSON messages **401/401/400**. Missing or empty nonce, missing/ambiguous patch anchors and patched-copy hash drift fail closed before startup. The original entrypoint hash gate remains strict; `clodex.capsuleEntrypointSha256` separately pins the patched bytes. | `src/workers/clodex-capsule.ts`, `src/runtime/clodex-capsule-entrypoint.ts`, `src/runtime/clodex-capsule-patch.ts` |
+| **N08** | Low, open | **Open, found 2026-11-15 by code reading, not reproduced.** In the non-default `patched-shadow` mode the launcher replaces the Claude Code pin with the hash it measures on disk, so in that mode a binary the vendor-signature policy refuses can still be launched unpinned. The default `native-gateway` mode keeps the pin. | `src/runtime/claude-shadow.ts` |
+| **N09** | Medium, open | **Open, audit finding D2-04 (2026-11-15): plausible, measured, not reproduced.** The Google lane's call-scoped configuration home hard-links the operator's Antigravity identity files. A hard link is the same file, so an in-place write by `agy` would change the operator's real file, and concurrent Google sessions share it. Measured with agy 1.5.9: the seven files were unchanged across five live probes and 20 routed requests; a token refresh was not observed. | README, Known gaps |
 
 **~~B04~~: Repaired 2026-09-08 for the checked-file replacement race.** Existing files open
 without truncation, reject final symlinks where `O_NOFOLLOW` is available, and compare the
@@ -40,7 +42,8 @@ The xAI refusal remains fail-closed and now names the file and the remedy. Root 
 workspace tests measure this error; `.grok/hooks` and `.grok/plugins` stay refused. Live xAI
 in repositories with non-empty `.mcp.json` is **NOT_RUN because discovery cannot be excluded**.
 
-N05 is repaired. The remaining open defects still prevent a release; see the README for the
+N05 is repaired. Three defects are open (N07, N08 and N09, all in the README's Known gaps table);
+see the README for the
 measured B01 native-path repair, the Agent inheritance arm measured live on 2026-09-08 (positive and negative arms), and the B07 repair that turns a headless permission denial into a terminal 403 instead of a retried 502.
 
 ## Reporting a vulnerability
