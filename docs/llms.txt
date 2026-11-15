@@ -1,0 +1,20 @@
+# claude-oauth
+
+> Loopback router that starts a real Claude Code process so Google, xAI and OpenAI models run over your own OAuth sessions, alongside ChatGPT Web via Agent Web Bridge and router-held API-key lanes for Alibaba Token Plan, Z.AI and OpenAI API. The native `claude` path is never modified, patched or proxied. Pre-release, not ready to use; open and repaired defects are listed by id.
+
+## Core
+
+- [Project page](https://onourimpram.github.io/claude-oauth/): Single-file project page with no external requests, stating the native-separation claim, its measurement, API-key lanes and open defects by id.
+- [GitHub repository](https://github.com/OnourImpram/claude-oauth): Source tree, portable shims, tests and verification gates.
+- [README](https://raw.githubusercontent.com/OnourImpram/claude-oauth/main/README.md): Goals, provider lanes, model selection, API-key data rules, native-separation probe, known gaps, requirements and build checks.
+- [CHANGELOG](https://raw.githubusercontent.com/OnourImpram/claude-oauth/main/CHANGELOG.md): Versioned and unreleased changes, defect repairs and measurement evidence across B*, G*, N*, P* and D* ids.
+
+## Security and contribution
+
+- [SECURITY](https://raw.githubusercontent.com/OnourImpram/claude-oauth/main/SECURITY.md): Where exploitable findings are reported.
+- [CONTRIBUTING](https://raw.githubusercontent.com/OnourImpram/claude-oauth/main/CONTRIBUTING.md): Contribution rules: every rule ships with its measure, every gate with its negative control, and `npm run check` must pass.
+
+## Verification and docs
+
+- [Native-separation probe](https://raw.githubusercontent.com/OnourImpram/claude-oauth/main/scripts/native-separation-probe.mjs): Two-arm probe script checking native `claude` behaviour with and without routing variables.
+- [Lifecycle Q3 verification](https://onourimpram.github.io/claude-oauth/lifecycle-q3-verification.md): Lifecycle verification record of 8 September 2026 (in Turkish).

@@ -1,13 +1,53 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/OnourImpram/claude-oauth/main/docs/claude-oauth-banner.png" width="100%" alt="claude-oauth: loopback router behind a real Claude Code process running Google, xAI, OpenAI, and API-key models while leaving the native claude path untouched.">
+</p>
+
 # claude-oauth
+
+[![ci](https://github.com/OnourImpram/claude-oauth/actions/workflows/check.yml/badge.svg)](https://github.com/OnourImpram/claude-oauth/actions/workflows/check.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![status](https://img.shields.io/badge/status-pre--release-orange)](#known-gaps)
 
 Run other models inside Claude Code over their own OAuth sessions, **without replacing the native
 Claude path.** `claude` stays native. `claude-oauth` opens the router.
+
+**At a glance**
+
+- **What it is:** starts a real Claude Code process and points its upstream endpoint at a
+  loopback router alongside it, keeping Claude Code's tools, permission prompts, skills and MCP
+  configuration.
+- **Native path untouched:** installing it does not degrade native Claude Code. `claude` still
+  talks to `api.anthropic.com`, and nothing here proxies, wraps or intercepts Anthropic's own
+  endpoint. Measured by [a two-arm probe](scripts/native-separation-probe.mjs).
+- **Who it is for:** students and researchers with a provider plan and no API budget, and
+  developers who want another model in the same harness; not for routing around Anthropic.
+- **Provider lanes:** Google (`agy`), xAI (`grok`) and OpenAI (Clodex) over your own OAuth
+  sessions; ChatGPT Web via Agent Web Bridge (installed separately); plus router-held API-key
+  lanes for Alibaba Token Plan, Z.AI and OpenAI API (public or synthetic material only).
+- **Second-model review:** hand outputs to a different vendor via `<alias>-delege` subagents or
+  mid-session `/model`, and treat the checker's output as worker evidence to verify rather than
+  truth.
+- **Known gaps and limits:** open and repaired defects are tracked with stable ids under
+  [Known gaps](#known-gaps) and in [CHANGELOG.md](CHANGELOG.md); the router itself has only been
+  exercised on Windows, macOS is unsupported, and no release builder is documented yet.
 
 > **Status: pre-release. Not ready to use, and deliberately not pretending otherwise.**
 > Several capability claims below are gated on open defects (see [Known gaps](#known-gaps)).
 > This README documents what is measured, what is not, and what is broken.
 > Project page: <https://onourimpram.github.io/claude-oauth/> · Security: [SECURITY.md](SECURITY.md) ·
 > Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · Changes: [CHANGELOG.md](CHANGELOG.md)
+
+**Contents**
+
+- [Why this exists](#why-this-exists)
+- [How it sits inside Claude Code](#how-it-sits-inside-claude-code)
+- [What it does not do](#what-it-does-not-do)
+- [The native-separation claim](#the-native-separation-claim)
+- [Known gaps](#known-gaps)
+- [Requirements](#requirements)
+- [Building and verifying from this tree](#building-and-verifying-from-this-tree)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -522,6 +562,19 @@ The most useful contribution right now is reproduction of the findings above. Pl
 include credentials, account identifiers, or machine-specific paths in issues or pull requests;
 report a leak by location and type, never by value. Anything exploitable goes to
 [SECURITY.md](SECURITY.md), not to an issue.
+
+## Related projects
+
+- [autofusion](https://github.com/OnourImpram/autofusion): Claude Code first cross model review,
+  grounding, and receipt system for serious engineering work. Site:
+  <https://onourimpram.github.io/autofusion/>.
+- [routeledger](https://github.com/OnourImpram/routeledger): Which model actually served each turn
+  of your Claude Code session, and where routing quietly diverged from what you configured.
+  Read-only, offline.
+- [mneme](https://github.com/OnourImpram/mneme): Plain-Markdown memory for Claude Code and MCP.
+  Local retrieval, redaction before indexing, no model on the Stop path.
+- [mergen](https://github.com/OnourImpram/mergen): Rechecks a completion claim against the
+  repository itself and holds the workflow when the required proof is missing.
 
 ## License
 
