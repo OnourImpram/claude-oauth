@@ -63,7 +63,7 @@ describe("withVerifiedOpenAiModels", () => {
 
     it("the accepted model's context window is the LIVE value, not a constant", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, catalog(LOCKED), LOCKED);
-        const sol = snapshot.models.find((model) => model.id === "anthropic-openai-gpt-5.6-sol");
+        const sol = snapshot.models.find((model) => model.id === "anthropic-openai-gpt-6.1-sol");
         strictEqual(sol?.contextWindow, LOCKED);
     });
 
@@ -77,8 +77,8 @@ describe("withVerifiedOpenAiModels", () => {
         const snapshot = withVerifiedOpenAiModels(baseline, withoutAstra, LOCKED);
         const ids = snapshot.models.map((model) => model.id);
         strictEqual(ids.includes("anthropic-openai-gpt-6-astra"), false, "a model absent from the catalog leaked into the snapshot");
-        strictEqual(ids.includes("anthropic-openai-gpt-5.6-sol"), true);
-        strictEqual(ids.includes("anthropic-openai-gpt-5.6-terra"), true);
+        strictEqual(ids.includes("anthropic-openai-gpt-6.1-sol"), true);
+        strictEqual(ids.includes("anthropic-openai-gpt-6.1-terra"), true);
     });
 
     // POSITIVE ARM: if astra is in the catalog and its context equals the lock, it DOES
@@ -113,7 +113,7 @@ describe("openAiContextMismatches", () => {
     it("names the rejected model and BOTH values", () => {
         const mismatches = openAiContextMismatches(catalog(LIVE_DEGRADED), LOCKED);
         strictEqual(mismatches.length, OPENAI_MODEL_CONTRACTS.length);
-        const sol = mismatches.find((entry) => entry.id === "anthropic-openai-gpt-5.6-sol");
+        const sol = mismatches.find((entry) => entry.id === "anthropic-openai-gpt-6.1-sol");
         strictEqual(sol?.liveContextWindow, LIVE_DEGRADED);
         strictEqual(sol?.lockedContextWindow, LOCKED);
     });
@@ -131,12 +131,12 @@ describe("openAiContextMismatches", () => {
 
     it("reports only the affected model when just one model has drifted", () => {
         const mixed: readonly ProviderModelRecord[] = [
-            { id: "anthropic-openai-oauth__gpt-5.6-sol", contextWindow: LOCKED },
-            { id: "anthropic-openai-oauth__gpt-5.6-terra", contextWindow: LIVE_DEGRADED },
+            { id: "anthropic-openai-oauth__gpt-6.1-sol", contextWindow: LOCKED },
+            { id: "anthropic-openai-oauth__gpt-6.1-terra", contextWindow: LIVE_DEGRADED },
         ];
         const mismatches = openAiContextMismatches(mixed, LOCKED);
         strictEqual(mismatches.length, 1);
-        strictEqual(mismatches[0]?.id, "anthropic-openai-gpt-5.6-terra");
+        strictEqual(mismatches[0]?.id, "anthropic-openai-gpt-6.1-terra");
     });
 });
 
@@ -213,7 +213,7 @@ describe("openAiModelReadiness", () => {
     // The real accident scenario: every other row verified, astra not in the catalog. The two
     // hand-written literals would say "everything is ready" here; the derived list drops
     // astra BY NAME. The verified set is derived from the contract list, so a row added later
-    // (sol6, luna, sol61 on 2026-11-15) does not turn this into a different scenario.
+    // (luna on 2026-11-15) does not turn this into a different scenario.
     it("when only Astra is missing, marks it disabled BY NAME and leaves the others enabled", () => {
         const readiness = openAiModelReadiness(snapshotOf(OPENAI_MODEL_CONTRACTS.filter((contract) => contract.alias !== "astra").map((contract) => contract.id)));
         const missing = readiness.filter((entry) => !entry.enabled).map((entry) => entry.id);

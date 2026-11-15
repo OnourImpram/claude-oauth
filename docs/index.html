@@ -408,7 +408,9 @@ footer p { max-width: var(--measure); }
           <h3>At launch</h3>
           <p><code>claude-oauth --model grok</code>, or <code>gemini</code>, <code>argon</code>, <code>carbon</code>,
             <code>hydrogen</code>, <code>orchestrator</code>, <code>orchestrator-argon</code>, <code>opus-google</code>, <code>sonnet-google</code>, <code>sol</code>,
-            <code>terra</code>, <code>sol6</code>, <code>luna</code>, <code>sol61</code>, <code>terra61</code>, <code>astra</code>. Any other argument is
+            <code>terra</code>, <code>luna</code>, <code>astra</code>. The four OpenAI names are model families,
+            not versions: each one points at the newest version of its family the router has contracted, and
+            moves to the next version when it arrives. Any other argument is
             passed to Claude Code as-is.</p>
         </div>
         <div>

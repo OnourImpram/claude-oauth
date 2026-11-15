@@ -224,7 +224,7 @@ export function isVerifiedAgentSnapshotRoute(model: ModelRecord): boolean {
         !model.capabilities.includes("vision"));
 }
 export interface OpenAiModelContract {
-    readonly alias: "sol" | "terra" | "sol6" | "luna" | "sol61" | "terra61" | "astra";
+    readonly alias: "sol" | "terra" | "luna" | "astra";
     readonly id: string;
     readonly upstreamModel: string;
     readonly displayName: string;
@@ -245,52 +245,25 @@ export interface OpenAiModelContract {
     /** Where advertisedContextWindow comes from. An override with no source is folklore. */
     readonly contextWindowSource?: string;
 }
+// NAMING RULE (operator, 2026-11-15). `sol`, `terra`, `luna` and `astra` are the NAMES of the
+// model families, not aliases of one version: 6 or 6.1 is only a version. A name points at the
+// newest version of its family, so when 6.2 or 7 arrives the family's row is REPLACED (id,
+// upstream model, display name) and the name stays. No version-suffixed second name is opened and
+// the move is not put to the operator as a question. What stays forbidden is a name sliding to a
+// DIFFERENT family or provider. The move is not silent either: it is written to CHANGELOG.md.
+// openAiFamilyNameViolations holds the rule and test/model-family-names.test.ts runs it.
+//
+// MEASURED in clodex 2.21.7 dist/cli.js (OPENAI_OAUTH_MODEL_SEEDS, 2026-11-15): the bundle
+// seeds gpt-6-sol and gpt-6-luna (window 272_000, ceiling 872_000) and gpt-6.1-sol (window
+// 500_000, ceiling 872_000). The ceiling equals the locked openAiContextWindow, so every row
+// shares OPENAI_CONTEXT_WINDOW_TOKENS; the auto-compact window is INHERITED from the earlier
+// sol/terra rows, not measured per model. A row is served only when the LIVE catalogue of the
+// operator's ChatGPT account reports the id (withVerifiedOpenAiModels).
 export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
+    // Sol moved gpt-5.6-sol -> gpt-6.1-sol on 2026-11-15; the gpt-6-sol row that sat beside it was
+    // superseded by the same move and is gone.
     {
         alias: "sol",
-        id: "anthropic-openai-gpt-5.6-sol",
-        upstreamModel: "anthropic-openai-oauth__gpt-5.6-sol",
-        displayName: "GPT-5.6 Sol via ChatGPT OAuth",
-        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
-        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
-        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
-    },
-    {
-        alias: "terra",
-        id: "anthropic-openai-gpt-5.6-terra",
-        upstreamModel: "anthropic-openai-oauth__gpt-5.6-terra",
-        displayName: "GPT-5.6 Terra via ChatGPT OAuth",
-        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
-        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
-        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
-    },
-    // Added 2026-11-15. MEASURED in clodex 2.21.7 dist/cli.js (OPENAI_OAUTH_MODEL_SEEDS): the
-    // bundle gained gpt-6-sol and gpt-6-luna (window 272_000, ceiling 872_000) and gpt-6.1-sol
-    // (window 500_000, ceiling 872_000). The ceiling equals the locked openAiContextWindow, so
-    // the rows share OPENAI_CONTEXT_WINDOW_TOKENS; the auto-compact window is INHERITED from
-    // sol/terra, not measured per model. `sol` keeps meaning gpt-5.6-sol: an existing alias is
-    // not repointed without the operator's word. A row is served only when the LIVE catalogue of
-    // the operator's ChatGPT account reports the id (withVerifiedOpenAiModels).
-    {
-        alias: "sol6",
-        id: "anthropic-openai-gpt-6-sol",
-        upstreamModel: "anthropic-openai-oauth__gpt-6-sol",
-        displayName: "GPT-6 Sol via ChatGPT OAuth",
-        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
-        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
-        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
-    },
-    {
-        alias: "luna",
-        id: "anthropic-openai-gpt-6-luna",
-        upstreamModel: "anthropic-openai-oauth__gpt-6-luna",
-        displayName: "GPT-6 Luna via ChatGPT OAuth",
-        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
-        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
-        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
-    },
-    {
-        alias: "sol61",
         id: "anthropic-openai-gpt-6.1-sol",
         upstreamModel: "anthropic-openai-oauth__gpt-6.1-sol",
         displayName: "GPT-6.1 Sol via ChatGPT OAuth",
@@ -298,16 +271,27 @@ export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
         maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
         autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
     },
-    // gpt-6.1-terra is NOT in the 2.21.7 seed list. MEASURED 2026-11-15 after `clodex providers
-    // refresh-models openai-oauth`: the operator's account catalogue lists it (window 500_000,
-    // ceiling 872_000) and `clodex models --json` reports effective 872_000 with the saved max
-    // stop, like the six seeded rows. Its live row publishes NO maxOutputTokens, so the output
-    // limit here is INHERITED from the seeded rows, not measured.
+    // Terra moved gpt-5.6-terra -> gpt-6.1-terra on 2026-11-15. gpt-6.1-terra is NOT in the 2.21.7
+    // seed list. MEASURED 2026-11-15 after `clodex providers refresh-models openai-oauth`: the
+    // operator's account catalogue lists it (window 500_000, ceiling 872_000) and `clodex models
+    // --json` reports effective 872_000 with the saved max stop, like the six seeded rows. Its
+    // live row publishes NO maxOutputTokens, so the output limit here is INHERITED from the seeded
+    // rows, not measured.
     {
-        alias: "terra61",
+        alias: "terra",
         id: "anthropic-openai-gpt-6.1-terra",
         upstreamModel: "anthropic-openai-oauth__gpt-6.1-terra",
         displayName: "GPT-6.1 Terra via ChatGPT OAuth",
+        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
+        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
+        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    // Added 2026-11-15 (gpt-6-luna is seeded in clodex 2.21.7; see the measurement above).
+    {
+        alias: "luna",
+        id: "anthropic-openai-gpt-6-luna",
+        upstreamModel: "anthropic-openai-oauth__gpt-6-luna",
+        displayName: "GPT-6 Luna via ChatGPT OAuth",
         contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
         maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
         autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
@@ -321,8 +305,9 @@ export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
     // RE-MEASURED 2026-11-15 in clodex 2.21.7 dist/cli.js (OPENAI_OAUTH_MODEL_SEEDS, 17 ids
     // against 14 in 2.11.1): gpt-6-astra is still seeded, the same row (window 272_000, ceiling
     // 872_000, line 6297), so this contract and the pin still move together. The three ids the
-    // bundle gained are gpt-6.1-sol, gpt-6-sol and gpt-6-luna; their rows are above (sol61, sol6, luna),
-    // next to terra61, which the account lists without a seed.
+    // bundle gained are gpt-6.1-sol, gpt-6-sol and gpt-6-luna; their rows are above (sol on
+    // gpt-6.1-sol, which superseded gpt-6-sol, and luna), next to terra, which the account lists
+    // without a seed.
     //
     // contextWindow here is the ceiling (openAiCatalogEntry checks live <= ceiling), not
     // an equality: Astra's own maxContextWindow is 872_000.
@@ -362,6 +347,41 @@ export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
 ];
 export function openAiModelContract(modelId: string): OpenAiModelContract | undefined {
     return OPENAI_MODEL_CONTRACTS.find((entry) => entry.id === modelId);
+}
+// The NAME of an OpenAI model here is its family (`sol`, `terra`, `luna`, `astra`), never a
+// version: 6.1 or 6.2 or 7 is only a version, and the name keeps pointing at the family's newest
+// one. The rule is a function so a test can hold it from both sides; without it nothing stopped a
+// new version from being ADDED beside the old row under a name like `sol61`.
+//
+// FIX when a violation is reported: do not add a row beside the old one. Replace the family's row
+// (id, upstream model, display name) and keep its name.
+export type OpenAiFamilyNameRule = "name-is-not-family" | "name-has-digit" | "family-repeated";
+export interface OpenAiFamilyNameViolation {
+    readonly rule: OpenAiFamilyNameRule;
+    readonly name: string;
+    readonly family: string;
+    readonly upstreamModel: string;
+}
+// `anthropic-openai-oauth__gpt-6.1-sol` -> model part `gpt-6.1-sol` -> family `sol`.
+export function openAiUpstreamFamily(upstreamModel: string): string {
+    const modelPart = upstreamModel.split("__").pop() ?? upstreamModel;
+    return modelPart.split("-").pop() ?? modelPart;
+}
+export function openAiFamilyNameViolations(contracts: readonly { readonly alias: string; readonly upstreamModel: string }[]): readonly OpenAiFamilyNameViolation[] {
+    const violations: OpenAiFamilyNameViolation[] = [];
+    const seen = new Set<string>();
+    for (const contract of contracts) {
+        const family = openAiUpstreamFamily(contract.upstreamModel);
+        const base = { name: contract.alias, family, upstreamModel: contract.upstreamModel };
+        if (contract.alias !== family)
+            violations.push({ rule: "name-is-not-family", ...base });
+        if (/\d/u.test(contract.alias))
+            violations.push({ rule: "name-has-digit", ...base });
+        if (seen.has(family))
+            violations.push({ rule: "family-repeated", ...base });
+        seen.add(family);
+    }
+    return violations;
 }
 export function openAiCatalogEntry(catalog: readonly ProviderModelRecord[], contract: OpenAiModelContract): ProviderModelRecord | undefined {
     return catalog.find((entry) => entry.id === contract.upstreamModel &&

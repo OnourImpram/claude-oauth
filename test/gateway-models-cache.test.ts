@@ -16,7 +16,9 @@ import {
 
 // Fixture: the real cache MEASURED on disk on 2026-09-02 -- exactly what discovery wrote.
 // baseUrl is a dead ephemeral port; this is the file as it stood at the moment the
-// operator's picker was empty.
+// operator's picker was empty. The model ids are the ones that file carried: they are data
+// here, kept as measured, and are not contract ids (the contract names live in
+// OPENAI_MODEL_CONTRACTS; the discovery fixture below follows them).
 const MEASURED_STALE_CACHE = {
     baseUrl: "http://127.0.0.1:51654",
     fetchedAt: 1788293828770,
@@ -30,7 +32,7 @@ const MEASURED_STALE_CACHE = {
 // discoveryPayload() shape: the same fields as registry.ts:66-83.
 const DISCOVERY_PAYLOAD = {
     data: [
-        { type: "model", id: "anthropic-openai-gpt-5.6-sol", display_name: "GPT-5.6 Sol via ChatGPT OAuth", context_window: 872_000, max_input_tokens: 872_000, max_output_tokens: 128_000 },
+        { type: "model", id: "anthropic-openai-gpt-6.1-sol", display_name: "GPT-6.1 Sol via ChatGPT OAuth", context_window: 872_000, max_input_tokens: 872_000, max_output_tokens: 128_000 },
         // Since 2026-09-05 Astra carries the ADVERTISED number (1_000_000), Sol the
         // measured one (872_000). The fixture imitates real discovery output; the two
         // numbers differing is deliberate, and the measure of that difference lives in
@@ -44,7 +46,7 @@ const DISCOVERY_PAYLOAD = {
         null,
     ],
     has_more: false,
-    first_id: "anthropic-openai-gpt-5.6-sol",
+    first_id: "anthropic-openai-gpt-6.1-sol",
     last_id: "anthropic-xai-grok-4.6",
 };
 
@@ -72,7 +74,7 @@ describe("gateway-models-cache", () => {
     it("projects discoveryPayload to exactly {id, display_name} and drops malformed rows", () => {
         const rows = projectDiscoveryPayload(DISCOVERY_PAYLOAD);
         assert.deepEqual(rows, [
-            { id: "anthropic-openai-gpt-5.6-sol", display_name: "GPT-5.6 Sol via ChatGPT OAuth" },
+            { id: "anthropic-openai-gpt-6.1-sol", display_name: "GPT-6.1 Sol via ChatGPT OAuth" },
             { id: "anthropic-openai-gpt-6-astra", display_name: "GPT-6 Astra via ChatGPT OAuth" },
             { id: "anthropic-xai-grok-4.6", display_name: "Grok 4.6 via xAI OAuth, read-only agent" },
         ]);

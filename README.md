@@ -29,7 +29,7 @@ maker and a checker that are never the same model: one produces the diff, the ma
 analysis; another, in a fresh context, reads the output and reports what is wrong with it. Claude
 Code already has the mechanism, the `Agent` tool and subagents. What it lacks is a second model to
 hand the work to. This repository supplies it: one delegate agent per routed model
-(named `<alias>-delege`: `gemini-delege`, `carbon-delege`, `grok-delege`, `sol61-delege`,
+(named `<alias>-delege`: `gemini-delege`, `carbon-delege`, `grok-delege`, `sol-delege`,
 `astra-delege` and so on for every contracted alias), and a `/model`
 switch that puts a Google, xAI or OpenAI model in the driver's seat for a review pass while your
 tools, permissions and MCP servers stay where they are.
@@ -155,8 +155,12 @@ three lanes as "the provider's own official CLI"; that was wrong for OpenAI and 
 ### Selecting a model, including mid-session
 
 - **At launch:** `claude-oauth --model grok` (or `gemini`, `argon`, `carbon`, `hydrogen`,
-  `orchestrator`, `orchestrator-argon`, `opus-google`, `sonnet-google`, `sol`, `terra`, `sol6`,
-  `luna`, `sol61`, `terra61`, `astra`). `gemini-pro` is gone: `gemini-3.1-pro-high` is no longer
+  `orchestrator`, `orchestrator-argon`, `opus-google`, `sonnet-google`, `sol`, `terra`,
+  `luna`, `astra`). `sol`, `terra`, `luna` and `astra` are the names of the OpenAI model
+  families, not of a version: a name always points at the newest version of its family that the
+  router has contracted (the display name of its `/model` row says which), so when a newer
+  version arrives the same name moves to it and no version-suffixed name is added.
+  `gemini-pro` is gone: `gemini-3.1-pro-high` is no longer
   in the `agy models` catalogue (measured 2026-11-15), and the alias is not repointed to another
   model, because the selected model is the model that answers. Any other argument is passed to
   Claude Code as-is. The Alibaba, Z.AI and OpenAI API rows have no launch alias: the router

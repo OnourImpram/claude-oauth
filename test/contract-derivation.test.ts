@@ -114,12 +114,12 @@ describe("native-gateway mode uses the full model identity", () => {
     });
 
     it("--model IS NOT rewritten in native mode", () => {
-        const rewritten = claudeOAuthAgentArguments(["--model", "anthropic-openai-gpt-5.6-sol"], ALL_EXTERNAL_IDS, "native-gateway");
-        strictEqual(rewritten[1], "anthropic-openai-gpt-5.6-sol");
+        const rewritten = claudeOAuthAgentArguments(["--model", "anthropic-openai-gpt-6.1-sol"], ALL_EXTERNAL_IDS, "native-gateway");
+        strictEqual(rewritten[1], "anthropic-openai-gpt-6.1-sol");
     });
 
     it("--model is converted to an alias in patched mode", () => {
-        const rewritten = claudeOAuthAgentArguments(["--model", "anthropic-openai-gpt-5.6-sol"], ALL_EXTERNAL_IDS, "patched-shadow");
+        const rewritten = claudeOAuthAgentArguments(["--model", "anthropic-openai-gpt-6.1-sol"], ALL_EXTERNAL_IDS, "patched-shadow");
         strictEqual(rewritten[1], "sol");
     });
 });
@@ -301,8 +301,8 @@ describe("the window advertised to Claude Code is derived from the contract", ()
         strictEqual(claudeClientDiscoveryId(astraRow()), "anthropic-openai-gpt-6-astra[1m]");
         // NEGATIVE ARM: Sol advertises no override, its 872_000 snapshot stays below 1_000_000,
         // and Claude Code keeps its 200k assumption for it (the 272K pricing boundary).
-        strictEqual(identities.includes("anthropic-openai-gpt-5.6-sol[1m]"), false);
-        strictEqual(identities.includes("anthropic-openai-gpt-5.6-sol"), true);
+        strictEqual(identities.includes("anthropic-openai-gpt-6.1-sol[1m]"), false);
+        strictEqual(identities.includes("anthropic-openai-gpt-6.1-sol"), true);
 
         // POSITIVE ARM -- the suffix CAN in fact be attached, and its trigger is the
         // snapshot window becoming equal to the contract ceiling. If this arm does not fall,
@@ -318,7 +318,7 @@ describe("the window advertised to Claude Code is derived from the contract", ()
         const identities = discoveryRows(withVerifiedOpenAiModels(emptyBaseline, withoutAstra, LIVE_WINDOW))
             .map((entry) => String(entry["id"]));
         strictEqual(identities.some((id) => id.startsWith("anthropic-openai-gpt-6-astra")), false);
-        strictEqual(identities.includes("anthropic-openai-gpt-5.6-sol"), true, "the other lane must remain available");
+        strictEqual(identities.includes("anthropic-openai-gpt-6.1-sol"), true, "the other lane must remain available");
     });
 });
 
@@ -433,7 +433,7 @@ describe("the operator surface shows measured and advertised values under SEPARA
     // The field is written ONLY when the two numbers differ. Repeating "872000 = 872000"
     // tells the operator nothing, and what comes with noise is blindness.
     it("the field is NEVER written for a row without an advertisement", () => {
-        const sol = verifiedSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-5.6-sol");
+        const sol = verifiedSnapshot.models.find((model) => model.id === "anthropic-openai-gpt-6.1-sol");
         ok(sol !== undefined, "Sol snapshot row is missing");
         const line = modelDetail(sol);
         strictEqual(line["contextWindow"], LIVE_WINDOW);

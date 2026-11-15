@@ -49,11 +49,13 @@ export type OAuthType = (typeof OAUTH_TYPES)[number];
 // backstop for an absurd number of rows. It is one exported number now, referenced by
 // both sides, and a test pins it: the sides can no longer drift apart in silence.
 //
-// 2026-11-15: 256 -> 512. The ChatGPT-OAuth lane grew from three contract rows to seven
-// (sol6, luna, sol61, terra61), and a drift of all seven needs ~440 characters; at 256 the
-// code named three rows and counted the rest ("+4_more"), which is exactly the mute status the
-// promise above exists to prevent (test/model-refresh.test.ts, "EVERY row is reported by
-// name"). 512 names up to eight rows; truncation stays the backstop beyond that.
+// 2026-11-15: 256 -> 512. The ChatGPT-OAuth lane grew from three contract rows to seven, and a
+// drift of all seven needs ~440 characters; at 256 the code named three rows and counted the
+// rest ("+4_more"), which is exactly the mute status the promise above exists to prevent
+// (test/model-refresh.test.ts, "EVERY row is reported by name"). 512 names up to eight rows;
+// truncation stays the backstop beyond that. The lane has four rows now (one per model family,
+// see OPENAI_MODEL_CONTRACTS), so the 512 bound is headroom; the bound itself is kept because
+// the IPC reader and the producer share it and a test pins it.
 export const SUPERVISOR_DETAIL_CODE_LIMIT = 512;
 export type Capability = "messages" | "streaming" | "tools" | "vision" | "thinking";
 export const MODEL_EXECUTION_MODES = ["native-message-loop", "agent-readonly"] as const;

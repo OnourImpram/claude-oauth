@@ -20,8 +20,8 @@ function receipt(overrides: Partial<RouteReceipt> & { readonly minutesAgo: numbe
         schemaVersion: 1,
         timestamp: new Date(NOW - minutesAgo * 60_000).toISOString(),
         requestId: `req-${minutesAgo}`,
-        requestedModel: "anthropic-openai-gpt-5.6-sol",
-        configuredModel: "gpt-5.6-sol",
+        requestedModel: "anthropic-openai-gpt-6.1-sol",
+        configuredModel: "gpt-6.1-sol",
         provider: "openai",
         oauthType: "chatgpt",
         durationMs: 1_000,
@@ -41,7 +41,7 @@ describe("summarizeReceipts", () => {
         ], { now: NOW, hours: 24 });
         strictEqual(summary.windowHours, 24);
         strictEqual(summary.requests, 5);
-        deepStrictEqual(summary.lanes.map((lane) => `${lane.provider}/${lane.model}`), ["openai/gpt-5.6-sol", "xai/grok-4.7"]);
+        deepStrictEqual(summary.lanes.map((lane) => `${lane.provider}/${lane.model}`), ["openai/gpt-6.1-sol", "xai/grok-4.7"]);
         const openai = summary.lanes[0];
         deepStrictEqual(
             { requests: openai?.requests, completed: openai?.completed, failed: openai?.failed, cancelled: openai?.cancelled },

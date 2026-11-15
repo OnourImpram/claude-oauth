@@ -115,8 +115,8 @@ describe("the local patch anchor matches the shape clodex ACTUALLY produces", ()
     }
 
     const MARKER = "/*clodex-local:hezarfen-google-oauth-model-surface*/";
-    const SOL: readonly [string, string] = ["sol", "gpt-5.6-sol"];
-    const TERRA: readonly [string, string] = ["terra", "gpt-5.6-terra"];
+    const SOL: readonly [string, string] = ["sol", "gpt-6.1-sol"];
+    const TERRA: readonly [string, string] = ["terra", "gpt-6.1-terra"];
     const ASTRA: readonly [string, string] = ["astra", "gpt-6-astra"];
 
     async function applyLocalPatch(source: string): Promise<string> {
@@ -196,7 +196,7 @@ describe("the local patch anchor matches the shape clodex ACTUALLY produces", ()
     // this test was green on its first run, the behaviour was already there; it pins it so a later
     // anchor widening cannot start matching the catalog site too (that would throw, see the test above).
     it("a source carrying clodex 2.21.x's second picker site (PATCH 11) still yields every needle once", async () => {
-        const rows = `{value:"sol",label:"Sol",description:"Custom model (clodex:openai-oauth:gpt-5.6-sol)"}`;
+        const rows = `{value:"sol",label:"Sol",description:"Custom model (clodex:openai-oauth:gpt-6.1-sol)"}`;
         const catalogSite = `function pw(e,n){let r=lw(e,n),s=r??Ap(e),_ccpick=/*ccpatch:picker*/[${rows}].forEach(function(_o){if(!s.some(function(_i){return _i.value===_o.value}))s.push(_o)}),h=r!==null&&uYn(),y=i.ANTHROPIC_CUSTOM_MODEL_OPTION}`;
         const patched = await applyLocalPatch(`${clodexPatched("openai-oauth", [SOL, TERRA])}\n${catalogSite}`);
         deepStrictEqual(missingNeedles(patched), []);

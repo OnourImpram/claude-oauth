@@ -79,7 +79,7 @@ const patchedModelAliases = new Map([...OPENAI_MODEL_CONTRACTS, ...AGENT_MODEL_C
 const nativeOAuthAgentTools = ["Read", "Write", "Edit", "Grep", "Glob", "PowerShell"];
 // The model string the agent will hand to Claude Code depends on the mode: the patched
 // picker expects an alias ("sol"), while the native gateway expects the FULL snapshot
-// identity ("anthropic-openai-gpt-5.6-sol") -- the native binary does not recognise aliases.
+// identity ("anthropic-openai-gpt-6.1-sol") -- the native binary does not recognise aliases.
 function clientModelFor(mode: ClaudeClientMode, alias: string, id: string): string {
     return mode === "native-gateway" ? id : alias;
 }

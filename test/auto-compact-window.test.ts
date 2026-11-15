@@ -125,7 +125,7 @@ describe("autoCompactWindowForModel", () => {
     });
 
     it("resolves a full snapshot id", () => {
-        strictEqual(autoCompactWindowForModel("anthropic-openai-gpt-5.6-terra"), OPENAI_AUTO_COMPACT_WINDOW_TOKENS);
+        strictEqual(autoCompactWindowForModel("anthropic-openai-gpt-6.1-terra"), OPENAI_AUTO_COMPACT_WINDOW_TOKENS);
     });
 
     // Astra no longer shares the FAMILY constant: both the alias and the full identity must
@@ -146,9 +146,16 @@ describe("autoCompactWindowForModel", () => {
             strictEqual(autoCompactWindowForModel(alias) !== undefined, true, alias);
     });
 
-    it("resolves the ChatGPT-OAuth rows added on 2026-11-15 to the shared OpenAI window", () => {
-        for (const alias of ["sol6", "luna", "sol61", "terra61"])
+    it("resolves the ChatGPT-OAuth family names to the shared OpenAI window", () => {
+        for (const alias of ["sol", "terra", "luna"])
             strictEqual(autoCompactWindowForModel(alias), OPENAI_AUTO_COMPACT_WINDOW_TOKENS, alias);
+    });
+
+    // The version-suffixed names (`sol6`, `sol61`, `terra61`) were retired on 2026-11-15: the
+    // family name follows the newest version, so a suffixed second name must resolve to nothing.
+    it("NEGATIVE: the retired version-suffixed names and ids resolve to nothing", () => {
+        for (const retired of ["sol6", "sol61", "terra61", "anthropic-openai-gpt-5.6-sol", "anthropic-openai-gpt-5.6-terra", "anthropic-openai-gpt-6-sol"])
+            strictEqual(autoCompactWindowForModel(retired), undefined, retired);
     });
 
     // gemini-3.1-pro-high left the Antigravity catalogue (agy 1.5.9 `models`, 2026-11-15); a

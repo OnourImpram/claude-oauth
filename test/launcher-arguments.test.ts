@@ -7,7 +7,7 @@ import { presentApiKeySelectors } from "../src/security/environment.js";
 // --agents. These functions REWRITE the user's arguments; a silent bug here either kills
 // delegation or overwrites the user's own agent definitions.
 
-const AVAILABLE = ["anthropic-openai-gpt-5.6-sol", "anthropic-openai-gpt-5.6-terra", "anthropic-google-gemini-3.8-flash-high"];
+const AVAILABLE = ["anthropic-openai-gpt-6.1-sol", "anthropic-openai-gpt-6.1-terra", "anthropic-google-gemini-3.8-flash-high"];
 
 describe("claudePatchedModelArguments", () => {
     it("--model value is converted to the patched alias", () => {
@@ -62,7 +62,7 @@ describe("claudeOAuthAgentArguments", () => {
     });
 
     it("injects delegates only for models VERIFIED in the snapshot", () => {
-        const onlySol = claudeOAuthAgentArguments([], ["anthropic-openai-gpt-5.6-sol"]);
+        const onlySol = claudeOAuthAgentArguments([], ["anthropic-openai-gpt-6.1-sol"]);
         const names = Object.keys(JSON.parse(onlySol[onlySol.indexOf("--agents") + 1] ?? "{}") as Record<string, unknown>);
         strictEqual(names.includes("sol-delege"), true);
         strictEqual(names.includes("terra-delege"), false);

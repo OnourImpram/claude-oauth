@@ -7,6 +7,33 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Changed: OpenAI model names follow the latest version (2026-11-15)
+
+- `sol`, `terra`, `luna` and `astra` are the names of the OpenAI model families, not aliases of one
+  version. A name points at the newest version of its family in the contract; when a newer version
+  arrives the family's row is replaced and the name stays. A version-suffixed second name is never
+  opened for it.
+- Moved: `sol` from `gpt-5.6-sol` to `gpt-6.1-sol` and `terra` from `gpt-5.6-terra` to
+  `gpt-6.1-terra` (display names follow). `luna` stays on `gpt-6-luna`, `astra` on `gpt-6-astra`.
+  Every row keeps the window, output limit and auto-compact value it had; Astra keeps its
+  advertised window and its source note.
+- Removed: the names `sol6`, `sol61` and `terra61`, and the rows they carried. The ids
+  `anthropic-openai-gpt-5.6-sol`, `anthropic-openai-gpt-5.6-terra` and
+  `anthropic-openai-gpt-6-sol` no longer resolve; select `sol` or `terra`. The delegate agents
+  follow the names: `sol-delege`, `terra-delege`, `luna-delege`, `astra-delege`; `sol6-delege`,
+  `sol61-delege` and `terra61-delege` are gone.
+- Upgrade step: a model snapshot written before this change keeps the retired rows until the
+  next refresh, and while it does the OpenAI lane reports `clodex_session_catalog_drift` naming
+  them and stays closed (measured with a unit probe on the new contracts, no provider call). Run
+  `claude-oauth models refresh --allow-shrink` once after installing this change (README, "After
+  a row is retired").
+- Held by a test: `openAiFamilyNameViolations` (`src/domain/model-contracts.ts`) reports a name that
+  is not the family of its upstream model, a name that contains a digit, and a second row of one
+  family. `test/model-family-names.test.ts` asserts the shipped contracts have no violation and has
+  negative arms on fixture lists for each rule. RED before the change: the assertion on the shipped
+  contracts named `sol6`, `sol61` and `terra61` (nine violations).
+- The tests that carried the old ids as fixtures now use the new ones, with every assertion kept.
+
 ### Docs: the site explains the own-API-key lanes (2026-11-15)
 
 - `docs/index.html` gains the section "Using your own API key" (OpenAI API, Alibaba Token Plan,
