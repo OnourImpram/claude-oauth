@@ -3,8 +3,12 @@ import type { ModelRecord, ProviderModelRecord, ProviderReadiness } from "./cont
 export const OPENAI_CONTEXT_WINDOW_TOKENS = 1_050_000;
 export const OPENAI_MAXIMUM_OUTPUT_TOKENS = 128_000;
 export const ANTIGRAVITY_CONTEXT_WINDOW_TOKENS = 1_048_576;
-export const GROK_46_MODEL_ID = "grok-4.6";
-export const GROK_46_CONTEXT_WINDOW_TOKENS = 500_000;
+export const GROK_MODEL_ID = "grok-4.7";
+// Advertised window: xAI's model page lists grok-4.7 at "500k" (docs.x.ai/docs/models, read
+// 2026-09-29). The Grok CLI 1.0.40 ACP catalog reports 256_000 for the same id; the catalog
+// check below pins THAT value, so a catalog change is still caught as drift.
+export const GROK_CONTEXT_WINDOW_TOKENS = 500_000;
+export const GROK_CATALOG_CONTEXT_WINDOW_TOKENS = 256_000;
 export const GROK_AUTO_COMPACT_THRESHOLD_PERCENT = 85;
 // OpenAI prices a request whose context crosses this boundary at 2x input and 1.5x
 // output -- for the WHOLE request, not just the excess. The multipliers were read
@@ -81,7 +85,7 @@ export const GROK_AUTO_COMPACT_WINDOW_TOKENS = 350_000;
 // Google: ~76% of 1_048_576. No token pricing boundary applies on this lane (the
 // quota is per-request, not per-token), so the only constraint is the hard wall.
 export const ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS = 800_000;
-export type AgentModelAlias = "gemini" | "gemini-pro" | "opus-google" | "grok";
+export type AgentModelAlias = "gemini" | "argon" | "carbon" | "hydrogen" | "orchestrator" | "orchestrator-argon" | "opus-google" | "sonnet-google" | "grok";
 export interface AgentModelContract {
     readonly alias: AgentModelAlias;
     readonly id: string;
@@ -103,34 +107,102 @@ export const AGENT_MODEL_CONTRACTS: readonly AgentModelContract[] = [
         contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
         autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
     },
+    // RETIRED 2026-11-15: alias `gemini-pro` (gemini-3.1-pro-high). MEASURED with `agy models`
+    // (agy 1.5.9): the catalogue lists 22 models and no gemini-3.1-pro row, so the row could not
+    // be served. The alias is NOT repointed to another model: the selected model is the model
+    // that answers. Carbon, Hydrogen and the two Orchestrator rows below are the successors.
+    // Gemini 4 Argon (2026-10-18). MEASURED with `agy models` (agy 1.3.1) on this machine's Google AI
+    // Ultra account: `gemini-4-argon-{low,medium,high}` are listed; only the High row is contracted,
+    // matching every other Antigravity row. The catalogue and antigravity.google/docs/models publish
+    // NO context window for Argon, so the shared Antigravity constants are INHERITED, not measured.
     {
-        alias: "gemini-pro",
-        id: "anthropic-google-gemini-3.1-pro-high",
+        alias: "argon",
+        id: "anthropic-google-gemini-4-argon-high",
         provider: "google",
-        upstreamModel: "gemini-3.1-pro-high",
-        displayName: "Gemini 3.1 Pro High via Google OAuth",
+        upstreamModel: "gemini-4-argon-high",
+        displayName: "Gemini 4 Argon High via Google OAuth",
+        oauthType: "google-cli",
+        contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
+        autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    // Added 2026-11-15. MEASURED with `agy models` (agy 1.5.9) on this machine's Google account: the catalogue
+    // lists `gemini-4-carbon-high`, `gemini-4-hydrogen-xhigh`, `gemini-pro-orchestrator`, `gemini-pro-orchestrator-argon`. Each row below answered a live one-line probe through the same flags the
+    // headless bridge passes before it was contracted. Like Argon, the catalogue publishes no context
+    // window for these, so the shared Antigravity constants are INHERITED, not measured.
+    {
+        alias: "carbon",
+        id: "anthropic-google-gemini-4-carbon-high",
+        provider: "google",
+        upstreamModel: "gemini-4-carbon-high",
+        displayName: "Gemini 4 Carbon High via Google OAuth",
         oauthType: "google-cli",
         contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
         autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
     },
     {
-        alias: "opus-google",
-        id: "anthropic-google-claude-opus-4-6-thinking",
+        alias: "hydrogen",
+        id: "anthropic-google-gemini-4-hydrogen-xhigh",
         provider: "google",
-        upstreamModel: "claude-opus-4-6-thinking",
-        displayName: "Claude Opus 4.6 Thinking via Google OAuth",
+        upstreamModel: "gemini-4-hydrogen-xhigh",
+        displayName: "Gemini 4 Hydrogen XHigh via Google OAuth",
+        oauthType: "google-cli",
+        contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
+        autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    {
+        alias: "orchestrator",
+        id: "anthropic-google-gemini-pro-orchestrator",
+        provider: "google",
+        upstreamModel: "gemini-pro-orchestrator",
+        displayName: "Gemini Orchestrator Carbon via Google OAuth",
+        oauthType: "google-cli",
+        contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
+        autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    {
+        alias: "orchestrator-argon",
+        id: "anthropic-google-gemini-pro-orchestrator-argon",
+        provider: "google",
+        upstreamModel: "gemini-pro-orchestrator-argon",
+        displayName: "Gemini Orchestrator Argon via Google OAuth",
+        oauthType: "google-cli",
+        contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
+        autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    // Claude via Antigravity moved 4.6 -> 5.5 (2026-10-05). MEASURED on this machine's Google AI
+    // Ultra account with `agy models` (agy 1.1.27): claude-opus-5-5-{low,medium,high} and
+    // claude-sonnet-5-5-{low,medium,high} are listed, claude-opus-4-6-thinking is NOT. Antigravity's
+    // models page (antigravity.google/docs/models, read the same day) marks the 4.6 rows unavailable
+    // on Ultra and "Will be removed on November 2, 2026"; the 5.5 rows are Pro (non-trial) and Ultra
+    // only. The alias opus-google is kept so every caller (delege-hat, model-sor) keeps working.
+    {
+        alias: "opus-google",
+        id: "anthropic-google-claude-opus-5-5-high",
+        provider: "google",
+        upstreamModel: "claude-opus-5-5-high",
+        displayName: "Claude Opus 5.5 High via Google OAuth",
+        oauthType: "google-cli",
+        contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
+        autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    {
+        alias: "sonnet-google",
+        id: "anthropic-google-claude-sonnet-5-5-high",
+        provider: "google",
+        upstreamModel: "claude-sonnet-5-5-high",
+        displayName: "Claude Sonnet 5.5 High via Google OAuth",
         oauthType: "google-cli",
         contextWindow: ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
         autoCompactWindow: ANTIGRAVITY_AUTO_COMPACT_WINDOW_TOKENS,
     },
     {
         alias: "grok",
-        id: "anthropic-xai-grok-4.6",
+        id: "anthropic-xai-grok-4.7",
         provider: "xai",
-        upstreamModel: GROK_46_MODEL_ID,
-        displayName: "Grok 4.6 via xAI OAuth",
+        upstreamModel: GROK_MODEL_ID,
+        displayName: "Grok 4.7 via xAI OAuth",
         oauthType: "xai-cli",
-        contextWindow: GROK_46_CONTEXT_WINDOW_TOKENS,
+        contextWindow: GROK_CONTEXT_WINDOW_TOKENS,
         autoCompactWindow: GROK_AUTO_COMPACT_WINDOW_TOKENS,
     },
 ];
@@ -152,7 +224,7 @@ export function isVerifiedAgentSnapshotRoute(model: ModelRecord): boolean {
         !model.capabilities.includes("vision"));
 }
 export interface OpenAiModelContract {
-    readonly alias: "sol" | "terra" | "astra";
+    readonly alias: "sol" | "terra" | "sol6" | "luna" | "sol61" | "terra61" | "astra";
     readonly id: string;
     readonly upstreamModel: string;
     readonly displayName: string;
@@ -192,11 +264,65 @@ export const OPENAI_MODEL_CONTRACTS: readonly OpenAiModelContract[] = [
         maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
         autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
     },
+    // Added 2026-11-15. MEASURED in clodex 2.21.7 dist/cli.js (OPENAI_OAUTH_MODEL_SEEDS): the
+    // bundle gained gpt-6-sol and gpt-6-luna (window 272_000, ceiling 872_000) and gpt-6.1-sol
+    // (window 500_000, ceiling 872_000). The ceiling equals the locked openAiContextWindow, so
+    // the rows share OPENAI_CONTEXT_WINDOW_TOKENS; the auto-compact window is INHERITED from
+    // sol/terra, not measured per model. `sol` keeps meaning gpt-5.6-sol: an existing alias is
+    // not repointed without the operator's word. A row is served only when the LIVE catalogue of
+    // the operator's ChatGPT account reports the id (withVerifiedOpenAiModels).
+    {
+        alias: "sol6",
+        id: "anthropic-openai-gpt-6-sol",
+        upstreamModel: "anthropic-openai-oauth__gpt-6-sol",
+        displayName: "GPT-6 Sol via ChatGPT OAuth",
+        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
+        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
+        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    {
+        alias: "luna",
+        id: "anthropic-openai-gpt-6-luna",
+        upstreamModel: "anthropic-openai-oauth__gpt-6-luna",
+        displayName: "GPT-6 Luna via ChatGPT OAuth",
+        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
+        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
+        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    {
+        alias: "sol61",
+        id: "anthropic-openai-gpt-6.1-sol",
+        upstreamModel: "anthropic-openai-oauth__gpt-6.1-sol",
+        displayName: "GPT-6.1 Sol via ChatGPT OAuth",
+        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
+        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
+        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
+    },
+    // gpt-6.1-terra is NOT in the 2.21.7 seed list. MEASURED 2026-11-15 after `clodex providers
+    // refresh-models openai-oauth`: the operator's account catalogue lists it (window 500_000,
+    // ceiling 872_000) and `clodex models --json` reports effective 872_000 with the saved max
+    // stop, like the six seeded rows. Its live row publishes NO maxOutputTokens, so the output
+    // limit here is INHERITED from the seeded rows, not measured.
+    {
+        alias: "terra61",
+        id: "anthropic-openai-gpt-6.1-terra",
+        upstreamModel: "anthropic-openai-oauth__gpt-6.1-terra",
+        displayName: "GPT-6.1 Terra via ChatGPT OAuth",
+        contextWindow: OPENAI_CONTEXT_WINDOW_TOKENS,
+        maximumOutputTokens: OPENAI_MAXIMUM_OUTPUT_TOKENS,
+        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
+    },
     // GPT-6 Astra. Seeded by clodex 2.11.1 only (measured 2026-09-05: the id
     // "gpt-6-astra" has ZERO occurrences in the 2.8.2 bundle and three in 2.11.1),
     // which is why this row and the clodex pin move together -- withVerifiedOpenAiModels
     // admits a model only when the LIVE catalogue reports it, so a contract without the
     // matching clodex build is a picker row that can never be verified.
+    //
+    // RE-MEASURED 2026-11-15 in clodex 2.21.7 dist/cli.js (OPENAI_OAUTH_MODEL_SEEDS, 17 ids
+    // against 14 in 2.11.1): gpt-6-astra is still seeded, the same row (window 272_000, ceiling
+    // 872_000, line 6297), so this contract and the pin still move together. The three ids the
+    // bundle gained are gpt-6.1-sol, gpt-6-sol and gpt-6-luna; their rows are above (sol61, sol6, luna),
+    // next to terra61, which the account lists without a seed.
     //
     // contextWindow here is the ceiling (openAiCatalogEntry checks live <= ceiling), not
     // an equality: Astra's own maxContextWindow is 872_000.
@@ -331,9 +457,9 @@ export function openAiCatalogDriftReadiness(models: readonly ModelRecord[], cata
         remedy: OPENAI_CATALOG_DRIFT_REMEDY,
     };
 }
-export function verifiedGrok46CatalogEntry(catalog: readonly ProviderModelRecord[]): ProviderModelRecord | undefined {
-    return catalog.find((entry) => entry.id === GROK_46_MODEL_ID &&
-        entry.contextWindow === GROK_46_CONTEXT_WINDOW_TOKENS);
+export function verifiedGrokCatalogEntry(catalog: readonly ProviderModelRecord[]): ProviderModelRecord | undefined {
+    return catalog.find((entry) => entry.id === GROK_MODEL_ID &&
+        entry.contextWindow === GROK_CATALOG_CONTEXT_WINDOW_TOKENS);
 }
 // Resolves the auto-compaction window for whatever the user typed after --model:
 // a picker alias ("sol"), a full snapshot id, or either with the [1m] suffix.
@@ -382,6 +508,95 @@ export const WEB_MODEL_CONTRACTS: readonly WebModelContract[] = [
 export function webModelContract(modelId: string): WebModelContract | undefined {
     return WEB_MODEL_CONTRACTS.find((entry) => entry.id === modelId);
 }
+// ---- Router-owned API-key lanes: Alibaba Token Plan, Z.AI, OpenAI API (2026-11-09) ----
+//
+// DATA RULE: these are third-party commercial endpoints without a corpus-consent guarantee
+// reviewed by the maintainer. Sensitive, clinical, client or private data MUST NOT be routed
+// here; public or synthetic material only. README states the rule and
+// `mcp__*` tools are never advertised upstream (a tool the provider can call is a path for
+// connected-account data to reach the provider in the tool result).
+//
+// MEASURED 2026-11-09 (tasks/2026-11-09-router-alibaba-zai/kanit/): the Alibaba Token Plan
+// endpoint is Anthropic-compatible at POST /apps/anthropic/v1/messages with `x-api-key` (all 13
+// chat models answered 200 "pong"); /anthropic/v1/messages and /compatible-mode/v1/messages
+// returned 404; the model list is GET /compatible-mode/v1/models (20 rows, NO context_length
+// field on any row). Z.AI is Anthropic-compatible at POST /api/anthropic/v1/messages with
+// `x-api-key`; its model list GET /api/paas/v4/models answered 200 while every chat call
+// answered 429 code 1113 "Insufficient balance or no resource package. Please recharge.".
+// OpenAI: GET /v1/models 200 with a valid key that has NO credits left, while
+// POST /v1/responses and /v1/chat/completions answered 429 insufficient_quota /
+// credit_balance_exhausted.
+//
+// WINDOW RULE: only primary sources or measurements give numbers. Everything below without a
+// source takes a conservative default (262_144 window / 200_000 auto-compact) and is marked
+// [UNVERIFIED] in the README. The one sourced
+// number is GPT-6 Astra's model-card 1,050,000 context / 128,000 max output (the same card the
+// ChatGPT-OAuth astra row quotes verbatim). Claude Code buckets any id without the [1m] suffix
+// at 200k, so the unverified rows stay in the client's own conservative bucket.
+export const ALIBABA_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com";
+export const ZAI_BASE_URL = "https://api.z.ai";
+export const OPENAI_API_BASE_URL = "https://api.openai.com";
+export const UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS = 262_144;
+export const UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS = 200_000;
+export const OPENAI_API_ASTRA_CONTEXT_WINDOW_TOKENS = 1_050_000;
+export const OPENAI_API_ASTRA_MAXIMUM_OUTPUT_TOKENS = 128_000;
+export type ApiKeyProvider = "alibaba" | "zai" | "openaiapi";
+export interface ApiKeyModelContract {
+    readonly id: string;
+    readonly provider: ApiKeyProvider;
+    readonly upstreamModel: string;
+    readonly displayName: string;
+    readonly contextWindow: number;
+    readonly autoCompactWindow: number;
+    readonly maximumOutputTokens?: number;
+    /** Where the window came from. An unsourced number is folklore; "[UNVERIFIED]" names it. */
+    readonly contextWindowSource: string;
+}
+export const ALIBABA_MODEL_CONTRACTS: readonly ApiKeyModelContract[] = [
+    // CURATED 2026-11-15 (operator request: keep the lanes to models worth routing to). The live
+    // list (GET /compatible-mode/v1/models, 21 rows) still carries every id removed here:
+    // qwen3.7-max, qwen3.7-plus, qwen3.6-flash, glm-5.2 (older generations of rows that stay) and
+    // deepseek-v4-pro-0813, deepseek-v4.1-flash-1017, deepseek-v4-flash-0731 (dated snapshots).
+    // qwen4-max-preview is new in the live list and answered a live one-line probe (HTTP 200,
+    // "pong") before it was contracted; like every row here its window is the [UNVERIFIED] default.
+    { id: "anthropic-alibaba-qwen4-max-preview", provider: "alibaba", upstreamModel: "qwen4-max-preview", displayName: "Qwen 4 Max Preview (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+    { id: "anthropic-alibaba-qwen3.8-max", provider: "alibaba", upstreamModel: "qwen3.8-max", displayName: "Qwen 3.8 Max (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+    { id: "anthropic-alibaba-qwen3.8-flash", provider: "alibaba", upstreamModel: "qwen3.8-flash", displayName: "Qwen 3.8 Flash (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+    { id: "anthropic-alibaba-glm-5.3", provider: "alibaba", upstreamModel: "glm-5.3", displayName: "GLM 5.3 (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+    { id: "anthropic-alibaba-deepseek-v4-pro", provider: "alibaba", upstreamModel: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+    { id: "anthropic-alibaba-deepseek-v4.1-flash", provider: "alibaba", upstreamModel: "deepseek-v4.1-flash", displayName: "DeepSeek V4.1 Flash (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+    { id: "anthropic-alibaba-auto", provider: "alibaba", upstreamModel: "auto", displayName: "Auto (Alibaba)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Alibaba's model list publishes no context_length" },
+];
+export const ZAI_MODEL_CONTRACTS: readonly ApiKeyModelContract[] = [
+    // Z.AI's own list carries no window for either row; glm-5.3 is the "max" tier of the pair
+    // (GET /api/paas/v4/models 2026-11-09 lists glm-5.3 and glm-5.3-flash, no glm-5.3-max).
+    { id: "anthropic-zai-glm-5.3", provider: "zai", upstreamModel: "glm-5.3", displayName: "GLM 5.3 Max (Z.AI)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Z.AI's model list publishes no context window" },
+    { id: "anthropic-zai-glm-5.3-flash", provider: "zai", upstreamModel: "glm-5.3-flash", displayName: "GLM 5.3 Flash (Z.AI)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; Z.AI's model list publishes no context window" },
+];
+export const OPENAI_API_MODEL_CONTRACTS: readonly ApiKeyModelContract[] = [
+    {
+        id: "anthropic-openaiapi-gpt-6-astra",
+        provider: "openaiapi",
+        upstreamModel: "gpt-6-astra",
+        displayName: "GPT-6 Astra (OpenAI API)",
+        contextWindow: OPENAI_API_ASTRA_CONTEXT_WINDOW_TOKENS,
+        autoCompactWindow: OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
+        maximumOutputTokens: OPENAI_API_ASTRA_MAXIMUM_OUTPUT_TOKENS,
+        contextWindowSource: "Model card https://developers.openai.com/api/docs/models/gpt-6-astra (quoted verbatim by the ChatGPT-OAuth astra contract, fetched 2026-09-05): \"1,050,000 context window\", \"128,000 max output tokens\". The 272K 2x pricing boundary applies on THIS lane; the Codex long-context exception quoted for the OAuth lane does not, so the auto-compact window is the Sol/Terra 220_000 below the boundary.",
+    },
+    { id: "anthropic-openaiapi-gpt-6.1-sol", provider: "openaiapi", upstreamModel: "gpt-6.1-sol", displayName: "GPT-6.1 Sol (OpenAI API)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; GET /v1/models publishes no context window" },
+    { id: "anthropic-openaiapi-gpt-6.1-terra", provider: "openaiapi", upstreamModel: "gpt-6.1-terra", displayName: "GPT-6.1 Terra (OpenAI API)", contextWindow: UNVERIFIED_API_KEY_CONTEXT_WINDOW_TOKENS, autoCompactWindow: UNVERIFIED_API_KEY_AUTO_COMPACT_WINDOW_TOKENS, contextWindowSource: "[UNVERIFIED] conservative default; GET /v1/models publishes no context window" },
+];
+export function apiKeyModelContracts(provider: ApiKeyProvider): readonly ApiKeyModelContract[] {
+    switch (provider) {
+        case "alibaba": return ALIBABA_MODEL_CONTRACTS;
+        case "zai": return ZAI_MODEL_CONTRACTS;
+        case "openaiapi": return OPENAI_API_MODEL_CONTRACTS;
+    }
+}
+export function apiKeyModelContract(provider: ApiKeyProvider, modelId: string): ApiKeyModelContract | undefined {
+    return apiKeyModelContracts(provider).find((entry) => entry.id === modelId);
+}
 export function autoCompactWindowForModel(modelArgument: string): number | undefined {
     const normalized = modelArgument.trim().toLowerCase().replace(/\[1m\]$/u, "");
     if (normalized === "")
@@ -397,6 +612,14 @@ export function autoCompactWindowForModel(modelArgument: string): number | undef
     for (const contract of OPENAI_MODEL_CONTRACTS) {
         if (normalized === contract.alias.toLowerCase() || normalized === contract.id.toLowerCase())
             return contract.autoCompactWindow;
+    }
+    // The API-key lanes have no launch aliases: they resolve by their full snapshot ids only,
+    // so each lane is asked for by name.
+    for (const provider of ["alibaba", "zai", "openaiapi"] as const) {
+        for (const contract of apiKeyModelContracts(provider)) {
+            if (normalized === contract.id.toLowerCase())
+                return contract.autoCompactWindow;
+        }
     }
     return undefined;
 }

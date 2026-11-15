@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+import { ANTIGRAVITY_PROBE_ABORT_MS, ANTIGRAVITY_PROBE_TIMEOUT_MS } from "./antigravity/probe-budget.js";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSnapshot, ProviderId, ProviderReadiness } from "./domain/contracts.js";
-import { activeCustomSelectors, blockingCustomSelectors, runAntigravityHeadless } from "./antigravity/headless-bridge.js";
-import { RouterError, normalizeRouterError } from "./domain/errors.js";
+import { activeCustomSelectors, antigravityAllowedModels, blockingCustomSelectors, runAntigravityHeadless } from "./antigravity/headless-bridge.js";
+import { RouterError, normalizeCliError } from "./domain/errors.js";
 import {
     catalogVerifiedGoogleModelIds,
     openAiContextMismatches,
@@ -13,17 +14,22 @@ import {
     type GoogleModelCatalogReadiness,
     type OpenAiModelReadiness,
     withPinnedNativeModels,
+    withVerifiedAlibabaModels,
     withVerifiedGoogleModels,
+    withVerifiedOpenAiApiModels,
     withVerifiedWebModels,
+    grokCatalogAfterCacheRefresh,
     withVerifiedGrokModel,
     withVerifiedOpenAiModels,
+    withVerifiedZaiModels,
 } from "./domain/model-refresh.js";
 import {
     AGENT_MODEL_CONTRACTS,
     ANTIGRAVITY_CONTEXT_WINDOW_TOKENS,
-    GROK_46_CONTEXT_WINDOW_TOKENS,
-    GROK_46_MODEL_ID,
-    verifiedGrok46CatalogEntry,
+    GROK_CATALOG_CONTEXT_WINDOW_TOKENS,
+    GROK_MODEL_ID,
+    type AgentModelAlias,
+    verifiedGrokCatalogEntry,
 } from "./domain/model-contracts.js";
 import { deviceLoginPlan } from "./domain/provider-login.js";
 import { modelDetail } from "./domain/registry.js";
@@ -31,6 +37,7 @@ import { runGeminiAcp } from "./gemini/acp-bridge.js";
 import { inspectGrokModels, prepareGrokProcessEnvironment, runGrokAcp } from "./grok/acp-bridge.js";
 import { runCaptured, runInteractive } from "./runtime/child-process.js";
 import { prepareEffectiveInstallation, type ClaudeShadowState } from "./runtime/claude-shadow.js";
+import type { VendorUpdateDecision } from "./runtime/claude-vendor-update.js";
 import {
     expandLockedPath,
     readInstallLock,
@@ -46,6 +53,7 @@ import { preferredLoopbackPort } from "./runtime/loopback-port.js";
 import { verifyReleaseIdentity, type ReleaseIdentity } from "./runtime/release-identity.js";
 import { runtimePaths, ensurePrivateDirectory } from "./runtime/paths.js";
 import { ReceiptStore } from "./runtime/receipt-store.js";
+import { summarizeReceipts } from "./runtime/receipt-summary.js";
 import { isNativeClaudeCommand, resolveEntrypoint } from "./cli-routing.js";
 import { readSnapshot, readSnapshotOrDefault, writeSnapshot } from "./runtime/snapshot-store.js";
 import {
@@ -57,7 +65,7 @@ import {
 import { createSessionNonce } from "./security/nonce.js";
 import { readActiveSupervisorStatuses } from "./supervisor/ipc.js";
 import { launchClaudeOAuth } from "./supervisor/launcher.js";
-import { defaultWebBridgeAdapter, startCatalogProviders } from "./supervisor/provider-set.js";
+import { defaultAlibabaAdapter, defaultOpenAiApiKeyAdapter, defaultWebBridgeAdapter, defaultZaiAdapter, startCatalogProviders } from "./supervisor/provider-set.js";
 interface CliContext {
     readonly root: string;
     readonly installLock: InstallLock;
@@ -66,6 +74,7 @@ interface CliContext {
     readonly environment: NodeJS.ProcessEnv;
     readonly shadow?: ClaudeShadowState;
     readonly shadowDetailCode?: string;
+    readonly claudeVendorUpdate?: VendorUpdateDecision;
 }
 interface NativeAuthStatus {
     readonly loggedIn: boolean;
@@ -259,20 +268,40 @@ async function catalogSnapshot(ctx: CliContext, write: boolean, allowShrink = fa
         const webReadiness = await defaultWebBridgeAdapter().readiness();
         snapshot = withVerifiedWebModels(snapshot, webReadiness.status === "ready");
         readiness.push(webReadiness);
+        // The API-key lanes (alibaba / zai / openaiapi, 2026-11-09), not OAuth sessions:
+        // rows derive from the contracts and enter only when the live model LIST carries the
+        // upstream id, while ONE tiny chat probe per lane decides the readiness state (a zai
+        // 429/1113 becomes zai_balance_insufficient, an OpenAI 429 insufficient_quota becomes
+        // openaiapi_credit_exhausted; neither is ever shown green). No key -> no rows.
+        const alibaba = await defaultAlibabaAdapter(ctx.environment).catalog();
+        snapshot = withVerifiedAlibabaModels(snapshot, alibaba.models.map((entry) => entry.id));
+        readiness.push(alibaba.readiness);
+        const zai = await defaultZaiAdapter(ctx.environment).catalog();
+        snapshot = withVerifiedZaiModels(snapshot, zai.models.map((entry) => entry.id));
+        readiness.push(zai.readiness);
+        const openaiapi = await defaultOpenAiApiKeyAdapter(ctx.environment).catalog();
+        snapshot = withVerifiedOpenAiApiModels(snapshot, openaiapi.models.map((entry) => entry.id));
+        readiness.push(openaiapi.readiness);
         try {
-            const catalog = await inspectGrokModels({
+            // Asked once more when the contract model is missing: the first answer after
+            // a period of disuse comes from the CLI's stale on-disk cache (see
+            // grokCatalogAfterCacheRefresh).
+            const catalog = await grokCatalogAfterCacheRefresh(async () => await inspectGrokModels({
                 binary: expandLockedPath(ctx.installLock.grok.executable, ctx.environment),
                 home: paths.grokHome,
                 cwd: process.cwd(),
                 environment: ctx.environment,
                 signal: AbortSignal.timeout(30_000),
-            });
-            const grok = verifiedGrok46CatalogEntry(catalog);
+            }));
+            const grok = verifiedGrokCatalogEntry(catalog);
             grokEnabled = grok !== undefined;
             snapshot = withVerifiedGrokModel(snapshot, catalog);
+            // The catalog arrived, so the login works: a missing contract model is a catalog
+            // mismatch, not an authentication problem. It used to be filed as auth_required
+            // under a code that still named grok 4.6 at 500k after the contract moved on.
             readiness.push(grokEnabled
-                ? ready("xai", "grok_4_6_acp_live_500k_catalog_verified")
-                : unavailable("xai", "grok_4_6_500k_not_in_live_catalog"));
+                ? ready("xai", "grok_acp_live_catalog_verified")
+                : { provider: "xai", oauthReady: true, adapterReady: false, status: "unavailable", detailCode: "grok_contract_model_not_in_live_catalog" });
         }
         catch {
             readiness.push(unavailable("xai", "grok_acp_live_catalog_failed"));
@@ -359,8 +388,8 @@ async function probeAntigravityModel(ctx: CliContext, model: string): Promise<Go
             prompt: `Reply with exactly ${marker}. Do not use tools or read workspace files.`,
             model,
             environment: ctx.environment,
-            timeoutMs: 60_000,
-            signal: AbortSignal.timeout(65_000),
+            timeoutMs: ANTIGRAVITY_PROBE_TIMEOUT_MS,
+            signal: AbortSignal.timeout(ANTIGRAVITY_PROBE_ABORT_MS),
         });
         const matched = result.response.trim() === marker;
         return {
@@ -489,6 +518,9 @@ async function doctor(ctx: CliContext, args: readonly string[]): Promise<number>
             identity: ctx.releaseIdentity ?? { status: "unverified", detailCode: "release_identity_not_computed" },
         },
         shadowSelfHeal: ctx.shadow ?? { status: "not_run", detailCode: ctx.shadowDetailCode },
+        // Whether the Claude Code binary is the pinned one, an update accepted under the
+        // lock's vendor-signature policy, or a refused one (with the reason and the remedy).
+        claudeVendorUpdate: ctx.claudeVendorUpdate ?? { status: "not_run", detailCode: "installation_not_prepared" },
         pickerCache: pickerCacheRemedy === undefined ? pickerCacheStatus : { ...pickerCacheStatus, remedy: pickerCacheRemedy },
         nativeClaude: native,
         session: activeSessions.length === 0
@@ -623,6 +655,16 @@ async function geminiAcpTask(ctx: CliContext, args: readonly string[]): Promise<
         process.off("SIGTERM", onSignal);
     }
 }
+// The fixed-model commands read their upstream id from the contract. They used to carry a
+// literal ("claude-opus-4-6-thinking"), which is the hand-written-surface defect class: moving
+// the contract to Claude 5.5 would have left `claude-oauth opus-google` asking for a model the
+// account's catalogue no longer lists.
+function agentUpstreamModel(alias: AgentModelAlias): string {
+    const contract = AGENT_MODEL_CONTRACTS.find((entry) => entry.alias === alias && entry.provider === "google");
+    if (contract === undefined)
+        throw new RouterError("model_not_available", `No Google contract carries the alias ${alias}.`, 404);
+    return contract.upstreamModel;
+}
 async function antigravityTask(ctx: CliContext, args: readonly string[], fixedModel?: string): Promise<number> {
     assertNoApiKeySelectors(ctx.environment);
     requireComponents(ctx, ["antigravity"]);
@@ -687,9 +729,9 @@ async function grokTask(ctx: CliContext, args: readonly string[]): Promise<numbe
             environment: ctx.environment,
             signal: abort.signal,
         });
-        const selected = verifiedGrok46CatalogEntry(catalog);
+        const selected = verifiedGrokCatalogEntry(catalog);
         if (selected === undefined) {
-            throw new RouterError("model_not_available", `The OAuth catalog does not expose ${GROK_46_MODEL_ID} with its reviewed ${GROK_46_CONTEXT_WINDOW_TOKENS}-token contract.`, 404);
+            throw new RouterError("model_not_available", `The OAuth catalog does not expose ${GROK_MODEL_ID} with its reviewed ${GROK_CATALOG_CONTEXT_WINDOW_TOKENS}-token contract.`, 404);
         }
         const result = await runGrokAcp({
             binary,
@@ -713,6 +755,17 @@ async function receipt(ctx: CliContext): Promise<number> {
     printJson(last ?? { status: "none" });
     return 0;
 }
+/** `claude-oauth receipts [--hours N]`: what the lanes did in the last N hours (default 24). */
+async function receipts(ctx: CliContext, args: readonly string[]): Promise<number> {
+    let hours = 24;
+    if (args.length === 2 && args[0] === "--hours" && /^[1-9]\d{0,4}$/u.test(args[1] as string))
+        hours = Number(args[1]);
+    else if (args.length !== 0)
+        throw new RouterError("invalid_request", "Usage: claude-oauth receipts [--hours <1-99999>].", 400);
+    const read = await new ReceiptStore(runtimePaths(ctx.environment).receipts).all();
+    printJson({ ...summarizeReceipts(read.receipts, { now: Date.now(), hours }), malformedLines: read.malformedLines });
+    return 0;
+}
 function help(): void {
     process.stdout.write([
         "claude-oauth [claude arguments]",
@@ -720,9 +773,11 @@ function help(): void {
         "claude-oauth auth login <claude|openai|xai|google|gemini>",
         "claude-oauth models refresh [--allow-shrink]",
         "claude-oauth receipt",
+        "claude-oauth receipts [--hours <n>]",
         "claude-oauth gemini --task <task> [--cwd <path>]",
         "claude-oauth opus-google --task <task> [--cwd <path>]",
-        "claude-oauth antigravity --model <gemini-3.8-flash-high|claude-opus-4-6-thinking> --task <task> [--cwd <path>]",
+        "claude-oauth sonnet-google --task <task> [--cwd <path>]",
+        `claude-oauth antigravity --model <${antigravityAllowedModels.join("|")}> --task <task> [--cwd <path>]`,
         "claude-oauth grok --task <task> [--cwd <path>]",
         "claude-oauth gemini-acp --task <task> [--cwd <path>]",
         "",
@@ -740,7 +795,7 @@ async function main(): Promise<number> {
         return 0;
     }
     const command = args[0];
-    if (!["doctor", "auth", "models", "receipt", "gemini", "opus-google", "antigravity", "grok", "gemini-acp"].includes(command ?? "")) {
+    if (!["doctor", "auth", "models", "receipt", "receipts", "gemini", "opus-google", "sonnet-google", "antigravity", "grok", "gemini-acp"].includes(command ?? "")) {
         return await launchClaudeOAuth({ args, cwd: process.cwd() });
     }
     const ctx = command === "doctor" ? await diagnosticContext() : await context();
@@ -765,11 +820,13 @@ async function main(): Promise<number> {
             throw new RouterError("invalid_request", "Usage: claude-oauth receipt.", 400);
         return await receipt(ctx);
     }
+    if (command === "receipts")
+        return await receipts(ctx, args.slice(1));
     if (command === "gemini") {
-        return await antigravityTask(ctx, args.slice(1), "gemini-3.8-flash-high");
+        return await antigravityTask(ctx, args.slice(1), agentUpstreamModel("gemini"));
     }
-    if (command === "opus-google") {
-        return await antigravityTask(ctx, args.slice(1), "claude-opus-4-6-thinking");
+    if (command === "opus-google" || command === "sonnet-google") {
+        return await antigravityTask(ctx, args.slice(1), agentUpstreamModel(command));
     }
     if (command === "antigravity") {
         return await antigravityTask(ctx, args.slice(1));
@@ -794,13 +851,16 @@ void main()
     process.exitCode = exitCode;
 })
     .catch((caught: unknown) => {
-    const error = normalizeRouterError(caught);
+    const error = normalizeCliError(caught);
     writeSafeLog({
         event: "cli_fatal",
         level: "error",
         code: error.code,
         ...(caught instanceof Error ? { errorName: caught.name } : {}),
         stackFrames: redactedStackFrames(caught),
+        // A local failure's message is written by normalizeCliError from the errno code,
+        // system call and path alone, so it is safe to keep and it is the whole diagnosis.
+        ...(error.code === "local_failure" ? { remedy: error.message.slice(0, 300) } : {}),
     });
     process.stderr.write(`${JSON.stringify({ ok: false, error: { code: error.code, message: error.message } })}\n`);
     process.exitCode = 1;

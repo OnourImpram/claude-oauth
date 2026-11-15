@@ -54,8 +54,8 @@
     "start": "node dist/src/cli.js"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.4.0",
-    "@bman654/clodex": "2.11.1"
+    "@agentclientprotocol/sdk": "2.7.0",
+    "@bman654/clodex": "2.21.7"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

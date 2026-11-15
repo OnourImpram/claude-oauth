@@ -10,8 +10,12 @@ function replaceUnique(source: string, name: string, anchor: string, replacement
     return source.replace(anchor, () => replacement);
 }
 
-// Anchors are from @bman654/clodex 2.11.1 dist/cli.js. Its original bytes remain
-// pinned separately; this transform never receives or embeds the session nonce.
+// Anchors are from @bman654/clodex 2.21.7 dist/cli.js. They are the same text as in 2.11.1
+// (measured 2026-11-15: the quick-mode password head, the /health + authorization pair and the body
+// of isAuthorized are byte-identical in both bundles), and the upstream still enforces NEITHER
+// property itself: quick local mode still returns a null password, and /health is still answered
+// before the authorization check. So both stay enforced here. Its original bytes remain pinned
+// separately; this transform never receives or embeds the session nonce.
 export function patchClodexCapsule(source: string): string {
     const passwordAnchor = `async function getServerPasswordForQuickMode(mode, passwordOverride) {
   if (mode === "local") return { password: null, wasSaved: false };`;

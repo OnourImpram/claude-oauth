@@ -5,9 +5,13 @@ import { describe, it } from "node:test";
 import type { ModelRecord, ModelSnapshot, ProviderModelRecord } from "../src/domain/contracts.js";
 import {
     AGENT_MODEL_CONTRACTS,
+    GROK_CATALOG_CONTEXT_WINDOW_TOKENS,
+    GROK_CONTEXT_WINDOW_TOKENS,
+    GROK_MODEL_ID,
     OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS,
     OPENAI_CONTEXT_WINDOW_TOKENS,
     OPENAI_MODEL_CONTRACTS,
+    verifiedGrokCatalogEntry,
 } from "../src/domain/model-contracts.js";
 import { withVerifiedGoogleModels, withVerifiedGrokModel, withVerifiedOpenAiModels } from "../src/domain/model-refresh.js";
 import { ModelRegistry, advertisedContextWindow, claudeClientDiscoveryId, modelDetail } from "../src/domain/registry.js";
@@ -180,6 +184,18 @@ function astraRow(over: {
 }
 
 
+describe("grok-4.7: catalog window and advertised window are pinned separately (2026-09-29)", () => {
+    it("accepts the CLI catalog row and advertises the xAI model-page window", () => {
+        strictEqual(GROK_MODEL_ID, "grok-4.7");
+        strictEqual(GROK_CONTEXT_WINDOW_TOKENS, 500_000);
+        ok(verifiedGrokCatalogEntry([{ id: "grok-4.7", contextWindow: GROK_CATALOG_CONTEXT_WINDOW_TOKENS }]) !== undefined);
+    });
+    it("NEGATIVE CONTROL: a catalog row with another window or id is drift, not a match", () => {
+        strictEqual(verifiedGrokCatalogEntry([{ id: "grok-4.7", contextWindow: 500_000 }]), undefined);
+        strictEqual(verifiedGrokCatalogEntry([{ id: "grok-4.6", contextWindow: GROK_CATALOG_CONTEXT_WINDOW_TOKENS }]), undefined);
+    });
+});
+
 describe("the window advertised to Claude Code is derived from the contract", () => {
     it("B06 Astra keeps the context advertisement separate from its pinned input capacity", () => {
         const line = discoveryRows(verifiedSnapshot).find((entry) => String(entry["id"]).startsWith("anthropic-openai-gpt-6-astra"));
@@ -195,7 +211,7 @@ describe("the window advertised to Claude Code is derived from the contract", ()
         ok(Number.isSafeInteger(pin) && pin > 0);
         const openAi = withVerifiedOpenAiModels(emptyBaseline, liveCatalog(pin), pin);
         const google = withVerifiedGoogleModels(openAi, AGENT_MODEL_CONTRACTS.filter((model) => model.provider === "google").map((model) => model.upstreamModel));
-        const snapshot = withVerifiedGrokModel(google, AGENT_MODEL_CONTRACTS.filter((model) => model.provider === "xai").map((model) => ({ id: model.upstreamModel, contextWindow: model.contextWindow })));
+        const snapshot = withVerifiedGrokModel(google, AGENT_MODEL_CONTRACTS.filter((model) => model.provider === "xai").map((model) => ({ id: model.upstreamModel, contextWindow: GROK_CATALOG_CONTEXT_WINDOW_TOKENS })));
         const rows = discoveryRows(snapshot);
         strictEqual(rows.length, ALL_EXTERNAL_IDS.length, "every routed contract must be covered");
         for (const model of snapshot.models) {

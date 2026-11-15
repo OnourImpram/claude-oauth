@@ -4,9 +4,14 @@
     "version": "24.14.0"
   },
   "claude": {
-    "version": "2.1.270",
+    "version": "2.1.325",
     "executable": "%USERPROFILE%\\.local\\bin\\claude.exe",
-    "sha256": "FD7F35EC7761195AB5BA4EFF423E48A78A7849E78F60D93EC31256CDB1A9EC7E"
+    "sha256": "87E0CB6AE0F4775DA388CD3043F4D8097EF961DCDDBF55FE90BC61FFC3F57A30",
+    "vendorSignature": {
+      "platform": "win32",
+      "signerCommonName": "Anthropic, PBC",
+      "signerOrganization": "Anthropic, PBC"
+    }
   },
   "claudeShadow": {
     "version": "2.1.251",
@@ -16,31 +21,31 @@
   },
   "clodex": {
     "package": "@bman654/clodex",
-    "version": "2.11.1",
-    "integrity": "sha512-j3yM0Znh9kZiBDrp2l/YYbtd/0SIVaSeN7rV7VwY92oMrVNtLsL+B++Y7bCU9bBLHVElj12tKJtvXvHZ9qAUTQ==",
-    "entrypointSha256": "3528B137FB81B12CAD58E914995ACA8092381CBC75463E3B3F3DFE3522519872",
+    "version": "2.21.7",
+    "integrity": "sha512-Y1LUhRXwr3W2vh30nbH3KKL2VgMfoo1DLwYBm8FxnRWPjNdDu+BXjrDgRxibk+XVdXuTN0SOh00BFFwdybFsJw==",
+    "entrypointSha256": "3C58A874D69F5D785122C81AF4A70B72F5376544D7018C6A4D295CF4009CA369",
     "localPatch": "config/claude-oauth-local-patches.mjs",
-    "localPatchSha256": "B61572B8CA51EAB8B724751D7C6DCD8312AD48E515F22922BA6EEDAB162E1122",
-    "capsuleEntrypointSha256": "408F96F52A41B45F19944119CCC93C74B11F27364FD12B9CC138B5D75E25ED0F"
+    "localPatchSha256": "E35C770968427A52A2C0901C1B94BE04CE4A6C361953C2CC8DBD8DB297646DDD",
+    "capsuleEntrypointSha256": "3CCF7BE90173E6DB8E0D114BA79EDF04FBC14CD5A96E332BAF4B173094848139"
   },
   "grok": {
-    "version": "1.0.30",
-    "sourceCommit": "04b7ffed98c6",
-    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\grok\\bin\\grok.exe",
-    "sha256": "CA24EA63272BA7881261F4A52498D1F5BD884B01DA25845990422A10DD315266",
-    "installerSha256": "12F665D4FE58A043AA7BA19A6BFA1C455DBD400E05F3146A791963268FEAD552"
+    "version": "1.0.77",
+    "sourceCommit": "50ca579fa996",
+    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\grok\\versions\\1.0.77\\grok.exe",
+    "sha256": "6B757512D240A6439535CA75AAD039E581D00F17BA8E937112FD0DBAADF1BC81",
+    "installerSha256": "D0F405244C03C36D8FAA296123AC4B5E0D7082C8FF42EE8E0F71595B8252C30E"
   },
   "gemini": {
-    "version": "0.58.0",
+    "version": "0.67.0",
     "executable": "%USERPROFILE%\\.local\\bin\\gemini.cmd",
     "sha256": "2671DEE8F63ED9D88C6CE247AA9BAC30B1952A9F71B4AD5EC51566B45D669DD5",
     "entrypoint": "%APPDATA%\\npm\\node_modules\\@google\\gemini-cli\\bundle\\gemini.js",
-    "entrypointSha256": "25F087A42F4484891AA73E6E36CC2790E69A3C023CC44FD244ADF44A091EEBD7"
+    "entrypointSha256": "7E35BA8D8629A295C0DB3E6A60040177E87F1A6440C51B379922E046DB9939A3"
   },
   "antigravity": {
-    "version": "1.1.27",
-    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\antigravity\\bin\\agy.exe",
-    "sha256": "D3BAE6895069231C169F427C99527D1F556951E9C43488F45E8B040FBF3011ED",
+    "version": "1.5.9",
+    "executable": "%LOCALAPPDATA%\\Hezarfen\\claude-oauth\\providers\\antigravity\\versions\\1.5.9\\agy.exe",
+    "sha256": "8803C289CAC04D6E53F2211592D9981C2D5760BC0D9B4A7F222EF6ECC7ABB38A",
     "sourceManifest": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json"
   },
   "claudeClient": {

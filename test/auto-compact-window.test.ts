@@ -6,7 +6,7 @@ import {
     AGENT_MODEL_CONTRACTS,
     GROK_AUTO_COMPACT_THRESHOLD_PERCENT,
     GROK_AUTO_COMPACT_WINDOW_TOKENS,
-    GROK_46_CONTEXT_WINDOW_TOKENS,
+    GROK_CONTEXT_WINDOW_TOKENS,
     OPENAI_ASTRA_ADVERTISED_CONTEXT_WINDOW_TOKENS,
     OPENAI_ASTRA_AUTO_COMPACT_WINDOW_TOKENS,
     OPENAI_AUTO_COMPACT_WINDOW_TOKENS,
@@ -35,7 +35,7 @@ describe("auto-compaction window policy", () => {
 
     // Two compaction authorities firing near each other double-summarize the history.
     it("Grok compacts before Grok's own internal threshold fires", () => {
-        const grokInternalTrigger = Math.floor(GROK_46_CONTEXT_WINDOW_TOKENS * (GROK_AUTO_COMPACT_THRESHOLD_PERCENT / 100));
+        const grokInternalTrigger = Math.floor(GROK_CONTEXT_WINDOW_TOKENS * (GROK_AUTO_COMPACT_THRESHOLD_PERCENT / 100));
         strictEqual(GROK_AUTO_COMPACT_WINDOW_TOKENS < grokInternalTrigger, true);
     });
 
@@ -141,8 +141,21 @@ describe("autoCompactWindowForModel", () => {
         strictEqual(autoCompactWindowForModel("sol[1m]"), OPENAI_AUTO_COMPACT_WINDOW_TOKENS);
     });
 
-    it("resolves the new Gemini 3.1 Pro row", () => {
-        strictEqual(autoCompactWindowForModel("gemini-pro") !== undefined, true);
+    it("resolves the Gemini 4 rows added on 2026-11-15", () => {
+        for (const alias of ["carbon", "hydrogen", "orchestrator", "orchestrator-argon"])
+            strictEqual(autoCompactWindowForModel(alias) !== undefined, true, alias);
+    });
+
+    it("resolves the ChatGPT-OAuth rows added on 2026-11-15 to the shared OpenAI window", () => {
+        for (const alias of ["sol6", "luna", "sol61", "terra61"])
+            strictEqual(autoCompactWindowForModel(alias), OPENAI_AUTO_COMPACT_WINDOW_TOKENS, alias);
+    });
+
+    // gemini-3.1-pro-high left the Antigravity catalogue (agy 1.5.9 `models`, 2026-11-15); a
+    // retired alias must not resolve to anything.
+    it("NEGATIVE: the retired alias gemini-pro resolves to nothing", () => {
+        strictEqual(autoCompactWindowForModel("gemini-pro"), undefined);
+        strictEqual(autoCompactWindowForModel("anthropic-google-gemini-3.1-pro-high"), undefined);
     });
 
     // THE point of returning undefined: this variable OVERRIDES the operator's own

@@ -12,6 +12,7 @@ import { ensurePrivateDirectory, runtimePaths, runtimeSessionPaths } from "../ru
 import { withPinnedNativeModels } from "../domain/model-refresh.js";
 import { readSnapshot, readSnapshotOrDefault, seedSnapshot } from "../runtime/snapshot-store.js";
 import { removeSupervisorState, writeSupervisorState } from "../runtime/state-store.js";
+import { sweepStaleSessionStates } from "./session-sweep.js";
 import { runInteractive } from "../runtime/child-process.js";
 import { assertNoApiKeySelectors, sanitizedClaudeEnvironment } from "../security/environment.js";
 import { createSessionNonce, SESSION_HEADER } from "../security/nonce.js";
@@ -19,7 +20,7 @@ import { AgentSessionRegistry } from "../mcp/session-registry.js";
 import { mcpHttpServer, startGrokAcpSession } from "../grok/acp-bridge.js";
 import { startAntigravitySession } from "../antigravity/session.js";
 import { sweepStaleConfigHomes } from "../antigravity/config-home.js";
-import { startSupervisorIpc, type SupervisorStatus } from "./ipc.js";
+import { readSupervisorStatus, startSupervisorIpc, type SupervisorStatus } from "./ipc.js";
 import { startProviderSet } from "./provider-set.js";
 import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, autoCompactWindowForModel } from "../domain/model-contracts.js";
 import type { ClaudeClientMode } from "../runtime/install-lock.js";
@@ -302,6 +303,11 @@ export function claudeRouterEnvironment(baseUrl: string, nonce: string, source: 
     environment["ANTHROPIC_BASE_URL"] = baseUrl.replace(/\/$/u, "");
     environment["ANTHROPIC_CUSTOM_HEADERS"] = `${SESSION_HEADER}: ${nonce}`;
     environment["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1";
+    // Opens Claude Code's gateway-hint gate so each request names its class (main, subagent,
+    // workflow, compaction, auxiliary, side_reply) in a header. Without it the receipt field
+    // `requestClass` never fired (measured 2026-11-15: 0 of 1630 receipts). The hints stop at
+    // the router: see GATEWAY_HINT_HEADERS in router/headers.ts.
+    environment["CLAUDE_CODE_GATEWAY_HINT_HEADERS"] = "1";
     // ANTHROPIC_AUTH_TOKEN CANNOT BE PUT HERE. Discovery looked like it was failing without it
     // -- the binary says "skipped: no credential (ANTHROPIC_AUTH_TOKEN, apiKeyHelper, or API
     // key)" -- but it was measured: when it is set, Claude Code DROPS its own OAuth token and
@@ -397,6 +403,17 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
                 get bridgedToolNames() { return bridge.tools.map((tool) => tool.name); },
             }),
     });
+    // D1-07. State files of sessions that died without their `finally` are removed here,
+    // at startup: a file whose IPC endpoint no longer answers has no owner left.
+    const sessionSweep = await sweepStaleSessionStates({ paths: sharedPaths, probe: readSupervisorStatus });
+    if (sessionSweep.removed.length > 0) {
+        writeSafeLog({
+            event: "session_state_sweep",
+            level: "info",
+            code: `removed:${sessionSweep.removed.length}:kept:${sessionSweep.kept.length}`,
+            remedy: "No action needed: these were state files of sessions that ended without cleaning up (a closed window, a killed process).",
+        });
+    }
     const antigravityBinary = expandLockedPath(installLock.antigravity.executable, environment);
     // G01. Before any call builds one, homes orphaned by an earlier crash are removed. The
     // sweep runs at STARTUP and not on a timer: a timer would race a live call, and the

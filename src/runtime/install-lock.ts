@@ -11,12 +11,24 @@ interface LockedExecutable {
     readonly executable: string;
     readonly sha256: string;
 }
+/**
+ * Optional on the `claude` entry. When present, a Claude Code binary that differs from the
+ * pinned bytes may be accepted at run time if the platform's code-signing verdict names this
+ * signer (see runtime/claude-vendor-update.ts). Absent, the pin is exact-hash only.
+ */
+export interface VendorSignaturePolicy {
+    readonly platform: "win32";
+    readonly signerCommonName: string;
+    readonly signerOrganization: string;
+}
 export interface InstallLock {
     readonly schemaVersion: 1;
     readonly node: {
         readonly version: string;
     };
-    readonly claude: LockedExecutable;
+    readonly claude: LockedExecutable & {
+        readonly vendorSignature?: VendorSignaturePolicy;
+    };
     readonly claudeShadow: LockedExecutable & {
         readonly openAiContextWindow: number;
     };
@@ -92,6 +104,22 @@ function parseExecutable(value: unknown): LockedExecutable {
         sha256,
     };
 }
+// A policy that is present but malformed is a broken lock. Ignoring it silently would turn
+// "accept the vendor's signed update" into "refuse every update" (or, read the other way by
+// a later change, into something looser) without anyone being told.
+function parseVendorSignaturePolicy(value: unknown): VendorSignaturePolicy | undefined {
+    if (value === undefined)
+        return undefined;
+    if (!isRecord(value) || value["platform"] !== "win32")
+        throw new Error("install lock vendor signature policy is invalid");
+    const signerCommonName = value["signerCommonName"];
+    const signerOrganization = value["signerOrganization"];
+    if (typeof signerCommonName !== "string" || signerCommonName.trim() === ""
+        || typeof signerOrganization !== "string" || signerOrganization.trim() === "") {
+        throw new Error("install lock vendor signature policy is invalid");
+    }
+    return { platform: "win32", signerCommonName, signerOrganization };
+}
 function parseInstallLock(value: unknown): InstallLock {
     if (!isRecord(value) || value["schemaVersion"] !== 1)
         throw new Error("install lock header is invalid");
@@ -144,10 +172,15 @@ function parseInstallLock(value: unknown): InstallLock {
     if (!isRecord(antigravity))
         throw new Error("Antigravity install lock entry is invalid");
     const parsedAntigravity = parseExecutable(antigravity);
+    const claudeRecord = value["claude"];
+    const vendorSignature = parseVendorSignaturePolicy(isRecord(claudeRecord) ? claudeRecord["vendorSignature"] : undefined);
     return {
         schemaVersion: 1,
         node: { version: requiredString(node, "version") },
-        claude: parseExecutable(value["claude"]),
+        claude: {
+            ...parseExecutable(claudeRecord),
+            ...(vendorSignature === undefined ? {} : { vendorSignature }),
+        },
         claudeShadow: {
             ...parseExecutable(claudeShadow),
             openAiContextWindow: requiredPositiveInteger(claudeShadow, "openAiContextWindow"),

@@ -28,7 +28,8 @@ import {
 } from "./install-lock.js";
 import { writeSafeLog } from "./log.js";
 import { ensurePrivateDirectory, runtimePaths, type RuntimePaths } from "./paths.js";
-import { verifyReleaseIdentity, type ReleaseIdentity } from "./release-identity.js";
+import { requireReleaseIdentity, verifyReleaseIdentity, type ReleaseIdentity } from "./release-identity.js";
+import { annotateVendorUpdate, resolveClaudeVendorUpdate, type VendorUpdateDecision } from "./claude-vendor-update.js";
 type ProcessRunner = (command: string, args: readonly string[], options: ProcessOptions) => Promise<CapturedProcess>;
 export interface ClaudeShadowState {
     readonly status: "current" | "rebuilt" | "repatched" | "bypassed-native";
@@ -43,6 +44,7 @@ export interface PreparedInstallation {
     readonly shadow: ClaudeShadowState;
     readonly releaseIdentity: ReleaseIdentity;
     readonly clientMode: ClaudeClientMode;
+    readonly claudeVendorUpdate: VendorUpdateDecision;
 }
 export interface EnsureClaudeShadowOptions {
     readonly root: string;
@@ -95,6 +97,14 @@ interface ClodexPatchManifest {
 // 9). Distinct PATCH identities in the bundle: 11 -- 1,3,4,5,6,7,8a,8b,8c,9,10, with no
 // PATCH 2. So 12 is neither the call-site count nor the identity count.
 //
+// RE-MEASURED 2026-11-15 in clodex 2.21.7 dist/cli.js, with the same instrument run on the
+// saved 2.11.1 bundle first (it reproduced 13 / 1 + 12 / 11, so the instrument is sound):
+// `applyOnce(` occurs 14 times (1 definition + 13 call sites) and there are 12 distinct PATCH
+// identities, the same eleven plus PATCH 11 (catalog picker options). The identity count now
+// EQUALS 12 by coincidence only; the constant is still a label and stays 12. Nothing needs it
+// bumped: the manifest also records the clodex version (runtimeManifestMatches), so moving the
+// pin to 2.21.7 already rejects every manifest written under 2.11.1 and forces a repatch.
+//
 // The on-disk key stays `requiredPatchCount`: renaming it would invalidate every
 // installed manifest and force a repatch for a cosmetic gain. Bumping this number is
 // how you DELIBERATELY invalidate them.
@@ -113,14 +123,24 @@ const CONFIG_HASH_PATTERN = /^[a-f0-9]{64}$/u;
 export const SHADOW_MODEL_SURFACE_NEEDLES = [
     "/*clodex-local:hezarfen-google-oauth-model-surface*/",
     '{value:"gemini",label:"Gemini",description:"Gemini 3.8 Flash High (Google OAuth, 1M context)"}',
-    '{value:"gemini-pro",label:"Gemini Pro",description:"Gemini 3.1 Pro High (Google OAuth, 1M context)"}',
-    '{value:"opus-google",label:"Opus Google",description:"Claude Opus 4.6 Thinking (Google OAuth, 1M context)"}',
-    '{value:"grok",label:"Grok",description:"Grok 4.6 (xAI OAuth, 500K context)"}',
+    '{value:"argon",label:"Argon",description:"Gemini 4 Argon High (Google OAuth, 1M context)"}',
+    '{value:"carbon",label:"Carbon",description:"Gemini 4 Carbon High (Google OAuth, 1M context)"}',
+    '{value:"hydrogen",label:"Hydrogen",description:"Gemini 4 Hydrogen XHigh (Google OAuth, 1M context)"}',
+    '{value:"orchestrator",label:"Orchestrator",description:"Gemini Orchestrator Carbon (Google OAuth, 1M context)"}',
+    '{value:"orchestrator-argon",label:"Orchestrator Argon",description:"Gemini Orchestrator Argon (Google OAuth, 1M context)"}',
+    '{value:"opus-google",label:"Opus Google",description:"Claude Opus 5.5 High (Google OAuth, 1M context)"}',
+    '{value:"sonnet-google",label:"Sonnet Google",description:"Claude Sonnet 5.5 High (Google OAuth, 1M context)"}',
+    '{value:"grok",label:"Grok",description:"Grok 4.7 (xAI OAuth, 500K context)"}',
     'case"gemini":return "gemini";',
-    'case"gemini-pro":return "gemini-pro";',
+    'case"argon":return "argon";',
+    'case"carbon":return "carbon";',
+    'case"hydrogen":return "hydrogen";',
+    'case"orchestrator":return "orchestrator";',
+    'case"orchestrator-argon":return "orchestrator-argon";',
     'case"opus-google":return "opus-google";',
+    'case"sonnet-google":return "sonnet-google";',
     'case"grok":return "grok";',
-    '["gemini","gemini-pro","opus-google","grok"].indexOf(',
+    '["gemini","argon","carbon","hydrogen","orchestrator","orchestrator-argon","opus-google","sonnet-google","grok"].indexOf(',
 ];
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -616,14 +636,30 @@ export async function prepareEffectiveInstallation(root: string, environment: No
     // bare `claude` launch via launchClaudeOAuth -- so this is the only place the
     // release-identity check cannot be routed around.
     const releaseIdentity = await verifyReleaseIdentity(root, environment);
-    if (releaseIdentity.status === "mismatch") {
-        throw new RouterError("adapter_unavailable", `Refusing to run release ${releaseIdentity.declaredId ?? "?"}: its contents no longer hash to its own id (${releaseIdentity.detailCode}). A content-addressed release that was edited in place is not the release it claims to be. FIX: reinstall the release, or run "node scripts/release-id.mjs --verify <release-directory>" to see the computed id.`, 503);
-    }
-    const baseLock = await readInstallLock(resolve(root, "config", "install-lock.json"));
+    requireReleaseIdentity(releaseIdentity);
+    const releaseLock = await readInstallLock(resolve(root, "config", "install-lock.json"));
     const nodeVersion = process.version.replace(/^v/u, "");
-    if (nodeVersion !== baseLock.node.version) {
+    if (nodeVersion !== releaseLock.node.version) {
         throw new RouterError("adapter_unavailable", "Pinned Node.js verification failed before Claude shadow self-heal.", 503);
     }
+    // Claude Code updates itself. When the bytes on disk are no longer the pinned ones, the
+    // lock's vendor-signature policy decides whether the new binary takes the pin's place
+    // for this run (runtime/claude-vendor-update.ts). A refusal changes nothing here: the
+    // lock stays as released and the ordinary check below reports the drift.
+    const vendorUpdate = await resolveClaudeVendorUpdate({
+        lock: releaseLock,
+        moduleRoot: root,
+        cachePath: runtimePaths(environment).claudeVendorUpdate,
+        environment,
+    });
+    const claudeVendorUpdate = vendorUpdate.decision;
+    if (claudeVendorUpdate.status === "accepted" && claudeVendorUpdate.cached !== true) {
+        writeSafeLog({ event: "claude_vendor_update_accepted", level: "info", code: `${claudeVendorUpdate.pinnedVersion}->${claudeVendorUpdate.observedVersion ?? "?"}` });
+    }
+    else if (claudeVendorUpdate.status === "refused") {
+        writeSafeLog({ event: "claude_vendor_update_refused", level: "warn", code: claudeVendorUpdate.detailCode, ...(claudeVendorUpdate.remedy === undefined ? {} : { remedy: claudeVendorUpdate.remedy }) });
+    }
+    const baseLock = vendorUpdate.lock;
     const clientMode = resolveClaudeClientMode(baseLock, environment);
     if (clientMode === "native-gateway") {
         // NO patching. The client is the signed native binary itself; external models
@@ -641,7 +677,7 @@ export async function prepareEffectiveInstallation(root: string, environment: No
                 sha256: nativeSha256,
             },
         };
-        const nativeChecks = await verifyInstallLock(nativeLock, root, environment);
+        const nativeChecks = annotateVendorUpdate(await verifyInstallLock(nativeLock, root, environment), claudeVendorUpdate);
         return {
             installLock: nativeLock,
             installChecks: nativeChecks,
@@ -654,11 +690,12 @@ export async function prepareEffectiveInstallation(root: string, environment: No
             },
             releaseIdentity,
             clientMode,
+            claudeVendorUpdate,
         };
     }
     const clodexCheck = await verifyClodexPackageLock(baseLock, root);
     requireInstallChecks([clodexCheck], ["clodex"]);
     const effective = await ensureClaudeShadow({ root, baseLock, environment });
-    const installChecks = await verifyInstallLock(effective.installLock, root, environment);
-    return { installLock: effective.installLock, installChecks, shadow: effective.shadow, releaseIdentity, clientMode };
+    const installChecks = annotateVendorUpdate(await verifyInstallLock(effective.installLock, root, environment), claudeVendorUpdate);
+    return { installLock: effective.installLock, installChecks, shadow: effective.shadow, releaseIdentity, clientMode, claudeVendorUpdate };
 }

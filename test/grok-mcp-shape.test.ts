@@ -9,7 +9,10 @@ import { mcpHttpServer, startGrokAcpSession } from "../src/grok/acp-bridge.js";
 import { SESSION_HEADER } from "../src/security/nonce.js";
 
 it("G08: real bridge sends the installed SDK McpServerHttp shape to an offline ACP peer", async () => {
-    const schema = createRequire(import.meta.url)("@agentclientprotocol/sdk/schema/schema.json") as {
+    // SDK 2.0.0 removed the unversioned `schema/schema.json` export ("The unversioned JSON schema
+    // export is removed; use the versioned schema/v1 or schema/v2 exports"); the stable v1 schema is
+    // the one the default entrypoint (and this bridge) speaks.
+    const schema = createRequire(import.meta.url)("@agentclientprotocol/sdk/schema/v1/schema.json") as {
         $defs: { McpServerHttp: { required: string[]; properties: { headers: { type: string } } }; HttpHeader: { required: string[] } };
     };
     deepStrictEqual([...schema.$defs.McpServerHttp.required].sort(), ["headers", "name", "url"]);

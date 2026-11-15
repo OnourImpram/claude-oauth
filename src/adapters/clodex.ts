@@ -360,6 +360,9 @@ export class ClodexAdapter implements ProviderAdapter {
             status: response.status,
             headers: response.headers,
             body: response.body,
+            // The capsule's bytes are forwarded as they arrive; a long GPT answer that is
+            // still streaming is the provider speaking (router silence guard, D1-01).
+            upstreamDriven: true,
             ...(providerRequestId === undefined ? {} : { providerRequestId }),
         };
     }

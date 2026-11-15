@@ -1,9 +1,12 @@
 import { appendFile, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
+    OAUTH_TYPES,
     PROVIDER_IDS,
+    REQUEST_CLASSES,
     ROUTER_ERROR_CODES,
     type ProviderId,
+    type RequestClass,
     type RouteReceipt,
     type RouterErrorCode,
 } from "../domain/contracts.js";
@@ -46,6 +49,38 @@ export class ReceiptStore {
             throw new RouterError("upstream_protocol_error", "The local receipt file is malformed.", 502, { cause: error });
         }
     }
+    /**
+     * Every readable receipt, oldest first: the rotated file, then the current one. A line that
+     * does not parse as a receipt is counted and skipped -- one damaged line (a crash mid-write)
+     * must not hide the rest of the history from a summary.
+     */
+    async all(): Promise<{ readonly receipts: readonly RouteReceipt[]; readonly malformedLines: number }> {
+        await this.#tail;
+        const receipts: RouteReceipt[] = [];
+        let malformedLines = 0;
+        for (const path of [`${this.path}.previous`, this.path]) {
+            let content: string;
+            try {
+                content = await readFile(path, "utf8");
+            }
+            catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT")
+                    continue;
+                throw error;
+            }
+            for (const line of content.split("\n")) {
+                if (line.trim() === "")
+                    continue;
+                try {
+                    receipts.push(parseReceipt(JSON.parse(line)));
+                }
+                catch {
+                    malformedLines += 1;
+                }
+            }
+        }
+        return { receipts, malformedLines };
+    }
     async #rotateIfNeeded(): Promise<void> {
         try {
             const metadata = await stat(this.path);
@@ -82,13 +117,16 @@ function parseReceipt(value: unknown): RouteReceipt {
     const errorCode = value["errorCode"];
     const providerRequestId = value["providerRequestId"];
     const usage = numericUsage(value["usage"]);
+    // A class this build does not know is dropped, not refused: a newer router (or a newer
+    // Claude Code list) must not make older receipts unreadable, and vice versa.
+    const requestClass = (REQUEST_CLASSES as readonly unknown[]).includes(value["requestClass"]) ? value["requestClass"] as RequestClass : undefined;
     if (!boundedString(value["timestamp"]) ||
         Number.isNaN(new Date(value["timestamp"]).valueOf()) ||
         !boundedString(value["requestId"], 128) ||
         !boundedString(value["requestedModel"], 256) ||
         !boundedString(value["configuredModel"], 256) ||
         !PROVIDER_IDS.includes(provider as ProviderId) ||
-        !["claude.ai", "chatgpt", "xai-cli", "google-cli"].includes(String(oauthType)) ||
+        !(OAUTH_TYPES as readonly string[]).includes(String(oauthType)) ||
         typeof value["durationMs"] !== "number" ||
         !Number.isFinite(value["durationMs"]) ||
         value["durationMs"] < 0 ||
@@ -113,5 +151,6 @@ function parseReceipt(value: unknown): RouteReceipt {
             : { errorCode: errorCode as RouterErrorCode }),
         ...(providerRequestId === undefined ? {} : { providerRequestId }),
         ...(usage === undefined ? {} : { usage }),
+        ...(requestClass === undefined ? {} : { requestClass }),
     };
 }

@@ -20,7 +20,14 @@ async function isolatedInstallation(source: string, capsuleHash?: string): Promi
     await mkdir(join(scratch, "config"));
     await writeFile(join(packageRoot, "package.json"), JSON.stringify({ version: lock.clodex.version }));
     await writeFile(join(packageRoot, "dist/cli.js"), source);
-    await copyFile(join(upstream, "chunk-J7WXOD2K.js"), join(packageRoot, "dist/chunk-J7WXOD2K.js"));
+    // The sibling's name is the bundler's output and changes with every release: read it from the
+    // real bundle instead of writing it down (the capsule itself derives it the same way).
+    const realSource = await readFile(join(upstream, "cli.js"), "utf8");
+    for (const sibling of realSource.matchAll(/\bfrom\s*"\.\/([^"]+)"/gu)) {
+        const name = sibling[1];
+        if (name !== undefined)
+            await copyFile(join(upstream, name), join(packageRoot, "dist", name));
+    }
     await writeFile(join(scratch, "node_modules/.package-lock.json"), JSON.stringify({
         packages: { [`node_modules/${lock.clodex.package}`]: { integrity: lock.clodex.integrity } },
     }));

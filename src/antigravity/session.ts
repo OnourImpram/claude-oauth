@@ -18,7 +18,7 @@
 
 import { RouterError } from "../domain/errors.js";
 import type { AgentRunHandle } from "../mcp/session-registry.js";
-import { runAntigravityHeadless } from "./headless-bridge.js";
+import { runAntigravityHeadless, type AntigravityProcessRunner } from "./headless-bridge.js";
 import type { AgentToolEndpoint } from "./config-home.js";
 
 export interface AntigravitySessionOptions {
@@ -31,6 +31,8 @@ export interface AntigravitySessionOptions {
     readonly toolEndpoint: AgentToolEndpoint;
     readonly configHomeRoot: string;
     readonly timeoutMs?: number;
+    /** Injected in tests; production spawns agy. */
+    readonly processRunner?: AntigravityProcessRunner;
 }
 
 export function startAntigravitySession(options: AntigravitySessionOptions): AgentRunHandle {
@@ -55,6 +57,7 @@ export function startAntigravitySession(options: AntigravitySessionOptions): Age
             ...(options.home === undefined ? {} : { home: options.home }),
             ...(options.environment === undefined ? {} : { environment: options.environment }),
             ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+            ...(options.processRunner === undefined ? {} : { processRunner: options.processRunner }),
         });
         response = result.response;
     })();

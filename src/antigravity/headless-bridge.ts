@@ -70,6 +70,12 @@ interface TerminalResult {
 const requiredUsageFields = ["input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens"];
 const defaultTimeoutMs = 300_000;
 const maximumTimeoutMs = 600_000;
+// D2-02 (2026-11-15). A routed session is ONE agy process for a whole agentic task; it blocks
+// in the router's tool bridge while Claude Code runs a tool or waits on a permission prompt.
+// The one-shot five minutes killed such a session mid-task. What ends a stuck turn there is
+// the router's request guard, and what ends an abandoned session is the registry's idle
+// sweep; this value is only the backstop behind both, and agy's --print-timeout follows it.
+export const sessionProcessTimeoutMs = 6 * 60 * 60 * 1000;
 const maximumOutputBytes = 8 * 1024 * 1024;
 const maximumInputBytes = 32 * 1024 * 1024;
 const maximumSettingsBytes = 256 * 1024;
@@ -587,8 +593,10 @@ export async function runAntigravityHeadless(options: AntigravityHeadlessOptions
     }
     if (options.signal?.aborted)
         throw new RouterError("upstream_timeout", "Antigravity request was cancelled.", 504);
-    const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
-    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > maximumTimeoutMs || timeoutMs % 1_000 !== 0) {
+    const routedSession = options.toolEndpoint !== undefined;
+    const timeoutMs = options.timeoutMs ?? (routedSession ? sessionProcessTimeoutMs : defaultTimeoutMs);
+    const timeoutCeilingMs = routedSession ? sessionProcessTimeoutMs : maximumTimeoutMs;
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > timeoutCeilingMs || timeoutMs % 1_000 !== 0) {
         throw new RouterError("invalid_request", "Antigravity timeout must be a positive bounded integer.", 400);
     }
     const source = options.environment ?? process.env;

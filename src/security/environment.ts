@@ -54,6 +54,20 @@ const networkProxyVariables = [
     "https_proxy",
     "all_proxy",
 ];
+// Credentials the ROUTER process itself consumes (the api-key lanes alibaba / zai /
+// openaiapi, 2026-11-09). They are NOT api-key selectors in the PROVIDER_API_KEY_VARIABLES
+// sense -- nothing a child would pick up to bypass OAuth -- so they do not trip
+// assertNoApiKeySelectors; but no child ever needs them, and Claude Code in particular must
+// never see them. Stripped from every child environment.
+// OPENAI_API_KEY itself is already in PROVIDER_API_KEY_VARIABLES (a selector); the openaiapi
+// lane reads it from a FILE, and the file variables are here.
+export const ROUTER_OWNED_SECRET_VARIABLES = [
+    "ALIBABA_TOKEN_PLAN_API_KEY",
+    "ALIBABA_TOKEN_PLAN_API_KEY_FILE",
+    "ZAI_API_KEY",
+    "ZAI_API_KEY_FILE",
+    "OPENAI_API_KEY_FILE",
+] as const;
 const launcherMetadataVariables = [
     "HEZARFEN_CLAUDE_OAUTH_LAUNCHER_SOURCE",
     "HEZARFEN_CLAUDE_OAUTH_RELEASE_ID",
@@ -143,13 +157,26 @@ const clodexRuntimeOverrides = [
     "CLODEX_TRACE",
     "CLODEX_SERVICE_TIER",
     "CLODEX_UPSTREAM_MAX_RETRIES",
-    // The endpoint added in clodex 2.11.1 (measured 2026-09-05: 0 occurrences in the 2.8.2
-    // bundle). An override introduced by a new version, if it is not added to the strip list
-    // in the same pass, is silently inherited from the working session: the claim of a
-    // hygienic environment is left unmeasured.
+    // Added with clodex 2.11.1 (measured 2026-09-05: 0 occurrences in the 2.8.2 bundle). An
+    // override introduced by a new version, if it is not added to the strip list in the same
+    // pass, is silently inherited from the working session: the claim of a hygienic environment
+    // is left unmeasured.
     "CLODEX_UPSTREAM_IDLE_TIMEOUT_MS",
     "CLODEX_UPSTREAM_TOTAL_TIMEOUT_MS",
     "CLODEX_WS_MAX_NEW_CONNECTIONS_PER_MIN",
+    // Re-measured 2026-11-15 against the pinned 2.21.7 bundle: the three .js files read 18
+    // distinct CLODEX_* names (17 in 2.11.1). test/environment.test.ts repeats the scan on the
+    // installed bundle and fails when a name is neither stripped nor kept on purpose
+    // (CLODEX_HOME, CLODEX_NO_DISCOVERY: the router hands those over itself). One name is new,
+    // 1 occurrence (0 in 2.11.1): the hold the passthrough lane waits through an upstream outage.
+    // Five were read by 2.11.1 as well and were never on this list: three server tunables and
+    // the two variables the claude launcher reads. The router sets none of them.
+    "CLODEX_PASSTHROUGH_OUTAGE_HOLD_MS",
+    "CLODEX_STREAM_KEEPALIVE_INTERVAL_MS",
+    "CLODEX_WS_MAX_CONNECTIONS",
+    "CLODEX_WS_MAX_NURSERY_CONNECTIONS",
+    "CLODEX_CLAUDE_PATH",
+    "CLODEX_REQUIRE_SERVER",
 ];
 function isClodexKeySelector(name: string): boolean {
     return /^CLODEX_KEY_[A-Z0-9_]+$/iu.test(name);
@@ -193,6 +220,7 @@ export function sanitizedWorkerEnvironment(provider: ProviderId | "gemini", sour
     deleteEnvironmentNames(result, [...networkProxyVariables, ...grokRuntimeOverrides]);
     deleteEnvironmentNames(result, telemetryCredentialVariables);
     deleteEnvironmentNames(result, launcherMetadataVariables);
+    deleteEnvironmentNames(result, ROUTER_OWNED_SECRET_VARIABLES);
     for (const name of Object.keys(result)) {
         if (isClodexKeySelector(name))
             delete result[name];

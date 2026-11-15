@@ -7,12 +7,16 @@
 // "Empty output is not evidence": --ozdenetim injects a synthetic canary and proves the
 // channel actually fires. A gate does not count as valid without its negative control.
 
-import { readFile, readdir } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const SCAN_DIRECTORIES = ["src", "test", "scripts", "config"];
-const SCAN_EXTENSIONS = [".ts", ".mts", ".js", ".mjs", ".json", ".ps1", ".cmd"];
+// The reach is the tracked tree: every directory that holds project files, and the files in
+// the repository root. Until 2026-11-15 it was src/test/scripts/config only, so the shims,
+// the docs, the workflows and the root documents were never read (audit D1-09).
+const SCAN_DIRECTORIES = ["src", "test", "scripts", "config", "shim", "docs", ".github"];
+const SCAN_EXTENSIONS = [".ts", ".mts", ".js", ".mjs", ".json", ".ps1", ".cmd", ".sh", ".md", ".html", ".yml", ".yaml", ".txt"];
 
 // Each rule is one secret CLASS. The name enters the report; the matched text does not.
 const RULES = [
@@ -53,7 +57,7 @@ function isAccepted(relativePath, matchedText) {
   return ACCEPTED.some(([pattern, shape]) => pattern.test(path) && shape.test(matchedText));
 }
 
-async function collect(directory) {
+async function collect(root, directory) {
   const found = [];
   async function visit(current) {
     let entries;
@@ -68,8 +72,37 @@ async function collect(directory) {
       else if (SCAN_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) found.push(path);
     }
   }
-  await visit(join(ROOT, directory));
+  await visit(join(root, directory));
   return found;
+}
+
+// Everything the scan reads under one root: the listed directories, walked, plus the files
+// that sit directly in the root. One function for the real run and for the self-check, so
+// the self-check measures the walk and the extension filter, not only the regexes.
+async function collectTree(root) {
+  const fromDirectories = (await Promise.all(SCAN_DIRECTORIES.map(async (directory) => await collect(root, directory)))).flat();
+  let rootEntries = [];
+  try { rootEntries = await readdir(root, { withFileTypes: true }); }
+  catch { rootEntries = []; }
+  const fromRoot = rootEntries
+    .filter((entry) => entry.isFile() && SCAN_EXTENSIONS.some((extension) => entry.name.endsWith(extension)))
+    .map((entry) => join(root, entry.name));
+  return [...fromDirectories, ...fromRoot];
+}
+
+async function scanTree(root) {
+  const files = await collectTree(root);
+  const findings = [];
+  let acceptedCount = 0;
+  for (const file of files) {
+    const relativePath = relative(root, file).split("\\").join("/");
+    const hits = scanText(await readFile(file, "utf8"));
+    for (const hit of hits) {
+      if (isAccepted(relativePath, hit.matched)) { acceptedCount += 1; continue; }
+      findings.push({ path: relativePath, rule: hit.rule, line: hit.line });
+    }
+  }
+  return { files, findings, acceptedCount };
 }
 
 function scanText(text) {
@@ -119,21 +152,41 @@ if (selfCheck) {
   console.log(`  ${jsonCaught ? "OK" : "FAILED"}  JSON quoted field name IS CAUGHT`);
   if (!jsonCaught) armFailed += 1;
 
+  // The reach arm (audit D1-09, 2026-11-15). The arms above feed text straight to the
+  // regexes, so they never noticed that the WALK skipped shim/, docs/, .github/ and the root
+  // documents: 25 of 159 tracked files, with SECURITY.md naming shim/ and docs/ as in scope.
+  // A temporary tree gets one canary per in-scope location and goes through the same
+  // collection the real run uses; each location must yield exactly one finding. Two more
+  // canaries sit where the scan must NOT look (build output, dependencies).
+  const treeRoot = await mkdtemp(join(tmpdir(), "secret-scan-reach-"));
+  try {
+    const inScope = ["src/a.ts", "test/a.ts", "scripts/a.mjs", "config/a.json", "shim/a.ps1", "shim/a.sh", "shim/a.cmd", "docs/a.md", "docs/a.html", ".github/workflows/a.yml", "README.md", "CHANGELOG.md", "package.json"];
+    const outOfScope = ["node_modules/pkg/a.js", "dist/src/a.js"];
+    for (const path of [...inScope, ...outOfScope]) {
+      await mkdir(dirname(join(treeRoot, path)), { recursive: true });
+      await writeFile(join(treeRoot, path), `token ${credential}\n`, "utf8");
+    }
+    const reach = await scanTree(treeRoot);
+    const reached = new Set(reach.findings.map((finding) => finding.path));
+    for (const path of inScope) {
+      const pass = reached.has(path);
+      console.log(`  ${pass ? "OK" : "FAILED"}  reach: a secret in ${path} IS FOUND`);
+      if (!pass) armFailed += 1;
+    }
+    for (const path of outOfScope) {
+      const pass = !reached.has(path);
+      console.log(`  ${pass ? "OK" : "FAILED"}  reach: ${path} is not scanned (build output / dependency)`);
+      if (!pass) armFailed += 1;
+    }
+  }
+  finally {
+    await rm(treeRoot, { recursive: true, force: true });
+  }
+
   process.exit(ok && armFailed === 0 ? 0 : 1);
 }
 
-const files = (await Promise.all(SCAN_DIRECTORIES.map(collect))).flat();
-const findings = [];
-let acceptedCount = 0;
-for (const file of files) {
-  const relativePath = relative(ROOT, file).split("\\").join("/");
-  const hits = scanText(await readFile(file, "utf8"));
-  if (hits.length === 0) continue;
-  for (const hit of hits) {
-    if (isAccepted(relativePath, hit.matched)) { acceptedCount += 1; continue; }
-    findings.push({ path: relativePath, rule: hit.rule, line: hit.line });
-  }
-}
+const { files, findings, acceptedCount } = await scanTree(ROOT);
 
 console.log(`files scanned   : ${files.length}`);
 console.log(`rule count      : ${RULES.length}`);

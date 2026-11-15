@@ -1,6 +1,6 @@
 import type { ModelRecord, ModelSnapshot, ProviderAdapter, ProviderId } from "./contracts.js";
 import { RouterError } from "./errors.js";
-import { agentModelContract, openAiModelContract } from "./model-contracts.js";
+import { agentModelContract, apiKeyModelContract, openAiModelContract } from "./model-contracts.js";
 export function claudeClientDiscoveryId(model: ModelRecord): string {
     const contract = openAiModelContract(model.id);
     // B10 (measured 2026-09-08 under B08 and reported 2026-09-10): Claude Code does not read
@@ -24,7 +24,15 @@ export function claudeClientDiscoveryId(model: ModelRecord): string {
     const reviewedAgentLongContext = model.executionMode === "agent-readonly" &&
         model.contextWindow !== undefined &&
         model.contextWindow > 200_000;
-    return reviewedLongContext || reviewedAgentLongContext ? `${model.id}[1m]` : model.id;
+    // The API-key lanes (alibaba / zai / openaiapi) run Claude Code's own
+    // message loop, so Claude Code's compaction is the ONLY authority: a row enters the 1M
+    // bucket only when its real window can hold 1M. A 524k or 262k row in that bucket would
+    // overrun the provider before the client ever compacts.
+    const reviewedApiKeyLongContext = (model.provider === "alibaba" || model.provider === "zai" || model.provider === "openaiapi") &&
+        apiKeyModelContract(model.provider, model.id) !== undefined &&
+        model.contextWindow !== undefined &&
+        model.contextWindow >= 1_000_000;
+    return reviewedLongContext || reviewedAgentLongContext || reviewedApiKeyLongContext ? `${model.id}[1m]` : model.id;
 }
 /**
  * Presentation value for discovery's context_window and modelDetail's advertisement.
@@ -74,6 +82,31 @@ export function modelDetail(model: ModelRecord): Readonly<Record<string, unknown
             : { maximumOutputTokens: model.maximumOutputTokens }),
     };
 }
+/**
+ * A Claude model id is Anthropic's to accept or refuse. Measured 2026-11-15: Claude Code 2.1.325
+ * resolves `haiku` to `claude-haiku-5-5`, the native list stopped one model earlier, and the
+ * request died here with `model_not_available`; router.log held the same class four more times
+ * (every native model Anthropic shipped needed a row before it worked). The native lane is a
+ * passthrough with the user's own claude.ai session, so an id of this shape that the snapshot
+ * does not list is served by that lane under its own name and Anthropic answers for it. Every
+ * other lane keeps the closed snapshot: there the selected model has to be a contracted one.
+ */
+const NATIVE_MODEL_ID = /^claude-[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const NATIVE_MODEL_ID_LIMIT = 64;
+function unlistedNativeModel(id: string): ModelRecord | undefined {
+    if (id.length > NATIVE_MODEL_ID_LIMIT || !NATIVE_MODEL_ID.test(id))
+        return undefined;
+    return Object.freeze({
+        id,
+        provider: "anthropic",
+        upstreamModel: id,
+        displayName: id,
+        oauthType: "claude.ai",
+        executionMode: "native-message-loop",
+        discoverable: false,
+        capabilities: Object.freeze(["messages", "streaming", "tools", "vision", "thinking"] as const),
+    });
+}
 export class ModelRegistry {
     #models: ReadonlyMap<string, ModelRecord>;
     #aliases: ReadonlyMap<string, string>;
@@ -113,11 +146,21 @@ export class ModelRegistry {
     resolve(modelId: string): {
         readonly model: ModelRecord;
         readonly adapter: ProviderAdapter;
+        /** The id is a Claude model id the snapshot does not list; it is served by the native lane as asked. */
+        readonly uncontractedNative?: true;
     } {
         const targetId = this.#aliases.get(modelId) ?? modelId;
-        const model = this.#models.get(targetId);
+        const listed = this.#models.get(targetId);
+        const model = listed ?? unlistedNativeModel(targetId);
         if (model === undefined) {
             throw new RouterError("model_not_available", `Model is not present in the immutable session snapshot.`, 404);
+        }
+        if (listed === undefined) {
+            const native = this.#adapters.get("anthropic");
+            if (native === undefined) {
+                throw new RouterError("adapter_unavailable", `The anthropic adapter is unavailable.`, 503);
+            }
+            return { model, adapter: native, uncontractedNative: true };
         }
         const adapter = this.#adapters.get(model.provider);
         if (adapter === undefined) {

@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RouterError } from "../domain/errors.js";
 import { patchClodexCapsule } from "./clodex-capsule-patch.js";
+import { copyCapsuleSiblings } from "./clodex-capsule-siblings.js";
 import { readInstallLock, requireInstallChecks, sha256File, verifyClodexPackageLock, type InstallLock } from "./install-lock.js";
+import { writeSafeLog } from "./log.js";
+import { sweepOwnedDirectories, writeOwnerRecord } from "./owned-directory.js";
 import { ensurePrivateDirectory } from "./paths.js";
 
 export interface ClodexCapsuleEntrypoint {
@@ -34,12 +37,21 @@ export async function prepareClodexCapsuleEntrypoint(root: string): Promise<Clod
     // killed session changed the release id and the next start refused the release (B09).
     const parent = join(root, ".runtime", "clodex-capsules");
     await ensurePrivateDirectory(parent);
+    // A session that was killed never ran its close(): its capsule (a copied bundle) stayed
+    // here for good. Capsules whose owner process is gone are removed before a new one is
+    // made; a capsule owned by a session that is still running is left alone (D1-07).
+    await sweepOwnedDirectories({
+        root: parent,
+        onCleanupFailed: () => writeSafeLog({ event: "clodex_capsule_cleanup_failed", level: "warn" }),
+    });
     const directory = await mkdtemp(join(parent, "session-"));
     const close = async (): Promise<void> => { await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); };
     try {
-        // This single sibling is the pinned bundle's only relative import.
-        await copyFile(join(upstream, "chunk-J7WXOD2K.js"), join(directory, "chunk-J7WXOD2K.js"));
+        // The siblings are whatever the bundle itself imports by relative path (its chunk names
+        // change with every release), refused with a 503 when one leaves the package's dist.
+        await copyCapsuleSiblings(upstream, patched, directory);
         await writeFile(join(directory, "package.json"), JSON.stringify({ type: "module" }), { mode: 0o600 });
+        await writeOwnerRecord(directory);
         const path = join(directory, "cli.js");
         await writeFile(path, patched, { encoding: "utf8", mode: 0o600, flag: "wx" });
         requireClodexCapsuleHash(await sha256File(path), lock);

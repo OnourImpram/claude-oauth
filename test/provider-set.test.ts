@@ -13,7 +13,7 @@ import { startProviderSet } from "../src/supervisor/provider-set.js";
 // and readiness says so BY NAME. The main path (anthropic) is left untouched.
 // openai/google are not requested so the test starts neither the clodex capsule nor the
 // agy binary: only the pure branches run.
-const GROK = agentModelContract("anthropic-xai-grok-4.6");
+const GROK = agentModelContract("anthropic-xai-grok-4.7");
 if (GROK === undefined)
     throw new Error("Grok contract is missing: AGENT_MODEL_CONTRACTS changed");
 const snapshot: ModelSnapshot = {
@@ -96,7 +96,7 @@ describe("startProviderSet -- A4 side provider disabled", () => {
             const xai = set.readiness.find((entry) => entry.provider === "xai");
             ok(xai !== undefined);
             ok(xai.detailCode !== "install_lock_drift", `an empty set must not produce install_lock_drift (${xai.detailCode})`);
-            deepStrictEqual(set.snapshot.models.map((model) => model.id), ["claude-opus-5", "anthropic-xai-grok-4.6"]);
+            deepStrictEqual(set.snapshot.models.map((model) => model.id), ["claude-opus-5", "anthropic-xai-grok-4.7"]);
         }
         finally {
             await set.close();

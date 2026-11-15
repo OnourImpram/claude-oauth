@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { RouterError } from "../domain/errors.js";
 
 // A release directory named router-v3-<distHash>-<configHash> claimed to be
 // content-addressed, but nothing ever recomputed those hashes -- so a release could
@@ -77,4 +78,19 @@ export async function verifyReleaseIdentity(root: string, environment: NodeJS.Pr
         return { status: "mismatch", declaredId, computedId, detailCode: "release_contents_do_not_match_release_id" };
     }
     return { status: "verified", declaredId, computedId, detailCode: "release_contents_match_release_id" };
+}
+/**
+ * The gate every entry point passes. "mismatch" was the only refusal; a release that could
+ * not be hashed at all ("unreadable": a junction or directory link under dist/ or config/, a
+ * locked or denied file) was launched anyway, although an entry the walker cannot read is
+ * exactly what an in-place edit looks like (audit D1-06, 2026-11-15). Both are refused now.
+ * "unverified" is a launch that never claimed to be a release (a development checkout).
+ */
+export function requireReleaseIdentity(identity: ReleaseIdentity): void {
+    if (identity.status === "mismatch") {
+        throw new RouterError("adapter_unavailable", `Refusing to run release ${identity.declaredId ?? "?"}: its contents no longer hash to its own id (${identity.detailCode}). A content-addressed release that was edited in place is not the release it claims to be. FIX: reinstall the release, or run "node scripts/release-id.mjs --verify <release-directory>" to see the computed id.`, 503);
+    }
+    if (identity.status === "unreadable") {
+        throw new RouterError("adapter_unavailable", `Refusing to run release ${identity.declaredId ?? "?"}: its dist/ or config/ could not be read to verify it (${identity.detailCode}). A release that cannot be hashed cannot be told apart from an edited one. FIX: look for a junction, a directory link or a locked file under dist/ and config/, or reinstall the release; "node scripts/release-id.mjs --verify <release-directory>" names the failure.`, 503);
+    }
 }

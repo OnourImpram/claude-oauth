@@ -88,7 +88,10 @@ describe("local patch <-> needle consistency", () => {
 // `patched-shadow` mode. This block breaks that silence: it runs the patch against the
 // shape clodex ACTUALLY produces.
 //
-// The shapes were READ from clodex 2.11.1 dist/cli.js (2026-09-05):
+// The shapes were READ from clodex 2.11.1 dist/cli.js (2026-09-05) and RE-READ from 2.21.7 on
+// 2026-11-15 (a diff of the two patcher sections): the text PATCH 5 and PATCH 6 EMIT is unchanged. What
+// moved around it: PATCH 6 now limits its "already present" check to the resolver switch, PATCH 5
+// builds its rows through a shared helper, PATCH 1 has a second alternative, PATCH 11 is new.
 //   PATCH 6 -> `"case" + q(alias) + ":return " + q(alias) + ";"`
 //   PATCH 5 -> `"{value:"+q(alias)+",label:"+q(Cap)+",description:"+q(display)+"}"`,
 //              joined with `,` into `[...]`, then `.forEach(function(_o){...});`
@@ -184,6 +187,20 @@ describe("the local patch anchor matches the shape clodex ACTUALLY produces", ()
     it("with TWO picker arrays the patch REJECTS instead of injecting twice", async () => {
         const twoPickerArrays = `${clodexPatched("openai-oauth", [SOL, TERRA])}\n[{value:"x",label:"X",description:"Custom model (clodex:openai-oauth:x)"}].forEach(function(_o){if(!k8.some(function(_i){return _i.value===_o.value}))k8.push(_o)});`;
         await rejects(async () => { await applyLocalPatch(twoPickerArrays); }, /anchor "model-picker" matched 2 times/u);
+    });
+
+    // clodex 2.21.x added a SECOND picker site (PATCH 11, the catalog picker). Its output was READ
+    // from a clodex-patched copy of Claude 2.1.325 (2026-11-15, built-in patches only): the same
+    // forEach body, but inserted as a comma-joined declaration, so what follows it is `,` and not
+    // `;`. The local patch anchor ends in `);`, so it sees exactly one picker site. CHARACTERIZATION:
+    // this test was green on its first run, the behaviour was already there; it pins it so a later
+    // anchor widening cannot start matching the catalog site too (that would throw, see the test above).
+    it("a source carrying clodex 2.21.x's second picker site (PATCH 11) still yields every needle once", async () => {
+        const rows = `{value:"sol",label:"Sol",description:"Custom model (clodex:openai-oauth:gpt-5.6-sol)"}`;
+        const catalogSite = `function pw(e,n){let r=lw(e,n),s=r??Ap(e),_ccpick=/*ccpatch:picker*/[${rows}].forEach(function(_o){if(!s.some(function(_i){return _i.value===_o.value}))s.push(_o)}),h=r!==null&&uYn(),y=i.ANTHROPIC_CUSTOM_MODEL_OPTION}`;
+        const patched = await applyLocalPatch(`${clodexPatched("openai-oauth", [SOL, TERRA])}\n${catalogSite}`);
+        deepStrictEqual(missingNeedles(patched), []);
+        strictEqual(patched.includes(catalogSite), true, "the catalog site must be left exactly as clodex wrote it");
     });
 });
 

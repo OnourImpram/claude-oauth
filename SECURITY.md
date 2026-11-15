@@ -83,6 +83,13 @@ binary itself. Those are other people's software, run under your own account; re
 them upstream. If this project *misuses* one of them, passes a flag it should not, trusts output
 it should not, pins a version with a known defect, that is in scope.
 
+The Claude Code pin can follow a vendor-signed update (`claude.vendorSignature` in
+`config/install-lock.json`, decided in `src/runtime/claude-vendor-update.ts`). A way to make that
+decision accept a binary the platform does not report as validly signed by the named signer, or
+to accept a version below the pin, is in scope and is a high-severity report. The acceptance
+record under the runtime root has the same trust level as the launcher script: whoever can
+write there can already replace the launcher.
+
 ## Disclosure
 
 Fixed issues are described in `CHANGELOG.md` with their id and the class of defect. Open issues

@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 export type LogLevel = "info" | "warn" | "error";
@@ -43,6 +43,7 @@ export interface SafeLogEntry {
 //
 // A log nobody can find is as bad as one that shouts, so the path is fixed and printable:
 // <runtime root>/router.log.
+const maximumLogBytes = 8 * 1024 * 1024;
 function logFilePath(): string {
     const base = process.env["LOCALAPPDATA"] ?? join(homedir(), ".local", "share");
     return join(base, "Hezarfen", "claude-oauth", "router.log");
@@ -59,7 +60,7 @@ export function writeSafeLog(entry: SafeLogEntry): void {
     if (process.env["NODE_TEST_CONTEXT"] !== undefined)
         return;
     try {
-        appendFileSync(logFilePath(), line, { encoding: "utf8", mode: 0o600 });
+        appendLogLine(logFilePath(), line, maximumLogBytes);
     }
     catch {
         // The log file is a convenience, never a dependency: a router that cannot write its
@@ -108,3 +109,31 @@ function safeStringify(value: unknown): string {
     }
 }
 
+// router.log grew without bound while the receipt store beside it rotated at 2 MiB (audit
+// D1-08, 2026-11-15). Same shape here: past the cap the live file becomes <name>.previous
+// (one generation, the older one is dropped) and writing continues in a fresh file. The size
+// is read from disk once per process and then tracked in memory, so the request path pays no
+// extra system call per line.
+const knownLogSizes = new Map<string, number>();
+export function appendLogLine(path: string, line: string, maximumBytes: number): void {
+    let size = knownLogSizes.get(path);
+    if (size === undefined) {
+        try {
+            size = statSync(path).size;
+        }
+        catch {
+            size = 0;
+        }
+    }
+    if (size >= maximumBytes) {
+        try {
+            renameSync(path, `${path}.previous`);
+        }
+        catch {
+            // Rotation is best effort (another process may hold the file): keep appending.
+        }
+        size = 0;
+    }
+    appendFileSync(path, line, { encoding: "utf8", mode: 0o600 });
+    knownLogSizes.set(path, size + Buffer.byteLength(line, "utf8"));
+}

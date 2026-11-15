@@ -3,8 +3,10 @@ import {
     AGENT_MODEL_CONTRACTS,
     OPENAI_MODEL_CONTRACTS,
     WEB_MODEL_CONTRACTS,
+    apiKeyModelContracts,
+    type ApiKeyProvider,
     openAiCatalogEntry,
-    verifiedGrok46CatalogEntry,
+    verifiedGrokCatalogEntry,
 } from "./model-contracts.js";
 /**
  * A7 (2026-09-02). Native rows (anthropic, native-message-loop) ALWAYS come from the
@@ -137,7 +139,7 @@ export function withVerifiedGrokModel(baseline: ModelSnapshot, catalog: readonly
     if (contract === undefined)
         return baseline;
     const retained = baseline.models.filter((model) => model.id !== contract.id);
-    const live = verifiedGrok46CatalogEntry(catalog);
+    const live = verifiedGrokCatalogEntry(catalog);
     const verified: readonly ModelRecord[] = live === undefined
         ? []
         : [{
@@ -201,6 +203,53 @@ export function requireAllProvidersReady(catalog: RequireAllProviderInput | unde
         googleGateReady(catalog.googleModels);
 }
 
+// ---- Router-owned API-key lanes (alibaba / zai / openaiapi, 2026-11-09) ----
+//
+// The contract is the source of truth, the live model
+// LIST decides membership, and a lane without a key or without an answer yields an empty
+// catalog and therefore no rows -- never picker entries that cannot answer. The window comes
+// from the contract (a live list that publishes no window), which is why every unsourced row
+// carries a conservative default and an [UNVERIFIED] source string.
+// A lane that lists its models but cannot serve them (Z.AI 429/1113 today, OpenAI with no
+// credits) KEEPS its rows and carries the named blocked readiness instead: the operator asked
+// for the lane, membership is real, and a request fails with the named remedy.
+export function withVerifiedApiKeyModels(baseline: ModelSnapshot, provider: ApiKeyProvider, liveIds: readonly string[]): ModelSnapshot {
+    const contracts = apiKeyModelContracts(provider);
+    const externalIds = new Set(contracts.map((entry) => entry.id));
+    const retained = baseline.models.filter((model) => !externalIds.has(model.id));
+    const live = new Set(liveIds);
+    const verified = contracts
+        .filter((entry) => live.has(entry.upstreamModel))
+        .map((entry): ModelRecord => ({
+        id: entry.id,
+        provider: entry.provider,
+        upstreamModel: entry.upstreamModel,
+        displayName: entry.displayName,
+        oauthType: "api-key",
+        executionMode: "native-message-loop",
+        discoverable: true,
+        contextWindow: entry.contextWindow,
+        ...(entry.maximumOutputTokens === undefined ? {} : { maximumOutputTokens: entry.maximumOutputTokens }),
+        capabilities: provider === "openaiapi"
+            ? ["messages", "streaming", "tools"]
+            : ["messages", "streaming", "tools", "thinking"],
+    }));
+    return {
+        ...baseline,
+        generatedAt: new Date().toISOString(),
+        source: "live-provider-refresh",
+        models: [...retained, ...verified],
+    };
+}
+export function withVerifiedAlibabaModels(baseline: ModelSnapshot, liveIds: readonly string[]): ModelSnapshot {
+    return withVerifiedApiKeyModels(baseline, "alibaba", liveIds);
+}
+export function withVerifiedZaiModels(baseline: ModelSnapshot, liveIds: readonly string[]): ModelSnapshot {
+    return withVerifiedApiKeyModels(baseline, "zai", liveIds);
+}
+export function withVerifiedOpenAiApiModels(baseline: ModelSnapshot, liveIds: readonly string[]): ModelSnapshot {
+    return withVerifiedApiKeyModels(baseline, "openaiapi", liveIds);
+}
 /**
  * ChatGPT Web rows enter the snapshot only when the lane's three readiness checks passed
  * (bridge daemon, tunnel-client, Chrome CDP). Same shape as withVerifiedGoogleModels: the
@@ -229,4 +278,21 @@ export function withVerifiedWebModels(baseline: ModelSnapshot, laneReady: boolea
         source: "live-provider-refresh",
         models: [...retained, ...verified],
     };
+}
+/**
+ * The Grok CLI answers the first `initialize` after a period of disuse from its on-disk model
+ * cache and refreshes that cache in the background (measured 2026-11-15: models_cache.json
+ * was rewritten during the next call, which then listed the contract model). One stale
+ * answer read as "the model is gone" dropped the whole xAI lane. When the contract model is
+ * missing, the catalog is therefore asked for ONCE more after a short pause. A model that is
+ * really gone, or listed at another window, is still reported: the second answer is returned
+ * as it is and the caller's check decides.
+ */
+export async function grokCatalogAfterCacheRefresh(inspect: () => Promise<readonly ProviderModelRecord[]>, options: { readonly sleep?: (ms: number) => Promise<void>; readonly delayMs?: number } = {}): Promise<readonly ProviderModelRecord[]> {
+    const first = await inspect();
+    if (verifiedGrokCatalogEntry(first) !== undefined)
+        return first;
+    const sleep = options.sleep ?? (async (ms: number): Promise<void> => await new Promise((resolveSleep) => setTimeout(resolveSleep, ms)));
+    await sleep(options.delayMs ?? 2_000);
+    return await inspect();
 }

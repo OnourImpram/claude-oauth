@@ -26,6 +26,9 @@ export class AnthropicAdapter implements ProviderAdapter {
             status: response.status,
             headers: response.headers,
             body: response.body,
+            // The body is Anthropic's own bytes, forwarded as they arrive: every chunk
+            // (their pings included) is the provider speaking.
+            upstreamDriven: true,
             ...(providerRequestId === undefined ? {} : { providerRequestId }),
         };
     }

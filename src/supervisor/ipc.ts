@@ -1,7 +1,7 @@
 import { SUPERVISOR_DETAIL_CODE_LIMIT } from "../domain/contracts.js";
 import { createServer, createConnection, type Socket } from "node:net";
 import { once } from "node:events";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { runtimeSessionPaths, type RuntimePaths } from "../runtime/paths.js";
 export interface SupervisorStatus {
@@ -99,11 +99,23 @@ const maximumSessionCandidates = 256;
 export async function readActiveSupervisorStatuses(paths: RuntimePaths): Promise<readonly SupervisorStatus[]> {
     const candidates = [paths.ipc];
     try {
-        const entries = await readdir(join(paths.root, "sessions"), { withFileTypes: true });
-        const sessionIds = entries
+        const directory = join(paths.root, "sessions");
+        const entries = await readdir(directory, { withFileTypes: true });
+        // Newest first, THEN the cap (audit D1-07, 2026-11-15). The cap used to cut the
+        // list in directory order, which is by name: once 256 leftovers of dead sessions
+        // existed, a live session whose random id sorted after them was never probed and
+        // doctor reported it as stopped. A live session's file is among the newest.
+        const dated = await Promise.all(entries
             .filter((entry) => entry.isFile())
             .flatMap((entry) => sessionStateFilePattern.exec(entry.name)?.[1] ?? [])
-            .slice(0, maximumSessionCandidates);
+            .map(async (sessionId) => ({
+                sessionId,
+                modifiedAt: await stat(join(directory, `${sessionId}.json`)).then((metadata) => metadata.mtimeMs, () => 0),
+            })));
+        const sessionIds = dated
+            .sort((left, right) => right.modifiedAt - left.modifiedAt)
+            .slice(0, maximumSessionCandidates)
+            .map((entry) => entry.sessionId);
         candidates.push(...sessionIds.map((sessionId) => runtimeSessionPaths(paths, sessionId).ipc));
     }
     catch (error) {

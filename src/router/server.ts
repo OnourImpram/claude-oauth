@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
-import type { AdapterResponse, RouteReceipt } from "../domain/contracts.js";
+import { REQUEST_CLASSES, type AdapterResponse, type RequestClass, type RouteReceipt } from "../domain/contracts.js";
 import { RouterError, errorPayload, normalizeRouterError } from "../domain/errors.js";
 import { ModelRegistry } from "../domain/registry.js";
 import { numericUsage, parseMessageEnvelope } from "../domain/validation.js";
@@ -10,7 +10,23 @@ import { ReceiptStore } from "../runtime/receipt-store.js";
 import { writeSafeLog, type SafeLogEntry } from "../runtime/log.js";
 import { nonceMatches, SESSION_HEADER } from "../security/nonce.js";
 import type { McpToolBridge } from "../mcp/tool-bridge.js";
-import { clientResponseHeaders } from "./headers.js";
+import { clientResponseHeaders, REQUEST_CLASS_HEADER } from "./headers.js";
+// A Claude model id the snapshot does not list is served by the native lane (registry.ts).
+// It is named once per id and process, so the missing row is visible without a line per request.
+const uncontractedNativeSeen = new Set<string>();
+function noteUncontractedNative(model: string, requestId: string): void {
+    if (uncontractedNativeSeen.has(model))
+        return;
+    uncontractedNativeSeen.add(model);
+    writeSafeLog({
+        event: "native_model_not_in_snapshot",
+        level: "warn",
+        requestId,
+        provider: "anthropic",
+        requestedModel: model,
+        remedy: "Served by the native lane under its own id. To list it, add a row to config/models.default.json and cut a release.",
+    });
+}
 export interface RouterServerOptions {
     readonly nonce: string;
     readonly registry: ModelRegistry;
@@ -22,6 +38,9 @@ export interface RouterServerOptions {
     // supplied, the /mcp path returns 404 -- meaning this capability is NOT CONFIGURED, and
     // that state is a named 404, not a silent failure.
     readonly mcpBridge?: (sessionKey: string) => McpToolBridge | undefined;
+    // How long the provider may stay silent before the request is ended. Tests inject a
+    // short value; production uses the default.
+    readonly requestTimeoutMs?: number;
 }
 export interface RunningRouter {
     readonly baseUrl: string;
@@ -29,7 +48,7 @@ export interface RunningRouter {
     close(): Promise<void>;
 }
 const maximumBodyBytes = 64 * 1024 * 1024;
-const requestTimeoutMs = 300_000;
+const defaultRequestTimeoutMs = 300_000;
 async function readBody(request: IncomingMessage): Promise<Buffer> {
     const contentLength = Number.parseInt(request.headers["content-length"] ?? "0", 10);
     if (Number.isFinite(contentLength) && contentLength > maximumBodyBytes) {
@@ -46,6 +65,9 @@ async function readBody(request: IncomingMessage): Promise<Buffer> {
     }
     return Buffer.concat(chunks);
 }
+function requestClassOf(value: string | readonly string[] | undefined): RequestClass | undefined {
+    return typeof value === "string" && (REQUEST_CLASSES as readonly string[]).includes(value) ? value as RequestClass : undefined;
+}
 function requestHeaders(request: IncomingMessage): Headers {
     const headers = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
@@ -61,7 +83,13 @@ function writeHeaders(response: ServerResponse, headers: Headers): void {
     for (const [name, value] of clientResponseHeaders(headers))
         response.setHeader(name, value);
 }
-async function streamResponse(response: ServerResponse, upstream: AdapterResponse): Promise<void> {
+interface StreamHooks {
+    /** A body chunk arrived from the adapter. */
+    readonly chunk: () => void;
+    /** The router started (true) or stopped (false) waiting for the client to drain. */
+    readonly waitingOnClient: (waiting: boolean) => void;
+}
+async function streamResponse(response: ServerResponse, upstream: AdapterResponse, signal: AbortSignal, hooks: StreamHooks): Promise<void> {
     response.statusCode = upstream.status;
     writeHeaders(response, upstream.headers);
     if (upstream.body === null) {
@@ -73,9 +101,27 @@ async function streamResponse(response: ServerResponse, upstream: AdapterRespons
             const result = await reader.read();
             if (result.done)
                 break;
-            if (!response.write(Buffer.from(result.value)))
-                await once(response, "drain");
+            hooks.chunk();
+            // D1-05 (reproduced 2026-11-15): a bare once(response, "drain") never settles
+            // when the client goes away while the write buffer is full -- a destroyed
+            // response emits neither "drain" nor "error" -- so the handler hung, kept the
+            // upstream reader locked and wrote no receipt. The wait now ends with the request:
+            // the same signal the client-disconnect and silence guards abort.
+            if (!response.write(Buffer.from(result.value))) {
+                hooks.waitingOnClient(true);
+                try {
+                    await once(response, "drain", { signal });
+                }
+                finally {
+                    hooks.waitingOnClient(false);
+                }
+            }
         }
+    }
+    catch (error) {
+        // An abandoned wait must not leave the provider streaming into nothing.
+        await reader.cancel().catch(() => undefined);
+        throw error;
     }
     finally {
         reader.releaseLock();
@@ -158,12 +204,22 @@ function describeAuthChannels(headers: IncomingMessage["headers"], pathNonceVali
     return arrived;
 }
 
+// Why a request was ended from the router's side. The reason travels as the abort reason,
+// so the catch below can tell its own timer and a departed client apart from a provider that
+// really answered with garbage. Before 2026-11-15 all three were filed as
+// upstream_protocol_error ("the provider returned an invalid response").
+class ClientGone extends Error {
+}
+function silenceTimeout(): RouterError {
+    return new RouterError("upstream_timeout", "The provider sent nothing within the router's time limit.", 504);
+}
 async function handleRequest(request: IncomingMessage, response: ServerResponse, options: RouterServerOptions): Promise<void> {
     const requestId = randomUUID();
     const startedAt = performance.now();
+    const abortController = new AbortController();
     const routedTarget = sessionTarget(request.url, options.nonce);
     const route = classifyRoute(routedTarget.target.pathname);
-    let receiptBase: Pick<RouteReceipt, "requestedModel" | "configuredModel" | "provider" | "oauthType"> | undefined;
+    let receiptBase: Pick<RouteReceipt, "requestedModel" | "configuredModel" | "provider" | "oauthType" | "requestClass"> | undefined;
     // If registry.resolve() throws, receiptBase is never assigned, no receipt is written and
     // the log does not say which model was requested -- "model_not_available" becomes
     // undiagnosable. The requested model is captured BEFORE resolution.
@@ -220,18 +276,37 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const envelope = parseMessageEnvelope(body, isMessages);
         requestedModel = envelope.model;
         const route = options.registry.resolve(envelope.model);
+        if (route.uncontractedNative === true)
+            noteUncontractedNative(envelope.model, requestId);
+        // Observability only: Claude Code labels its own requests (main, subagent,
+        // compaction, ...). Recorded when the label is one of the measured values; nothing
+        // is routed, refused or changed by it.
+        const requestClass = requestClassOf(request.headers[REQUEST_CLASS_HEADER]);
         receiptBase = {
             requestedModel: envelope.model,
             configuredModel: route.model.upstreamModel,
             provider: route.model.provider,
             oauthType: route.model.oauthType,
+            ...(requestClass === undefined ? {} : { requestClass }),
         };
-        const abortController = new AbortController();
-        const timeout = setTimeout(() => abortController.abort(new Error("upstream timeout")), requestTimeoutMs);
-        request.once("aborted", () => abortController.abort(new Error("client aborted")));
+        // D1-01. This guard measures how long the PROVIDER has been silent; it used to be
+        // armed once and so capped the total duration, cutting healthy streams at 300 s.
+        // It is re-armed when the provider speaks: on a body chunk if the adapter declares
+        // the body to be the provider's own bytes, or when the adapter reports activity
+        // itself. A keep-alive the router generates re-arms nothing, so the agent lanes keep
+        // the bound they rely on to end a stuck turn (session-registry FINDING 1).
+        const silenceLimitMs = options.requestTimeoutMs ?? defaultRequestTimeoutMs;
+        let timeout = setTimeout(() => abortController.abort(silenceTimeout()), silenceLimitMs);
+        const providerSpoke = (): void => {
+            if (abortController.signal.aborted)
+                return;
+            clearTimeout(timeout);
+            timeout = setTimeout(() => abortController.abort(silenceTimeout()), silenceLimitMs);
+        };
+        request.once("aborted", () => abortController.abort(new ClientGone("client aborted")));
         response.once("close", () => {
             if (!response.writableEnded)
-                abortController.abort(new Error("client disconnected"));
+                abortController.abort(new ClientGone("client disconnected"));
         });
         let upstream: AdapterResponse;
         try {
@@ -244,8 +319,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
                 body,
                 headers: requestHeaders(request),
                 signal: abortController.signal,
+                upstreamActivity: providerSpoke,
             });
-            await streamResponse(response, upstream);
+            // While the router waits for a slow client it reads nothing from a
+            // provider-driven body, so that time is the client's silence, not the provider's:
+            // the guard is stopped for the wait and re-armed after it. A body the adapter
+            // generates keeps its bound untouched.
+            const upstreamDriven = upstream.upstreamDriven === true;
+            await streamResponse(response, upstream, abortController.signal, {
+                chunk: () => {
+                    if (upstreamDriven)
+                        providerSpoke();
+                },
+                waitingOnClient: (waiting) => {
+                    if (!upstreamDriven || abortController.signal.aborted)
+                        return;
+                    if (waiting)
+                        clearTimeout(timeout);
+                    else
+                        providerSpoke();
+                },
+            });
             const completion = await upstream.completion;
             const providerRequestId = completion?.providerRequestId ?? upstream.providerRequestId;
             const providerUsage = completion?.usage ?? upstream.usage;
@@ -266,7 +360,36 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         response.end();
     }
     catch (caught) {
-        const error = normalizeRouterError(caught);
+        // Read the abort state before touching the response: destroying it below fires
+        // "close", which would make every failure look like a departed client.
+        const abortReason: unknown = abortController.signal.aborted ? abortController.signal.reason : undefined;
+        const clientGone = abortReason instanceof ClientGone;
+        const error = abortReason instanceof RouterError ? abortReason : normalizeRouterError(caught);
+        if (clientGone) {
+            response.destroy();
+            if (receiptBase !== undefined) {
+                await appendReceipt(options.receipts, {
+                    schemaVersion: 1,
+                    timestamp: new Date().toISOString(),
+                    requestId,
+                    ...receiptBase,
+                    durationMs: Math.round(performance.now() - startedAt),
+                    status: "cancelled",
+                });
+            }
+            writeSafeLog({
+                event: "request_cancelled",
+                level: "info",
+                requestId,
+                ...(receiptBase === undefined ? {} : { provider: receiptBase.provider }),
+                code: "client_disconnected",
+                ...(requestedModel === undefined ? {} : { requestedModel: safeModelName(requestedModel) }),
+                durationMs: Math.round(performance.now() - startedAt),
+                route,
+                method: safeMethod(request.method),
+            });
+            return;
+        }
         if (!response.headersSent) {
             const body = errorPayload(error);
             const headers: Record<string, string> = {

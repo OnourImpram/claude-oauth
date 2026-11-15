@@ -53,6 +53,6 @@ describe("supervisor detailCode fits the contract that carries it", () => {
         // If the constant were raised without the reader agreeing, the third arm above
         // would keep passing while the reader kept refusing. This arm pins the number
         // itself, so a change has to be deliberate on both sides.
-        strictEqual(SUPERVISOR_DETAIL_CODE_LIMIT, 256);
+        strictEqual(SUPERVISOR_DETAIL_CODE_LIMIT, 512);
     });
 });

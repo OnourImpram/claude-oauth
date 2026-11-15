@@ -210,11 +210,12 @@ describe("openAiModelReadiness", () => {
         strictEqual(openAiModelReadiness(undefined).some((entry) => entry.enabled), false);
     });
 
-    // The real accident scenario: sol+terra verified, astra not in the catalog. The two
+    // The real accident scenario: every other row verified, astra not in the catalog. The two
     // hand-written literals would say "everything is ready" here; the derived list drops
-    // astra BY NAME.
+    // astra BY NAME. The verified set is derived from the contract list, so a row added later
+    // (sol6, luna, sol61 on 2026-11-15) does not turn this into a different scenario.
     it("when only Astra is missing, marks it disabled BY NAME and leaves the others enabled", () => {
-        const readiness = openAiModelReadiness(snapshotOf(["anthropic-openai-gpt-5.6-sol", "anthropic-openai-gpt-5.6-terra"]));
+        const readiness = openAiModelReadiness(snapshotOf(OPENAI_MODEL_CONTRACTS.filter((contract) => contract.alias !== "astra").map((contract) => contract.id)));
         const missing = readiness.filter((entry) => !entry.enabled).map((entry) => entry.id);
         deepStrictEqual(missing, ["anthropic-openai-gpt-6-astra"]);
         strictEqual(readiness.every((entry) => entry.enabled), false, "--require-all CANNOT succeed in this state");

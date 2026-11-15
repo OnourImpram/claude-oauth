@@ -95,7 +95,7 @@ export const AGY_DENIED_NATIVE_TOOLS: readonly string[] = [
     "unsandboxed(*)",
 ];
 
-const OWNER_FILE = ".hezarfen-owner.json";
+import { OWNER_FILE, sweepOwnedDirectories } from "../runtime/owned-directory.js";
 const defaultStaleAfterMs = 6 * 60 * 60 * 1000;
 
 interface OwnerRecord {
@@ -222,78 +222,9 @@ export interface SweepOutcome {
  * second arm asserting the live home survives.
  */
 export async function sweepStaleConfigHomes(options: SweepOptions): Promise<SweepOutcome> {
-    const now = (options.now ?? Date.now)();
-    const staleAfterMs = options.staleAfterMs ?? defaultStaleAfterMs;
-    const alive = options.isProcessAlive ?? processIsAlive;
-    const removed: string[] = [];
-    const kept: string[] = [];
-    let entries: Dirent[];
-    try {
-        entries = await readdir(options.root, { withFileTypes: true });
-    }
-    catch {
-        return { removed, kept };
-    }
-    for (const entry of entries) {
-        if (!entry.isDirectory())
-            continue;
-        const path = join(options.root, entry.name);
-        const owner = await readOwner(path);
-        // An unreadable owner record means the home is not accounted for by anyone. It is
-        // swept -- but only past the TTL, so a home caught mid-creation is not destroyed.
-        const stale = owner === undefined
-            ? await olderThan(path, now, staleAfterMs)
-            : now - owner.createdAt > staleAfterMs || !alive(owner.pid);
-        if (!stale) {
-            kept.push(path);
-            continue;
-        }
-        try {
-            await rm(path, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
-            removed.push(path);
-        }
-        catch {
-            kept.push(path);
-            writeSafeLog({ event: "antigravity_config_home_cleanup_failed", level: "warn" });
-        }
-    }
-    return { removed, kept };
-}
-
-async function readOwner(path: string): Promise<OwnerRecord | undefined> {
-    try {
-        const parsed: unknown = JSON.parse(await readFile(join(path, OWNER_FILE), "utf8"));
-        if (typeof parsed !== "object" || parsed === null)
-            return undefined;
-        const record = parsed as Record<string, unknown>;
-        if (typeof record["pid"] !== "number" || typeof record["createdAt"] !== "number")
-            return undefined;
-        return { pid: record["pid"], createdAt: record["createdAt"] };
-    }
-    catch {
-        return undefined;
-    }
-}
-
-async function olderThan(path: string, now: number, staleAfterMs: number): Promise<boolean> {
-    try {
-        return now - (await stat(path)).mtimeMs > staleAfterMs;
-    }
-    catch {
-        return false;
-    }
-}
-
-function processIsAlive(pid: number): boolean {
-    if (!Number.isInteger(pid) || pid <= 0)
-        return false;
-    try {
-        // Signal 0 performs the permission and existence check WITHOUT delivering a signal.
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (error) {
-        // EPERM means the process exists but belongs to someone else -- alive, not ours.
-        return (error as NodeJS.ErrnoException).code === "EPERM";
-    }
+    // One implementation, shared with the Clodex capsule directories (runtime/owned-directory.ts).
+    return await sweepOwnedDirectories({
+        ...options,
+        onCleanupFailed: () => writeSafeLog({ event: "antigravity_config_home_cleanup_failed", level: "warn" }),
+    });
 }

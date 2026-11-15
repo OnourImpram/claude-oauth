@@ -1,4 +1,5 @@
 import {
+    OAUTH_TYPES,
     PROVIDER_IDS,
     type Capability,
     type MessageEnvelope,
@@ -34,6 +35,8 @@ export function parseMessageEnvelope(body: Uint8Array, requireMessages: boolean)
     return value as MessageEnvelope;
 }
 const capabilities = new Set(["messages", "streaming", "tools", "vision", "thinking"]);
+// The providers whose credential is a router-owned API key (see ModelRecord.oauthType).
+export const API_KEY_PROVIDERS = new Set<string>(["alibaba", "zai", "openaiapi"]);
 function parseModel(value: unknown): ModelRecord {
     if (!isRecord(value))
         throw new Error("model entry must be an object");
@@ -48,10 +51,15 @@ function parseModel(value: unknown): ModelRecord {
         !PROVIDER_IDS.includes(provider as ProviderId) ||
         !isNonEmptyString(value["upstreamModel"]) ||
         !isNonEmptyString(value["displayName"]) ||
-        !["claude.ai", "chatgpt", "xai-cli", "google-cli", "chatgpt-web"].includes(String(oauthType)) ||
+        !(OAUTH_TYPES as readonly string[]).includes(String(oauthType)) ||
         !["native-message-loop", "agent-readonly"].includes(String(executionMode)) ||
         // web: the bridge speaks Messages itself, so it runs the same loop as anthropic/openai.
-        ((provider === "anthropic" || provider === "openai" || provider === "web") && executionMode !== "native-message-loop") ||
+        // alibaba / zai: the adapter speaks Messages, same loop.
+        // openaiapi: the adapter translates Messages <-> chat completions, same loop.
+        ((provider === "anthropic" || provider === "openai" || provider === "web" || provider === "alibaba" || provider === "zai" || provider === "openaiapi") && executionMode !== "native-message-loop") ||
+        // The api-key credential class belongs to the router-owned key lanes alone; no OAuth
+        // lane may claim it and no key lane may claim anything else.
+        (API_KEY_PROVIDERS.has(String(provider)) !== (oauthType === "api-key")) ||
         ((provider === "google" || provider === "xai") && executionMode !== "agent-readonly") ||
         typeof value["discoverable"] !== "boolean" ||
         (contextWindow !== undefined && (!Number.isSafeInteger(contextWindow) || (contextWindow as number) <= 0)) ||

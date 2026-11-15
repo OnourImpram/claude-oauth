@@ -1,4 +1,6 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { assertNoApiKeySelectors, presentApiKeySelectors, sanitizedClaudeEnvironment, sanitizedWorkerEnvironment } from "../src/security/environment.js";
 
@@ -100,6 +102,53 @@ describe("sanitizedWorkerEnvironment", () => {
         // CLODEX_HOME is REQUIRED for the capsule to run, and stripping it means the
         // provider never comes up at all.
         strictEqual(cleaned["PATH"], "/usr/bin");
+    });
+
+    // Measured 2026-11-15 against the pinned 2.21.7 bundle (and the saved 2.11.1 one): one knob is
+    // new (CLODEX_PASSTHROUGH_OUTAGE_HOLD_MS) and five that both bundles read were never on the strip
+    // list: three connection/keep-alive tunables and the two launcher variables.
+    it("strips every CLODEX_* knob that the 2.21.7 bundle reads and the 2.11.1 list missed", () => {
+        const knobs = [
+            "CLODEX_PASSTHROUGH_OUTAGE_HOLD_MS",
+            "CLODEX_STREAM_KEEPALIVE_INTERVAL_MS",
+            "CLODEX_WS_MAX_CONNECTIONS",
+            "CLODEX_WS_MAX_NURSERY_CONNECTIONS",
+            "CLODEX_CLAUDE_PATH",
+            "CLODEX_REQUIRE_SERVER",
+        ];
+        const cleaned = sanitizedWorkerEnvironment("openai", { ...Object.fromEntries(knobs.map((name) => [name, "1"])), PATH: "/usr/bin" });
+        deepStrictEqual(knobs.filter((name) => cleaned[name] !== undefined), []);
+        strictEqual(cleaned["PATH"], "/usr/bin");
+    });
+
+    // THE MEASURE of the rule "a knob a new Clodex version reads is stripped in the same pass": it
+    // reads the INSTALLED bundle, so the next version bump turns this red until the new name is
+    // either stripped or named here as deliberately kept. (The 2.11.1 list was extended by hand and
+    // nothing compared it with the bundle, which is how six names stayed unnoticed.)
+    it("every CLODEX_* environment variable the installed bundle reads is stripped or deliberately kept", async () => {
+        const dist = join(import.meta.dirname, "../..", "node_modules/@bman654/clodex/dist");
+        const names = new Set<string>();
+        for (const file of (await readdir(dist)).filter((name) => name.endsWith(".js"))) {
+            const text = await readFile(join(dist, file), "utf8");
+            // A quoted name, or a property read (`process.env.X`, `env.X`). A bare identifier such as
+            // the CLODEX_LAUNCH_FLAGS constant is neither, so it is not mistaken for a variable.
+            for (const match of text.matchAll(/["'`](CLODEX_[A-Z0-9_]*[A-Z0-9])["'`]|\.(CLODEX_[A-Z0-9_]*[A-Z0-9])\b/gu)) {
+                const name = match[1] ?? match[2];
+                if (name !== undefined)
+                    names.add(name);
+            }
+        }
+        // Positive control: an instrument that finds nothing would pass this test for any bundle.
+        strictEqual(names.has("CLODEX_HOME"), true, "the scan must see a variable every release reads");
+        strictEqual(names.has("CLODEX_TRACE"), true, "the scan must see a variable that is stripped");
+        strictEqual(names.size >= 14, true, `the scan found only ${names.size} names`);
+        // The router sets these two itself, after sanitizing: it must be able to hand them over.
+        const keptOnPurpose = new Set(["CLODEX_HOME", "CLODEX_NO_DISCOVERY"]);
+        const inherited = [...names].filter((name) =>
+            !keptOnPurpose.has(name) && sanitizedWorkerEnvironment("openai", { [name]: "1" })[name] !== undefined);
+        deepStrictEqual(inherited.sort(), [], "these variables would be inherited from the working session into the capsule");
+        for (const name of keptOnPurpose)
+            strictEqual(sanitizedWorkerEnvironment("openai", { [name]: "x" })[name], "x", `${name} must survive sanitizing`);
     });
 
     it("does not strip CLODEX_HOME (the capsule cannot run without it)", () => {

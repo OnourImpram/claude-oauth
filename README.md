@@ -29,7 +29,8 @@ maker and a checker that are never the same model: one produces the diff, the ma
 analysis; another, in a fresh context, reads the output and reports what is wrong with it. Claude
 Code already has the mechanism, the `Agent` tool and subagents. What it lacks is a second model to
 hand the work to. This repository supplies it: one delegate agent per routed model
-(`gemini-delege`, `grok-delege`, `sol-delege`, `astra-delege`, `terra-delege`), and a `/model`
+(named `<alias>-delege`: `gemini-delege`, `carbon-delege`, `grok-delege`, `sol61-delege`,
+`astra-delege` and so on for every contracted alias), and a `/model`
 switch that puts a Google, xAI or OpenAI model in the driver's seat for a review pass while your
 tools, permissions and MCP servers stay where they are.
 
@@ -109,7 +110,8 @@ claude        ──────────────────────
 
 claude-oauth  ─▶  Claude Code process  ─▶  loopback router  ─┬─▶  Antigravity `agy`   Google OAuth
                   (your tools, your          (this repo)     ├─▶  `grok`              xAI OAuth
-                   permissions, your MCP)                    └─▶  Clodex capsule      ChatGPT/Codex OAuth
+                   permissions, your MCP)                    ├─▶  Clodex capsule      ChatGPT/Codex OAuth
+                                                             └─▶  API-key lanes       Alibaba / Z.AI / OpenAI API
 ```
 
 | Lane | What actually runs | Whose software | Pinned in `config/install-lock.json` |
@@ -118,10 +120,32 @@ claude-oauth  ─▶  Claude Code process  ─▶  loopback router  ─┬─▶
 | xAI | `grok` over ACP (Agent Client Protocol), long-lived sessions, up to six live at once by default (`CLAUDE_OAUTH_MAX_AGENT_SESSIONS`), so a tool loop can cross Claude Code's per-turn HTTP requests | xAI | `grok.version` |
 | OpenAI | **Clodex** (`@bman654/clodex`), a third-party bridge, run as a local capsule with the `openai-oauth` provider | [bman654/clodex](https://github.com/bman654/clodex), MIT-licensed npm package, with repository-owned shadow and capsule patches | `clodex.version`, `clodex.localPatchSha256`, `clodex.capsuleEntrypointSha256` |
 | ChatGPT Web | **Agent Web Bridge**, a loopback daemon that drives your signed-in ChatGPT tab in your own Chrome (CDP) and exposes a Messages subset; tools reach ChatGPT through its own plugin over the OpenAI tunnel-client | Agent Web Bridge, by the same author as this repository, installed separately (its repository is not public yet) | not pinned; readiness is three live checks (daemon, tunnel, Chrome CDP) and the lane is listed only when all three pass |
+| Alibaba Token Plan | Nothing local: the router passes Anthropic Messages through **unchanged** (model swap, fresh headers) to `https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages` with an **API key** (`x-api-key`) | Alibaba Cloud (Model Studio token plan, Singapore region) | not pinned; seven chat rows (`qwen4-max-preview`, `qwen3.8-max`, `qwen3.8-flash`, `glm-5.3`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `auto`) enter the snapshot only when the live model list names them; one tiny chat probe then names the lane's state |
+| Z.AI | Same passthrough shape to `https://api.z.ai/api/anthropic/v1/messages` with an **API key** (`x-api-key`) | Z.AI (Zhipu) | not pinned; two rows (`glm-5.3`, `glm-5.3-flash`), same live check |
+| OpenAI API | Nothing local: the router translates Messages to OpenAI **chat completions** and calls `https://api.openai.com/v1/chat/completions` with an **API key** (`authorization: Bearer`). Distinct from the OpenAI row above: that lane is your ChatGPT/Codex OAuth session, this one is a platform API key | OpenAI | not pinned; three rows (`gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`), same live check |
+
+> **API-key lane data rule (Alibaba Token Plan, Z.AI, OpenAI API).** **Do not route sensitive,
+> clinical, client, human-subject or otherwise private data to these lanes.** Use them for public
+> or synthetic material. As a structural guard the router never advertises MCP tools (`mcp__*`:
+> mail, drive, calendar, browser connectors) to any of the three lanes, so a model on them cannot
+> pull data from those accounts into its context; it gets Claude Code's built-in tools only. The
+> same guard covers the conversation history: `mcp__*` calls and results already in it (for
+> example, produced under a Claude model before a `/model` switch) are withheld on all three
+> lanes too (the Anthropic passthrough and the chat-completions translation share one function),
+> each replaced by a text block that names the tool and carries neither its input nor its result.
+> On the passthrough lanes (Alibaba, Z.AI), the client's `metadata` block is dropped before the
+> body crosses. Built-in tools can still read local files you point them at: the rule above is
+> yours to keep. The OpenAI API lane is a general-purpose platform API billed per token: the data
+> rule is a usage rule here, not a terms-of-service constraint, but it is stated the same way so
+> one sentence governs all non-OAuth lanes. The Google and xAI agent lanes are different: they
+> run on your own OAuth, and the router does not withhold `mcp__*` tools from them, so they do
+> offer them.
 
 Each lane authenticates as **you**, on your own plan: the Google and xAI lanes run those vendors'
 own CLIs; the OpenAI lane does **not** run OpenAI's `codex` CLI, it runs Clodex, which speaks to
-OpenAI over your ChatGPT/Codex-plan OAuth session. The ChatGPT Web lane is different in kind: no
+OpenAI over your ChatGPT/Codex-plan OAuth session. The Alibaba, Z.AI and OpenAI API lanes
+carry no OAuth session at all: the router holds one of your API keys per lane, per the key rule
+below. The ChatGPT Web lane is different in kind: no
 API at all, it is your browser session, and the five picker rows (`anthropic-web-chatgpt-instant`,
 `-medium`, `-high`, `-extra-high`, `-pro`) are ChatGPT's own reasoning-effort stops. Their context
 window is what ChatGPT enforces on a Pro account (111,193 tokens, auto-compact at 95,000), read
@@ -130,8 +154,26 @@ three lanes as "the provider's own official CLI"; that was wrong for OpenAI and 
 
 ### Selecting a model, including mid-session
 
-- **At launch:** `claude-oauth --model grok` (or `gemini`, `gemini-pro`, `opus-google`, `sol`,
-  `terra`, `astra`). Any other argument is passed to Claude Code as-is.
+- **At launch:** `claude-oauth --model grok` (or `gemini`, `argon`, `carbon`, `hydrogen`,
+  `orchestrator`, `orchestrator-argon`, `opus-google`, `sonnet-google`, `sol`, `terra`, `sol6`,
+  `luna`, `sol61`, `terra61`, `astra`). `gemini-pro` is gone: `gemini-3.1-pro-high` is no longer
+  in the `agy models` catalogue (measured 2026-11-15), and the alias is not repointed to another
+  model, because the selected model is the model that answers. Any other argument is passed to
+  Claude Code as-is. The Alibaba, Z.AI and OpenAI API rows have no launch alias: the router
+  resolves them by their full row id (for example `anthropic-openaiapi-gpt-6-astra`), and they
+  appear in the `/model` picker after `claude-oauth models refresh`; see
+  [Using your own API key](#using-your-own-api-key).
+- **A new Claude model:** a Claude model id the snapshot does not list (`claude-...`) is served
+  by the native lane under its own id, and Anthropic accepts or refuses it. The router logs
+  `native_model_not_in_snapshot` once. Ids of every other lane have to be contracted rows.
+- **After a row is retired:** the model snapshot under the runtime root keeps a retired row until
+  the next refresh, and selecting it answers 404. `claude-oauth models refresh` refuses to drop a
+  row on its own ("Refusing to shrink the model snapshot": that is how the picker silently
+  regressed before). When the removal is deliberate, run `claude-oauth models refresh
+  --allow-shrink` once; the refusal names every row that would go.
+- **Alibaba / Z.AI / OpenAI API keys:** these lanes use your own API key; the variables, the key
+  file format, and how to list a lane's models are in
+  [Using your own API key](#using-your-own-api-key) below.
 - **Mid-session:** Claude Code's own `/model` command. Routed models appear in the picker after
   `claude-oauth models refresh` has written them into the model snapshot; until then the picker
   shows only Claude models.
@@ -161,7 +203,7 @@ mode to remember: the native `claude` command never enters any of this.
   process; the cap is 6 by default and `CLAUDE_OAUTH_MAX_AGENT_SESSIONS=<n>` (1..32) before
   `claude-oauth` raises or lowers it. Past the cap a subagent gets `503 Too many agent turns in
   flight` naming the variable.
-- **Context gauge on Grok 4.6:** Claude Code knows two window sizes, 200k (plain id) and 1M
+- **Context gauge on Grok 4.7:** Claude Code knows two window sizes, 200k (plain id) and 1M
   (`[1m]` suffix), and ignores what discovery advertises. Grok's 500k window is shown as `[1m]`
   so the gauge stays proportional; the router compacts at 350k when launched with `--model grok`,
   and Grok's own 85% compaction is the backstop for a mid-session `/model` switch, where the
@@ -177,14 +219,121 @@ mode to remember: the native `claude` command never enters any of this.
   2026-09-14 13:05-13:23: Grok reads with its own tools (264 native calls, 0 router-served
   reads), so its reads never show on the gauge at all. The `input_tokens` the router reports
   on this lane is `ceil(bytes / 3)` of Claude Code's transcript, an upper bound: a reading of
-  600k there is a 1.8 MB transcript, not a count from xAI's tokenizer.
+  600k there is a 1.8 MB transcript, not a count from xAI's tokenizer. The `output_tokens` the
+  agent lanes (Google and xAI) report has had the same bound since 2026-11-15, `ceil(bytes / 3)`
+  of the answer with a minimum of 1, where it used to be the raw UTF-8 byte count; a count the
+  provider reports itself is still preferred over both.
+- **Receipts, the request class and the hint headers:** `claude-oauth receipt` shows the last
+  request; `claude-oauth receipts [--hours N]` (default 24) summarises the receipts the router
+  already writes, one row per provider and configured model: requests, completed, failed and
+  cancelled, token sums over the receipts that carried usage (the native lane reports none), median
+  duration, error codes and request classes. No prompt text exists in a receipt. A receipt may
+  carry `requestClass` (`main`, `subagent`, `workflow`, `compaction`, `auxiliary` or
+  `side_reply`), taken from the client's `x-claude-code-request-class` header; it is observability
+  only, nothing is routed or refused by it, and a value outside that list is dropped. Claude Code
+  builds that header only when its gateway-hint gate is open, so the launcher sets
+  `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` for the Claude child. The four hint headers behind that gate
+  (`x-claude-code-request-class`, `x-claude-1p-request-class`, `x-claude-code-agent-type`,
+  `x-claude-code-prompt-id`) are read by the router and forwarded to no provider: the router
+  records the request class and drops all four in `upstreamRequestHeaders`, the function the
+  Anthropic passthrough and the Clodex lane, the two adapters that forward client headers, build
+  their upstream headers with (`test/gateway-hint-headers.test.ts`).
+
+### Using your own API key
+
+Three lanes are not OAuth sessions: they use an API key that is yours. The router process reads the
+key itself, on every call, and no child process ever receives it.
+
+| Lane | Key | Key file variable | Also read from the shell environment | What the router sends |
+|---|---|---|---|---|
+| Alibaba Token Plan | `ALIBABA_TOKEN_PLAN_API_KEY` | `ALIBABA_TOKEN_PLAN_API_KEY_FILE` | yes, `ALIBABA_TOKEN_PLAN_API_KEY` | Anthropic Messages, passed through, `x-api-key` header |
+| Z.AI | `ZAI_API_KEY` | `ZAI_API_KEY_FILE` | yes, `ZAI_API_KEY` | Anthropic Messages, passed through, `x-api-key` header |
+| OpenAI API | `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` | **no, file only** | OpenAI chat completions, `authorization: Bearer` header |
+
+**Where the key comes from.** For Alibaba and Z.AI the router first uses the key variable in the
+environment of the `claude-oauth` process, if it is set and not blank; otherwise it reads the
+dotenv file named by the lane's `<KEY>_FILE` variable. The file holds one `NAME=value` line per
+key: the first line whose name matches is used, a leading `export` and one pair of surrounding
+single or double quotes are accepted, and every other line (comments, other variables) is
+ignored. A single file can hold all three lines; each lane still needs its own `<KEY>_FILE`
+variable pointing at it. The OpenAI API lane reads the **file only**: `OPENAI_API_KEY` in the
+environment of `claude-oauth` is an api-key selector, and the router refuses to launch or to
+refresh the model list while one is set. If no key is found the lane reports `auth_required`
+(`alibaba_key_missing`, `zai_key_missing`, `openaiapi_key_missing`) with a `FIX:` remedy that
+names the variables, and a request to it is answered with that remedy; nothing is sent upstream.
+
+```
+# keys.env: any path you choose; the router only reads it, it never writes it
+ALIBABA_TOKEN_PLAN_API_KEY=<your Alibaba Token Plan key>
+ZAI_API_KEY=<your Z.AI key>
+OPENAI_API_KEY=<your OpenAI platform key>
+```
+
+```powershell
+$env:OPENAI_API_KEY_FILE = "$HOME\.config\claude-oauth\keys.env"
+$env:ZAI_API_KEY_FILE = $env:OPENAI_API_KEY_FILE
+$env:ALIBABA_TOKEN_PLAN_API_KEY_FILE = $env:OPENAI_API_KEY_FILE
+claude-oauth models refresh
+```
+
+**How the key stays away from child processes.** `ALIBABA_TOKEN_PLAN_API_KEY`,
+`ALIBABA_TOKEN_PLAN_API_KEY_FILE`, `ZAI_API_KEY`, `ZAI_API_KEY_FILE` and `OPENAI_API_KEY_FILE`
+are listed in `ROUTER_OWNED_SECRET_VARIABLES`, and `OPENAI_API_KEY` is on the provider
+API-key list; both lists are removed (case-insensitively) from the environment of Claude Code and
+of every provider worker process. The client's own Claude OAuth `authorization` and
+`anthropic-beta` headers are never forwarded to these lanes: the upstream request is built from
+fresh headers. When an upstream error body echoes the key, it is replaced by `[redacted]` before
+the message is quoted; on the OpenAI API lane the same holds for an error object that arrives
+inside a stream.
+
+**Listing a lane's models.** The picker rows of these lanes are contracts in the source, and a row
+enters the model snapshot only when the lane's live model list names its upstream id.
+
+- `claude-oauth models refresh` asks each lane for its model list with your key (15 second
+  limit), admits the contracted rows that the list contains and, when it contains at least one,
+  sends one small chat request (16 to 64 output tokens) to decide the lane's state. It writes
+  the snapshot and prints the model ids now in it (`snapshot.models`) and each lane's state
+  (`providers`). A lane with no key, a rejected key, or a list that carries none of its
+  contracted models adds no rows. The refresh refuses to drop rows on its own; see
+  `--allow-shrink` above.
+- `claude-oauth doctor --live` runs the same live pass without writing the snapshot and prints
+  each lane's state under `live.providers`; the `snapshot` it prints is the one on disk.
+- After a refresh the rows appear in Claude Code's `/model` picker as `... (Alibaba)`,
+  `... (Z.AI)` and `... (OpenAI API)`. The router resolves them by their full row id, for example
+  `anthropic-alibaba-qwen3.8-max`, `anthropic-zai-glm-5.3` or `anthropic-openaiapi-gpt-6.1-sol`.
+
+Both commands contact the lane's provider with your key. The states they report are named, and
+none is shown green without a key: `*_key_missing`, `*_key_rejected` (HTTP 401 or 403),
+`*_unreachable`, `*_models_http_*` (the list endpoint answered with another status),
+`*_models_not_in_live_catalog` (the list carries none of the lane's contracted models) and
+`*_probe_*` (the chat probe failed), each with a remedy. Two provider conditions have their own
+name, both MEASURED 2026-11-09: Z.AI HTTP 429 with code `1113` ("Insufficient balance or no
+resource package") is `zai_balance_insufficient`, and OpenAI HTTP 429 `insufficient_quota` /
+`credit_balance_exhausted` is `openaiapi_credit_exhausted`. In both the lane reads `blocked`, its
+rows stay in the picker, and a request fails with the named remedy until the account is
+recharged.
+
+**Data rule.** The API-key lane data rule above applies in full: `mcp__*` tools and `mcp__*`
+history are withheld on all three lanes, and sensitive or private data does not belong on them.
+
+**Context windows.** `gpt-6-astra` carries the model card's 1,050,000-token window and 128,000
+output cap (it takes the `[1m]` picker suffix). Every other row on the three lanes takes a
+conservative default (262,144 in, auto-compact at 200,000) and is marked `[UNVERIFIED]` in the
+contract source: neither Alibaba's, Z.AI's nor OpenAI's model list publishes a context window,
+and the router does not invent numbers. **Not added:** Alibaba's seven media models
+(`wan2.7-image`, `wan2.7-image-pro`, `wan3.0-video`, `qwen-image-3.0-pro`,
+`qwen-audio-3.0-tts-plus`, `qwen-audio-3.0-realtime-plus`, `qwen-audio-3.0-asr-flash`) are on
+the provider's list but not on this lane: they are not Messages-protocol chat models, and a
+chat-only passthrough lane cannot serve them honestly.
 
 ## What it does not do
 
 - It does **not** modify, patch, or proxy the native Claude path. `claude` talks to
   `api.anthropic.com` as it did before installation, that is the claim measured below.
 - It does **not** bypass any provider's authentication. Each lane uses your own account's OAuth
-  session, through the vendor's CLI for Google and xAI, through Clodex for OpenAI.
+  session, through the vendor's CLI for Google and xAI, through Clodex for OpenAI. The
+  Alibaba, Z.AI and OpenAI API lanes are the exceptions by design: each uses your own API key,
+  held by the router process only.
 - It does **not** grant entitlements. If a provider's plan does not include a model, the router
   cannot conjure it. Quota exhaustion surfaces as quota exhaustion.
 
@@ -229,6 +378,13 @@ instead of a timeout. The negative arm used a synthetic loopback URL and was ref
 behavior. Stub tests execute the PowerShell and POSIX shims, check environment separation, argument
 forwarding and exit status, and exercise a native launch with no router release. Probe controls detect
 both an always-accepting and an always-rejecting CLI.
+
+One thing the router asks of the Claude Code process it starts is outside what the probe measures:
+the launcher sets `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, so the client adds four request-hint headers
+(`x-claude-code-request-class`, `x-claude-1p-request-class`, `x-claude-code-agent-type`,
+`x-claude-code-prompt-id`), and the router takes the request class for its receipts and forwards
+none of the four, so the Anthropic passthrough sends Anthropic nothing it would not have sent with
+that gate closed (`test/gateway-hint-headers.test.ts`, a unit measurement, not the probe).
 
 ### Using the shipped shims
 
@@ -286,7 +442,7 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | ~~B05~~ | ~~High~~ | **Repaired 2026-09-08.** Portable PowerShell/POSIX shims and a reproducible two-arm probe ship in this tree; stub tests measure native environment cleanup and router entry selection. Live probe: both arms PASS on Windows, 2026-09-08, output recorded above. |
 | ~~B06~~ | ~~High~~ | **Repaired 2026-09-08.** `max_input_tokens` uses the lower of the advertised window and snapshot transport capacity, tested for every routed model against its pin; Astra's `context_window` remains a presentation value of 1,000,000 while input is capped at the unchanged 872,000 pin: accepted capacity unproven, advertisement capped at the pin. |
 | ~~B07~~ | ~~High~~ | **Found and repaired 2026-09-08 (Agent arm).** When the Google model chose one of its own native tools (`read_file`) instead of the bridged Claude Code tools, the call-scoped settings denied it, agy ended without an answer, and the bridge returned the denial as HTTP 502; Claude Code treated 502 as transient and retried ten times with exponential backoff, every retry meeting the same policy. The denial now travels as 403 (terminal for the turn, not retried) and the bridged prompt carries one policy sentence telling the model that its native file, shell and browser tools are disabled here and naming the MCP server to use. Tests: `test/headless-bridge-denial-status.test.ts`, `test/headless-bridge-policy-note.test.ts`; mutation control over the whole suite fails one test per reverted change. Whether the model now picks the bridged tools more often is a model behaviour, not something this repair proves. |
-| ~~B08~~ | ~~High~~ | **Found and repaired 2026-09-08 (two-step bridged tool probe on the Google lane).** The router reported request bytes as `input_tokens`; Claude Code read a 320 kB second turn as 320k tokens against the 200k window it assumes for a model id without the `[1m]` suffix, started an automatic compaction, and the compaction request replayed the just-delivered `tool_result`, which the registry refused as "no live agent session" (409) ten times with backoff until the turn failed. Repair: the registry remembers delivered ids (bounded, past retirement) and the adapter runs an all-delivered result set as a fresh turn, logging `agent_tool_result_replayed`; the reported input bound is now `ceil(bytes / 3)`, an estimate and labelled as one; every session retirement logs its reason (`agent_session_retired`). Test: `test/mcp-replayed-result.test.ts`; mutation control over the whole suite fails it and the usage-bound test. Pick the `[1m]` model id in the picker for the full Gemini window. |
+| ~~B08~~ | ~~High~~ | **Found and repaired 2026-09-08 (two-step bridged tool probe on the Google lane).** The router reported request bytes as `input_tokens`; Claude Code read a 320 kB second turn as 320k tokens against the 200k window it assumes for a model id without the `[1m]` suffix, started an automatic compaction, and the compaction request replayed the just-delivered `tool_result`, which the registry refused as "no live agent session" (409) ten times with backoff until the turn failed. Repair: the registry remembers delivered ids (bounded, past retirement) and the adapter runs an all-delivered result set as a fresh turn, logging `agent_tool_result_replayed`; the reported input bound is now `ceil(bytes / 3)`, an estimate and labelled as one (the output side has had the same bound, minimum 1, since 2026-11-15); every session retirement logs its reason (`agent_session_retired`). Test: `test/mcp-replayed-result.test.ts`; mutation control over the whole suite fails it and the usage-bound test. Pick the `[1m]` model id in the picker for the full Gemini window. |
 | ~~B09~~ | ~~High~~ | **Found and repaired 2026-09-10 (operator report: `claude-oauth` refused to start).** The OpenAI lane wrote its patched Clodex capsule to `dist/clodex-capsules/session-*` inside the pinned release, and `dist` is one of the two directories the content-addressed release id hashes. A session that ended without `close()` (a killed process on 2026-09-08 14:43) left the capsule behind, the release no longer hashed to its own id, and the next start refused it with `release_contents_do_not_match_release_id`. The refusal was correct: the detector fired on a real edit-in-place. The defect was where runtime state lived. Repair: capsules are written under `<release>/.runtime/clodex-capsules/`, still below the module root so bare ESM imports resolve against the release's own dependencies, and outside every hashed directory; `.runtime/` is ignored by git and excluded when a release is cut. Test: `test/clodex-capsule-entrypoint.test.ts` asserts the capsule path is under `.runtime` and never under `dist` or `config`; mutation control over the whole suite fails it. A fresh release was cut and pinned; the drifted release directory was left untouched as evidence. |
 | ~~B10~~ | ~~High~~ | **Found and repaired 2026-09-10 (operator report: every GPT model showed a 200k window).** Claude Code does not read the `context_window` that discovery advertises; it assumes 200k for any model id without the `[1m]` suffix (measured under B08). The router attached the suffix only when the SNAPSHOT window equalled the contract ceiling, so Astra's advertised 1,000,000 never reached the client and Astra ran at 200k with compaction far too early. Repair: the suffix follows the ADVERTISED window; Astra is `anthropic-openai-gpt-6-astra[1m]` and takes the 650k `autoCompactWindow` from settings, the same as Opus. Sol and Terra advertise their 872,000 snapshot and stay at the 200k assumption on purpose: it keeps them under the 272K input pricing boundary. Grok advertised 500,000 and stayed at 200k until 2026-09-14, on the reasoning that a `[1m]` id would overflow at 500k before the 650k compaction. **Revised 2026-09-14 (operator report: Grok gauge at 85% where a 1M lane read 17%).** The 200k assumption compacted a 500k model at ~140k real tokens, which is the worse error; every agent lane above 200k now takes the suffix (`anthropic-xai-grok-4.6[1m]`), and the router's 350k auto-compaction at launch plus Grok's own 85% trigger bound the 1M bucket. Test: `test/contract-derivation.test.ts` (positive arms Astra and Grok, negative arm Sol); mutation control over the whole suite fails it. |
 | ~~B11~~ | ~~Medium~~ | **Found and repaired 2026-09-10 (operator report: Gemini answered with "Please run /login").** B07 returned a headless permission denial as 403; Claude Code reads 401 and 403 as an authentication failure and prompted for login on a lane whose OAuth session was fine. Repair: a denial is 400, terminal, shown as an API error, not retried, never mistaken for an expired login. Test: `test/headless-bridge-denial-status.test.ts`; mutation control over the whole suite fails it. The denial the operator saw was attributed to a native `read_file` outside the allow list of the call-scoped agy settings. That attribution was tested on 2026-09-13 against the repaired release and did not hold. Three probes ran real agy 1.1.27 in exactly the routed configuration, against a real MCP endpoint: a plain file read, a call to a tool named `mcp__playwright__browser_navigate`, and an instruction to avoid MCP and use a native file tool. All three succeeded through the MCP surface; the model never reached for a native tool. No allow-list entry was added, because none was shown to be needed. Whether a routed Gemini can drive Playwright end to end in a live session is still `NOT_RUN`. |
@@ -301,6 +457,9 @@ pre-release README that hides them is worthless. Ids are stable across this file
 | ~~N04~~ | ~~High~~ | **Repaired 2026-09-08.** Every request derives its catalogue and replaces changed bridge descriptors before releasing parked results; the xAI permission lookup reads the live names. Tests cover ToolSearch adding `mcp__playwright__browser_snapshot`, schema changes, removal, and unchanged descriptors. Already parked removed-tool calls can finish; subsequent calls are refused. Provider-side catalogue cache refresh is NOT_RUN, the offline measurement covers `tools/list`. |
 | ~~N05~~ | ~~High~~ | **Repaired 2026-09-08.** The capsule runs a hash-pinned patched copy of Clodex and receives its session nonce only through the child environment. Measured with an anonymous scratch home, missing/wrong/correct `x-api-key`: catalog and health **401/401/200**, malformed JSON messages **401/401/400**. Empty nonce, missing patch anchors and patched hash drift prevent startup. |
 | ~~N06~~ | ~~Medium~~ | **Repaired 2026-09-08.** Captured helpers receive SIGTERM, then SIGKILL after configurable `terminationGraceMs` (default 100 ms), and reject with a timeout even without `exit`; Windows tests cover the deadline and missing-exit case, while the meaningful SIGTERM-resistant Linux arm is NOT_RUN locally (Windows host). |
+| N07 | Low | **Open, recorded 2026-11-15 with the Clodex 2.21.7 merge.** Rated low because only the non-default patched-shadow mode is affected. The patched-shadow mode cannot patch Claude Code 2.1.325: Clodex's own proof check fails, and it failed with Clodex 2.11.1 as well, so the bump did not cause it. The default native-gateway mode does not use the patched shadow. Not repaired. |
+| N08 | Low | **Open, found 2026-11-15 by the independent comparison audit (code reading, not reproduced).** In the non-default `patched-shadow` mode the launcher replaces the Claude Code pin with the hash it measures on disk (`src/runtime/claude-shadow.ts`), so in that mode a binary the vendor-signature policy refuses can still be launched unpinned. The default `native-gateway` mode keeps the pin. Not repaired; it is the same mode N07 says cannot patch Claude Code 2.1.325. |
+| N09 | Medium | **Open, adapter audit finding D2-04 (2026-11-15): plausible, measured, not reproduced.** The Google lane's call-scoped configuration home hard-links the operator's Antigravity identity files (`oauth_creds.json`, `state.json`, `projects.json`, `settings.json` and three more). A hard link is the same file, so an in-place write by `agy` would change the operator's real file, and concurrent Google sessions share it. Measured with agy 1.5.9: hash, size and modification time of the seven files were identical before the first run, after five live probes and after 20 completed Google-lane requests on the same day; the credential file had last been written eleven days earlier. So `agy` did not write them during routed use in this sample. A token refresh was not observed, and that is the case the finding is about. Not repaired: replacing the links with copies would lose a refreshed token, and the right repair depends on how `agy` writes (in place or by rename), which is still unmeasured. |
 | ~~P01~~ | ~~High~~ | **Repaired 2026-09-08.** Found while measuring N05 on Linux: the install lock is written with Windows variables (`%USERPROFILE%`, `%LOCALAPPDATA%`, `%APPDATA%`), and on POSIX `doctor` died in path expansion before reporting a single component. On POSIX those variables now resolve to `HOME`, `XDG_DATA_HOME` (else `~/.local/share`) and `XDG_CONFIG_HOME` (else `~/.config`), backslashes become separators, and a binary that is not there is reported as missing instead of aborting the diagnosis. Measured: WSL2 `doctor` lists components; unit arms in `test/install-lock-posix-paths.test.ts`, mutation control fails 3 tests. Linux binaries are still not pinned by the lock, so on Linux `doctor` reports them missing until a POSIX lock exists. |
 
 B01's measured Google native-write bypass is closed. The live check covers direct routing with
@@ -321,6 +480,13 @@ live acceptance; near-limit input and output-budget probes were NOT_RUN in this 
   is documented, not resolved.
 - The provider CLIs, authenticated under your own accounts, at the paths and versions pinned in
   `config/install-lock.json`. Those paths are Windows paths (`%LOCALAPPDATA%`, `%USERPROFILE%`).
+- **Claude Code updates itself, and the pin follows.** The lock pins the Claude Code binary by
+  hash. When Claude Code replaces itself with a newer build, the router accepts it for the run
+  only if Windows Authenticode reports a `Valid` signature whose signer is the one named in
+  `claude.vendorSignature`, and the version did not go backwards; an unsigned, tampered,
+  differently signed or older binary is refused with a named reason. `claude-oauth doctor`
+  shows the decision under `claudeVendorUpdate`. Remove the field to get the strict exact-hash
+  pin back. Every other component stays exact-hash.
 - **Platforms.** The test suite runs on Windows and Linux (both in CI). The router itself has only
   been exercised on Windows. The shadow-lock path refuses macOS explicitly
   (`src/runtime/claude-shadow.ts`), so macOS is unsupported, not merely unmeasured.

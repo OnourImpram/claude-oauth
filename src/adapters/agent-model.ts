@@ -5,6 +5,7 @@ import { numericUsage } from "../domain/validation.js";
 import type { AgentSessionRegistry, ToolResultDelivery, TurnOutcome, TurnProgress } from "../mcp/session-registry.js";
 import { deriveMcpTools, type AnthropicToolDefinition, type McpToolResultContent, type ParkedToolCall } from "../mcp/tool-bridge.js";
 import { writeSafeLog } from "../runtime/log.js";
+import { foldToolAdditions } from "./tool-addition.js";
 type AgentModelProvider = "google" | "xai";
 export interface AgentModelRunRequest {
     readonly model: ModelRecord;
@@ -249,6 +250,44 @@ function assertCompatibleToolChoice(value: unknown): void {
         unsupported("Forced tool selection is unavailable on an agent-readonly route.");
     }
 }
+/**
+ * Folds `tool_addition` blocks out of the request before any gate reads it.
+ *
+ * MEASURED 2026-11-15 (Claude Code 2.1.325): with the mid-conversation-tool-changes /
+ * inline-tools betas the client puts `tool_addition` blocks inside a `role: "system"` message in
+ * `messages`. This lane answered the whole request 422 "contains an unsupported tool_addition
+ * block", so `--model grok -p` and every session that loaded a deferred tool failed on the
+ * agent lanes (receipts: xAI `unsupported_feature`). The API-key lanes already fold (audit
+ * D2-03); this is the same function.
+ *
+ * No prefix is withheld here: the agent lanes run on the operator's own OAuth, and the
+ * envelope's `tools` array already crosses to the agent unfiltered on this lane, `mcp__*`
+ * included. A folded definition follows the rule of the array it joins. The definitions are
+ * de-duplicated on the TRIMMED name, because the bridge trims and refuses a duplicate with 400.
+ * A `tools` value that is not an array is left alone so the existing 400 still answers it.
+ */
+function withFoldedToolAdditions(request: AdapterRequest): AdapterRequest {
+    const tools = request.envelope.tools;
+    const known = new Set<string>(Array.isArray(tools)
+        ? tools.flatMap((tool: unknown) => isRecord(tool) && typeof tool["name"] === "string" ? [tool["name"].trim()] : [])
+        : []);
+    const fold = foldToolAdditions(request.envelope.messages, known, []);
+    if (!fold.sawToolAddition)
+        return request;
+    const additions = fold.definitions.filter((definition) => {
+        const name = (definition["name"] as string).trim();
+        if (name === "" || known.has(name))
+            return false;
+        known.add(name);
+        return true;
+    });
+    writeSafeLog({ event: "agent_tool_addition_folded", level: "info", route: "mcp", code: String(additions.length),
+        remedy: "No action needed: tool definitions Claude Code added mid-conversation were folded into this turn's tool list." });
+    const offered = (tools === undefined || Array.isArray(tools)) && additions.length > 0
+        ? { tools: [...(tools ?? []), ...additions] }
+        : {};
+    return { ...request, envelope: { ...request.envelope, messages: fold.messages, ...offered } as AdapterRequest["envelope"] };
+}
 function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDrivenTools = false): CompiledPrompt {
     if (request.model.executionMode !== "agent-readonly") {
         throw new RouterError("adapter_unavailable", "The selected model is not an agent-readonly route.", 503);
@@ -398,7 +437,10 @@ function compilePrompt(request: AdapterRequest, allowToolBlocks = false, selfDri
 function localUsage(inputTokenUpperBound: number, output: string): Record<string, number> {
     return {
         input_tokens: inputTokenUpperBound,
-        output_tokens: Math.max(1, Buffer.byteLength(output, "utf8")),
+        // Audit D2-08, the B08 class on the output side: raw bytes were 3-4 times the token count
+        // and fed the same context gauge, so a 30 kB answer carried ~20k phantom tokens into the
+        // compaction arithmetic. Same bound as input: three bytes per token, never below 1.
+        output_tokens: Math.max(1, Math.ceil(Buffer.byteLength(output, "utf8") / 3)),
     };
 }
 function responseUsage(inputTokenUpperBound: number, output: string, providerUsage: unknown): Record<string, number> {
@@ -622,10 +664,13 @@ export class AgentModelAdapter implements ProviderAdapter {
     async readiness(): Promise<ProviderReadiness> {
         return await this.#readiness();
     }
-    async send(request: AdapterRequest): Promise<AdapterResponse> {
-        if (request.model.provider !== this.provider) {
+    async send(incoming: AdapterRequest): Promise<AdapterResponse> {
+        if (incoming.model.provider !== this.provider) {
             throw new RouterError("adapter_unavailable", "Provider adapter and model do not match.", 503);
         }
+        // Both gates (/v1/messages and count_tokens) and both paths (tool loop, text-only) read
+        // the SAME folded request, so they cannot disagree about a tool_addition block.
+        const request = withFoldedToolAdditions(incoming);
         // Phase 9. IF the session registry is present, this route carries a real tool
         // loop. If not, what follows is exactly today's text-only path -- not a single
         // line of it changed, and the existing agent-model tests are the receipt.
@@ -839,6 +884,10 @@ export class AgentModelAdapter implements ProviderAdapter {
                 }, this.#pingIntervalMs);
                 const onProgress: TurnProgress = (text) => {
                     if (!streamOpen || settled || text.length <= streamedChars) return;
+                    // The agent's text grew: that is the provider speaking, so the router's
+                    // silence guard is re-armed. The ping above never reaches this line, so a
+                    // turn that writes nothing is still ended at the limit (FINDING 1).
+                    request.upstreamActivity?.();
                     try {
                         if (streamedChars === 0) {
                             openTextStream(controller, request, inputTokenUpperBound, messageId);

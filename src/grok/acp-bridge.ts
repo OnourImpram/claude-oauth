@@ -12,7 +12,7 @@ import { writeSafeLog, type SafeLogEntry } from "../runtime/log.js";
 import { selectTextLines } from "../runtime/text-lines.js";
 import { readBoundedWorkspaceText } from "../security/workspace-read.js";
 import {
-    GROK_46_MODEL_ID,
+    GROK_MODEL_ID,
     GROK_AUTO_COMPACT_THRESHOLD_PERCENT,
 } from "../domain/model-contracts.js";
 export interface GrokModelMetadata {
@@ -373,7 +373,7 @@ function grokEnvironment(home: string, source: NodeJS.ProcessEnv): NodeJS.Proces
     environment["GROK_HOME"] = home;
     environment["GROK_DISABLE_API_KEY_AUTH"] = "1";
     environment["GROK_OAUTH_ENABLED"] = "1";
-    environment["GROK_DEFAULT_MODEL"] = GROK_46_MODEL_ID;
+    environment["GROK_DEFAULT_MODEL"] = GROK_MODEL_ID;
     environment["GROK_DEFAULT_SELECTED_PERMISSION"] = "reject";
     environment["GROK_FOLDER_TRUST"] = "1";
     environment["GROK_MEMORY"] = "0";

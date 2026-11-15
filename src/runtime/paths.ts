@@ -15,6 +15,8 @@ export interface RuntimePaths {
     readonly clodexHome: string;
     readonly grokHome: string;
     readonly geminiHome: string;
+    /** Record of the last Claude Code update accepted under the lock's vendor-signature policy. */
+    readonly claudeVendorUpdate: string;
 }
 export function runtimePaths(environment: NodeJS.ProcessEnv = process.env): RuntimePaths {
     const base = environment["LOCALAPPDATA"] ?? join(homedir(), ".local", "share");
@@ -43,6 +45,7 @@ export function runtimePaths(environment: NodeJS.ProcessEnv = process.env): Runt
         clodexHome: join(root, "providers", "clodex"),
         grokHome: join(root, "providers", "grok"),
         geminiHome: join(root, "providers", "gemini"),
+        claudeVendorUpdate: join(root, "claude-vendor-update.json"),
     };
 }
 const runtimeSessionIdPattern = /^[a-f0-9]{32}$/u;

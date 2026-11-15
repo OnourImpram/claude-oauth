@@ -1,15 +1,19 @@
 import type { ModelSnapshot, ProviderAdapter, ProviderId, ProviderReadiness } from "../domain/contracts.js";
+import { RouterError } from "../domain/errors.js";
+import { writeSafeLog } from "../runtime/log.js";
 import type { RuntimePaths } from "../runtime/paths.js";
 import { AnthropicAdapter } from "../adapters/anthropic.js";
 import { AgentModelAdapter } from "../adapters/agent-model.js";
 import { ClodexAdapter } from "../adapters/clodex.js";
 import { WebBridgeAdapter } from "../adapters/web-bridge.js";
+import { AnthropicApiKeyAdapter, ALIBABA_LANE, ZAI_LANE } from "../adapters/anthropic-api-key.js";
+import { OpenAiApiKeyAdapter } from "../adapters/openai-api-key.js";
 import { runAntigravityHeadless } from "../antigravity/headless-bridge.js";
 import { FixedOriginFetchTransport } from "../ports/fetch-transport.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { startClodexCapsule, type RunningClodexCapsule } from "../workers/clodex-capsule.js";
-import { isVerifiedAgentSnapshotRoute, isVerifiedOpenAiSnapshotRoute, openAiCatalogDriftReadiness } from "../domain/model-contracts.js";
+import { ALIBABA_BASE_URL, OPENAI_API_BASE_URL, ZAI_BASE_URL, isVerifiedAgentSnapshotRoute, isVerifiedOpenAiSnapshotRoute, openAiCatalogDriftReadiness } from "../domain/model-contracts.js";
 import { runGrokAcp } from "../grok/acp-bridge.js";
 import type { AgentSessionRegistry } from "../mcp/session-registry.js";
 export interface ProviderSet {
@@ -56,6 +60,27 @@ export function defaultWebBridgeAdapter(home: string = homedir()): WebBridgeAdap
         chromeCdpUrl: "http://127.0.0.1:9222",
     });
 }
+/**
+ * Alibaba Token Plan lane adapter (Anthropic-protocol passthrough, `x-api-key`). One
+ * constructor for refresh (cli.ts) and serving (below); the fixed HTTPS origin is enforced by
+ * the transport and the key is resolved per call from `environment`.
+ * DATA RULE: public or synthetic material only (see ALIBABA_MODEL_CONTRACTS).
+ */
+export function defaultAlibabaAdapter(environment: NodeJS.ProcessEnv): AnthropicApiKeyAdapter {
+    return new AnthropicApiKeyAdapter(new FixedOriginFetchTransport(new URL(ALIBABA_BASE_URL)), ALIBABA_LANE, environment);
+}
+/** Z.AI lane adapter, same shape as the Alibaba lane. */
+export function defaultZaiAdapter(environment: NodeJS.ProcessEnv): AnthropicApiKeyAdapter {
+    return new AnthropicApiKeyAdapter(new FixedOriginFetchTransport(new URL(ZAI_BASE_URL)), ZAI_LANE, environment);
+}
+/**
+ * OpenAI API-key lane adapter (chat completions via the shared Messages translation,
+ * `authorization: Bearer`). Distinct from the `openai` ChatGPT-OAuth/clodex lane, which is
+ * untouched. DATA RULE: public or synthetic material only.
+ */
+export function defaultOpenAiApiKeyAdapter(environment: NodeJS.ProcessEnv): OpenAiApiKeyAdapter {
+    return new OpenAiApiKeyAdapter(new FixedOriginFetchTransport(new URL(OPENAI_API_BASE_URL)), environment);
+}
 export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePaths, clodexNonce: string, externalRuntime?: ExternalAgentRuntime): Promise<ProviderSet> {
     const adapters = new Map<ProviderId, ProviderAdapter>();
     const readiness: ProviderReadiness[] = [];
@@ -70,6 +95,22 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
         const web = defaultWebBridgeAdapter();
         adapters.set("web", web);
         readiness.push(await web.readiness());
+    }
+    // The API-key lanes (alibaba / zai / openaiapi): a lane that is down keeps its adapter
+    // (same rule as the web lane). The adapter
+    // stays registered even when its key is missing, so a request against the lane answers with
+    // the named remedy (`alibaba_key_missing`, `zai_key_missing`, `openaiapi_key_missing`)
+    // instead of a bare "adapter unavailable".
+    for (const lane of [
+        { id: "alibaba", build: defaultAlibabaAdapter },
+        { id: "zai", build: defaultZaiAdapter },
+        { id: "openaiapi", build: defaultOpenAiApiKeyAdapter },
+    ] as const) {
+        if (requestedProviders.has(lane.id) && externalRuntime?.disabledProviders?.has(lane.id) !== true) {
+            const adapter = lane.build(externalRuntime?.environment ?? process.env);
+            adapters.set(lane.id, adapter);
+            readiness.push(await adapter.readiness());
+        }
     }
     if (requestedProviders.has("openai")) {
         try {
@@ -99,7 +140,8 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
                     await capsule.close();
             }
         }
-        catch {
+        catch (error) {
+            writeSafeLog({ event: "provider_start_failed", level: "warn", provider: "openai", ...describeProviderStartFailure(error) });
             readiness.push(unavailable("openai", "clodex_auth_or_startup_failed"));
         }
     }
@@ -121,7 +163,7 @@ export async function startProviderSet(snapshot: ModelSnapshot, paths: RuntimePa
                 ...(externalRuntime.grokSessions === undefined
                     ? {}
                     : { sessions: externalRuntime.grokSessions }),
-                readiness: async () => ready("xai", "grok_4_6_acp_snapshot_verified"),
+                readiness: async () => ready("xai", "grok_acp_snapshot_verified"),
                 run: async ({ model, prompt, signal }) => {
                     const result = await runGrokAcp({
                         binary: externalRuntime.grokBinary,
@@ -230,4 +272,18 @@ export async function startCatalogProviders(paths: RuntimePaths, clodexNonce: st
             await clodex?.close();
         },
     };
+}
+/**
+ * What a provider's failed start leaves in router.log (audit D1-04, 2026-11-15). The serving
+ * path swallowed every OpenAI-lane failure into one readiness code and wrote nothing, so a
+ * capsule that would not spawn, a stale entrypoint hash and an expired ChatGPT login read the
+ * same although their remedies are opposite. A RouterError's message is author-written and
+ * carries the remedy; a foreign error contributes its name only.
+ */
+export function describeProviderStartFailure(error: unknown): { readonly code: string; readonly remedy?: string; readonly errorName?: string } {
+    if (error instanceof RouterError)
+        return { code: error.code, remedy: error.message.slice(0, 300) };
+    if (error instanceof Error)
+        return { code: "provider_start_failed", errorName: error.name };
+    return { code: "provider_start_failed" };
 }
