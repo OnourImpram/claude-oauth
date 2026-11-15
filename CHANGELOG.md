@@ -7,6 +7,11 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+## [2.0.0], pre-release, 2026-11-15
+
+First tagged release, numbered 2.0.0. The entries below were recorded as unreleased until this
+tag.
+
 ### Fixed: a one-shot Google task gets the time its caller asked for (2026-11-15)
 
 - The one-shot commands `gemini`, `opus-google`, `sonnet-google` and `antigravity --model` take
@@ -963,4 +968,5 @@ passes and repaired where a repair was narrow enough to carry its own regression
 B01, B02, B03, B04, B05, B06, G01, G02, G03, G04, G08, N01, N06. None are closed by this
 version; several require an authority or capability contract decision before code.
 
+[2.0.0]: https://github.com/OnourImpram/claude-oauth/releases/tag/v2.0.0
 [0.1.0]: https://github.com/OnourImpram/claude-oauth
