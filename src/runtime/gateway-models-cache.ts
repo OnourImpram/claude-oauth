@@ -27,7 +27,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { PinnedPortHolder } from "./loopback-port.js";
 
 export interface GatewayModelsCacheEntry {
     readonly id: string;
@@ -147,64 +146,11 @@ export async function gatewayModelsCacheStatus(path: string, liveBaseUrl: string
     return { status: "stale", cachedBaseUrl: cache.baseUrl, liveBaseUrl: live, modelCount: cache.models.length };
 }
 
-/**
- * A1/A3 rule (plan of 2026-09-02): the cache is written ONLY when bound to the fixed port.
- * Claude Code keeps a single file; if a second session on an ephemeral port writes it, it
- * overwrites the picker of the session on the fixed port. The second session does not write:
- * there the external models are still reachable by their identities (--model ...), only the
- * /model list stays empty, and that is logged BY NAME through the
- * gateway_models_cache_skipped event -- not silently.
- *
- * 2026-11-16: the rule protects a ROUTER session's picker. When the pinned port is held by a
- * process that is not a router ("foreign"), or nobody holds it any more ("free"), there is no
- * picker to protect and the ephemeral session writes the cache with its own address. An
- * unanswered probe ("unknown") keeps the conservative skip.
- */
-export function shouldWriteGatewayModelsCache(
-    livePort: number,
-    preferredPort: number,
-    pinnedHolder: PinnedPortHolder = "unknown",
-    cacheHolder?: PinnedPortHolder,
-): boolean {
-    if (livePort === preferredPort)
-        return true;
-    if (pinnedHolder !== "foreign" && pinnedHolder !== "free")
-        return false;
-    // 2026-11-16 (OCR review of 71184c7): with a foreign holder on the pinned port, every window is
-    // ephemeral. The cache may already belong to another live window; that window's picker is protected
-    // exactly as the pinned session's is. cacheHolder is the answer of the port the cache points at;
-    // undefined means there is no readable cache, or it points at the pinned port or at this session.
-    return cacheHolder === undefined || cacheHolder === "foreign" || cacheHolder === "free";
-}
-
-/** The port the current picker cache points at, or undefined when there is no readable cache. */
-export async function cachedGatewayPort(path: string): Promise<number | undefined> {
-    let cache: GatewayModelsCache | undefined;
-    try {
-        cache = await readGatewayModelsCache(path);
-    }
-    catch {
-        return undefined;
-    }
-    if (cache === undefined)
-        return undefined;
-    try {
-        const port = Number.parseInt(new URL(cache.baseUrl).port, 10);
-        return Number.isInteger(port) && port > 0 ? port : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
-
-/** Why an ephemeral session leaves the picker cache alone; named in the log and on stderr. */
-export function gatewayCacheSkipReason(pinnedHolder: PinnedPortHolder | undefined, cacheHolder: PinnedPortHolder | undefined): string {
-    if (pinnedHolder === "router")
-        return "another claude-oauth session holds it";
-    if (cacheHolder === "router")
-        return "it is held by another program, and another claude-oauth session on an ephemeral port owns the picker cache";
-    return "its holder did not answer, so it is treated as another claude-oauth session";
-}
+// Every launch writes this file with its own address, whatever port it is on (2026-11-16). The earlier
+// rule -- only the session on the pinned port writes -- assumed a later write takes the picker from a
+// running session. Claude Code 2.1.325 reads the file once at startup and keeps it in memory, so it
+// does not; the rule only left every parallel window but one with the native list. The write is
+// serialised by picker-cache-lock.ts so each Claude reads its own address.
 
 /** Doctor's pickerCache arm: a detector ships with its remedy; "matches" carries none. */
 export function gatewayModelsCacheRemedy(status: GatewayModelsCacheStatus): string | undefined {
@@ -212,7 +158,7 @@ export function gatewayModelsCacheRemedy(status: GatewayModelsCacheStatus): stri
         case "matches":
             return undefined;
         case "stale":
-            return `Picker cache is keyed to ${status.cachedBaseUrl} but the router listens on ${status.liveBaseUrl}: relaunch through the launcher on the pinned port; the router rewrites this file at launch.`;
+            return `Picker cache is keyed to ${status.cachedBaseUrl} but the router listens on ${status.liveBaseUrl}: relaunch through the launcher; every launch rewrites this file with its own address.`;
         case "missing":
             return `No picker cache at ${status.path}: launch once through the launcher; the router writes it.`;
         case "unreadable":

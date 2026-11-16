@@ -24,8 +24,9 @@ import { readSupervisorStatus, startSupervisorIpc, type SupervisorStatus } from 
 import { startProviderSet } from "./provider-set.js";
 import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, autoCompactWindowForModel } from "../domain/model-contracts.js";
 import type { ClaudeClientMode } from "../runtime/install-lock.js";
-import { preferredLoopbackPort, probePinnedPortHolder, type PinnedPortHolder } from "../runtime/loopback-port.js";
-import { cachedGatewayPort, gatewayCacheSkipReason, gatewayModelsCachePath, projectDiscoveryPayload, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
+import { preferredLoopbackPort, probePinnedPortHolder } from "../runtime/loopback-port.js";
+import { claudeConfigDirectory, gatewayModelsCachePath, projectDiscoveryPayload, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
+import { acquirePickerCacheLock, claudeSessionRecordPath, pickerCacheLockPath, releaseWhenClaudeStarted } from "../runtime/picker-cache-lock.js";
 import { routeConsoleToLog, writeSafeLog } from "../runtime/log.js";
 import type { McpToolBridge } from "../mcp/tool-bridge.js";
 
@@ -471,46 +472,41 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         // CONTINUES: an empty picker is a defect, `claude` not starting is a breakage.
         const gatewayCachePath = gatewayModelsCachePath(environment);
         const pinnedPort = preferredLoopbackPort(environment);
-        const pinnedHolder: PinnedPortHolder | undefined = router.port === pinnedPort ? undefined : await probePinnedPortHolder(pinnedPort);
-        // A second ephemeral window must not take the picker from a first one (OCR review of
-        // 71184c7, 2026-11-16): ask who serves the port the current cache points at.
-        let cacheHolder: PinnedPortHolder | undefined;
-        if (pinnedHolder === "foreign" || pinnedHolder === "free") {
-            const cachedPort = await cachedGatewayPort(gatewayCachePath);
-            if (cachedPort !== undefined && cachedPort !== pinnedPort && cachedPort !== router.port)
-                cacheHolder = await probePinnedPortHolder(cachedPort);
+        if (router.port !== pinnedPort && (await probePinnedPortHolder(pinnedPort)) === "foreign") {
+            // Diagnosis only: a program that is not a claude-oauth router holds the pinned port.
+            writeSafeLog({
+                event: "loopback_pinned_port_foreign",
+                level: "warn",
+                code: `holder=foreign;port=${router.port}`,
+                remedy: `Port ${pinnedPort} is held by a program that is not a claude-oauth router; this window uses ${router.port} and its /model list is unaffected. If that program should not hold the port, stop it (netstat -ano | findstr :${pinnedPort}) or set HEZARFEN_ROUTER_PORT.`,
+            });
         }
-        if (!shouldWriteGatewayModelsCache(router.port, pinnedPort, pinnedHolder, cacheHolder)) {
-            // A3: a session on an ephemeral port must not overwrite the picker of the session on
-            // the fixed port.
-            const remedy = `Router is on an ephemeral port, not ${pinnedPort} (${gatewayCacheSkipReason(pinnedHolder, cacheHolder)}): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`;
-            writeSafeLog({ event: "gateway_models_cache_skipped", level: "warn", code: `port=${router.port}`, remedy });
-            // Measured 2026-09-14: an operator with two windows read the missing picker as a
-            // bug in one of them; the log line alone never reached the terminal.
-            process.stderr.write(`claude-oauth: second window on port ${router.port}. ${remedy}\n`);
+        // Parallel windows (2026-11-16): every window writes the cache with its own address, under a
+        // lock held until its Claude has read the file (picker-cache-lock.ts header).
+        const pickerLock = await acquirePickerCacheLock(pickerCacheLockPath(gatewayCachePath));
+        if (pickerLock.waitedMs >= 1_000)
+            process.stderr.write(`claude-oauth: waited ${Math.round(pickerLock.waitedMs / 1_000)} s for another claude-oauth window to start, so that each window keeps its own /model list.\n`);
+        if (!pickerLock.acquired) {
+            writeSafeLog({
+                event: "gateway_models_cache_lock_unavailable",
+                level: "warn",
+                code: `waited_ms=${pickerLock.waitedMs}`,
+                remedy: `The /model picker lock (${pickerCacheLockPath(gatewayCachePath)}) could not be taken; this window writes the cache anyway. If a window that opened at the same moment lists only the native models, reopen that window.`,
+            });
         }
-        else {
-            if (pinnedHolder !== undefined) {
-                writeSafeLog({
-                    event: "loopback_pinned_port_foreign",
-                    level: "warn",
-                    code: `holder=${pinnedHolder};port=${router.port}`,
-                    remedy: `Port ${pinnedPort} ${pinnedHolder === "free" ? "is no longer held" : "is held by a process that is not a claude-oauth router"}, and no other claude-oauth session owns the picker cache: this session wrote the /model cache with its own address (port ${router.port}) and the picker lists external models here. To get the stable address back, stop the process on ${pinnedPort} (netstat -ano | findstr :${pinnedPort}) or set HEZARFEN_ROUTER_PORT.`,
-                });
-            }
-            try {
-                const written = await writeGatewayModelsCache(gatewayCachePath, router.baseUrl, projectDiscoveryPayload(registry.discoveryPayload()));
-                writeSafeLog({ event: "gateway_models_cache_written", level: "info", code: `models=${written.models.length}`, remedy: `${written.baseUrl} -> ${gatewayCachePath}` });
-            }
-            catch (error) {
-                writeSafeLog({
-                    event: "gateway_models_cache_write_failed",
-                    level: "warn",
-                    code: (error as NodeJS.ErrnoException).code ?? "write_failed",
-                    remedy: `The /model picker will not list external models this session (${gatewayCachePath}). Check that the cache directory is writable; the router keeps running.`,
-                });
-            }
+        try {
+            const written = await writeGatewayModelsCache(gatewayCachePath, router.baseUrl, projectDiscoveryPayload(registry.discoveryPayload()));
+            writeSafeLog({ event: "gateway_models_cache_written", level: "info", code: `models=${written.models.length}`, remedy: `${written.baseUrl} -> ${gatewayCachePath}` });
         }
+        catch (error) {
+            writeSafeLog({
+                event: "gateway_models_cache_write_failed",
+                level: "warn",
+                code: (error as NodeJS.ErrnoException).code ?? "write_failed",
+                remedy: `The /model picker will not list external models this session (${gatewayCachePath}). Check that the cache directory is writable; the router keeps running.`,
+            });
+        }
+        let stopPickerWatch: (() => void) | undefined;
         const startedAt = new Date().toISOString();
         const models = registry.list().map((model) => model.id);
         const providers = providerSet.readiness;
@@ -521,12 +517,19 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
             await writeSupervisorState(paths.state, status());
             const claudeBinary = expandLockedPath(installLock.claudeShadow.executable, environment);
             const interactiveRunner = options.interactiveRunner ?? runInteractive;
+            // The lock is released once Claude has written its session record (it has read the cache
+            // by then), or below when Claude exits first.
             return await interactiveRunner(claudeBinary, claudeOAuthAgentArguments(options.args, models, prepared.clientMode), {
                 cwd: options.cwd,
                 environment: claudeRouterEnvironment(router.baseUrl, sessionNonce, environment, requestedModelArgument(options.args)),
+                onSpawn: (pid) => {
+                    stopPickerWatch = releaseWhenClaudeStarted(pickerLock, claudeSessionRecordPath(claudeConfigDirectory(environment), pid), Date.now());
+                },
             });
         }
         finally {
+            stopPickerWatch?.();
+            await pickerLock.release();
             await ipc?.close().catch(() => undefined);
             await sessions.close();
             await router.close().catch(() => undefined);

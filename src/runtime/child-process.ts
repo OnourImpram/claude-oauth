@@ -13,6 +13,8 @@ export interface ProcessOptions {
     /** Grace after SIGTERM before SIGKILL and unconditional timeout rejection. Defaults to 100 ms. */
     readonly terminationGraceMs?: number;
     readonly maximumOutputBytes?: number;
+    /** runInteractive: called with the child's process id right after spawn. */
+    readonly onSpawn?: (pid: number) => void;
 }
 function needsShell(command: string): boolean {
     return process.platform === "win32" && [".cmd", ".bat"].includes(extname(command).toLowerCase());
@@ -25,6 +27,8 @@ export async function runInteractive(command: string, args: readonly string[], o
         stdio: "inherit",
         windowsHide: false,
     });
+    if (child.pid !== undefined)
+        options.onSpawn?.(child.pid);
     return await new Promise((resolveExit, rejectExit) => {
         child.once("error", rejectExit);
         child.once("exit", (code, signal) => {

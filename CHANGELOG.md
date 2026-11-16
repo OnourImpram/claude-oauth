@@ -7,6 +7,21 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: parallel windows each keep their own /model list (2026-11-16)
+
+With three `claude-oauth` windows open, only the one on port 8791 listed the external models; the two
+on ephemeral ports showed the native list. Since 2.0.0 a window on an ephemeral port left the picker
+cache alone to protect the window on 8791. Claude Code 2.1.325 reads that cache once, at startup, and
+keeps it in memory, so a later write never takes the list from a running window; the protection only
+left the other windows empty. Every window now writes the cache with its own address, under a lock
+held until its Claude has read the file. The release signal is Claude's own session record,
+`sessions/<pid>.json`, measured 0.43 to 0.83 s after the read with three processes started together;
+a fixed 8 s hold failed that test, because under load the read came 10.8 s after the write. The lock
+is also released when Claude exits, and after 30 s at most. A window that opens meanwhile waits and
+says so on stderr. A lock whose owner died or whose deadline passed is taken over; after 45 s a
+window proceeds without it. Tests in `test/picker-cache-lock.test.ts`; five mutations of the lock
+each fail them.
+
 ## [2.0.2], 2026-11-16
 
 A patch release for the gap a review of 2.0.1 found.

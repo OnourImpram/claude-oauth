@@ -10,7 +10,6 @@ import {
     gatewayModelsCacheStatus,
     projectDiscoveryPayload,
     readGatewayModelsCache,
-    shouldWriteGatewayModelsCache,
     writeGatewayModelsCache,
 } from "../src/runtime/gateway-models-cache.js";
 
@@ -113,13 +112,6 @@ describe("gateway-models-cache", () => {
         const status = await gatewayModelsCacheStatus(path, "http://127.0.0.1:8791");
         assert.equal(status.status, "unreadable");
         assert.match((status as { reason: string }).reason, /baseUrl|fetchedAt|models/u);
-    });
-
-    it("A1/A3: writes only when the router holds the pinned port", () => {
-        assert.equal(shouldWriteGatewayModelsCache(8791, 8791), true, "pinned session writes");
-        assert.equal(shouldWriteGatewayModelsCache(9000, 9000), true, "HEZARFEN_ROUTER_PORT override is the pin");
-        // NEGATIVE ARM -- the measured fault: an ephemeral port (51654) does not overwrite the pinned session's cache.
-        assert.equal(shouldWriteGatewayModelsCache(51654, 8791), false, "ephemeral session skips");
     });
 
     it("every non-matching status carries a remedy naming what to do; matches carries none", async () => {

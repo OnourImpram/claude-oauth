@@ -5,7 +5,7 @@
 // session held the port, and /model listed only native models. Each arm below is one answer a
 // holder can give; the last block ties the answer to the cache decision.
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { createServer as createNetServer, type Server as NetServer, type Socket } from "node:net";
 import { once } from "node:events";
@@ -16,7 +16,6 @@ import { after, describe, it } from "node:test";
 import type { ModelSnapshot } from "../src/domain/contracts.js";
 import { ModelRegistry } from "../src/domain/registry.js";
 import { startRouterServer } from "../src/router/server.js";
-import { cachedGatewayPort, gatewayCacheSkipReason, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../src/runtime/gateway-models-cache.js";
 import { allocateLoopbackPort, probePinnedPortHolder, ROUTER_IDENTITY_HEADER } from "../src/runtime/loopback-port.js";
 import { ReceiptStore } from "../src/runtime/receipt-store.js";
 
@@ -126,44 +125,3 @@ describe("probePinnedPortHolder", () => {
     });
 });
 
-describe("the picker cache follows the holder", () => {
-    it("the pinned session always writes", () => {
-        assert.equal(shouldWriteGatewayModelsCache(8791, 8791, undefined), true);
-    });
-    it("an ephemeral session writes when no router session's picker is at stake", () => {
-        assert.equal(shouldWriteGatewayModelsCache(55390, 8791, "foreign"), true, "the measured case");
-        assert.equal(shouldWriteGatewayModelsCache(55390, 8791, "free"), true);
-    });
-    it("an ephemeral session never overwrites a router session's picker, nor guesses", () => {
-        assert.equal(shouldWriteGatewayModelsCache(55390, 8791, "router"), false);
-        assert.equal(shouldWriteGatewayModelsCache(55390, 8791, "unknown"), false);
-        assert.equal(shouldWriteGatewayModelsCache(55390, 8791), false, "no answer recorded is no permission");
-    });
-    // OCR review of 71184c7 (2026-11-16): with a foreign holder on 8791, two windows are both
-    // ephemeral; the second must not take the picker from the first.
-    it("a foreign holder does not license overwriting another ephemeral window's cache", () => {
-        assert.equal(shouldWriteGatewayModelsCache(51401, 8791, "foreign", "router"), false, "the measured two-window case");
-        assert.equal(shouldWriteGatewayModelsCache(51401, 8791, "foreign", "unknown"), false);
-        assert.equal(shouldWriteGatewayModelsCache(51401, 8791, "foreign", "foreign"), true, "the cache points at a dead or foreign port");
-        assert.equal(shouldWriteGatewayModelsCache(51401, 8791, "free", "free"), true);
-        assert.equal(shouldWriteGatewayModelsCache(51401, 8791, "foreign", undefined), true, "no readable cache");
-    });
-    it("names why it skipped, for each holder", () => {
-        assert.match(gatewayCacheSkipReason("router", undefined), /another claude-oauth session holds it/u);
-        assert.match(gatewayCacheSkipReason("foreign", "router"), /owns the picker cache/u);
-        assert.match(gatewayCacheSkipReason("unknown", undefined), /did not answer/u);
-    });
-});
-
-describe("cachedGatewayPort", () => {
-    it("reads the port the picker cache points at, and nothing from a missing or broken file", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "cache-port-"));
-        closers.push(() => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-        const path = join(directory, "gateway-models.json");
-        assert.equal(await cachedGatewayPort(path), undefined, "missing");
-        await writeGatewayModelsCache(path, "http://127.0.0.1:55390", []);
-        assert.equal(await cachedGatewayPort(path), 55390);
-        await writeFile(path, "{ not json", "utf8");
-        assert.equal(await cachedGatewayPort(path), undefined, "broken");
-    });
-});
