@@ -1,8 +1,8 @@
 # Security
 
-## Status: version 2.0.1, with three known open defects
+## Status: version 2.0.2, with three known open defects
 
-Version 2.0.1 is ready to use on Windows. The design, the claims and the defects, open and
+Version 2.0.2 is ready to use on Windows. The design, the claims and the defects, open and
 repaired, are published so that they can be read and reproduced. Security-relevant defects and
 their repair status are listed here first; the README's Known gaps table is the complete ledger:
 

@@ -7,6 +7,10 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+## [2.0.2], 2026-11-16
+
+A patch release for the gap a review of 2.0.1 found.
+
 ### Fixed: a second ephemeral window no longer takes the picker from the first (2026-11-16)
 
 A review of the 2.0.1 fix with OpenCodeReview found the gap it left: when a foreign process holds port
@@ -1007,6 +1011,7 @@ passes and repaired where a repair was narrow enough to carry its own regression
 B01, B02, B03, B04, B05, B06, G01, G02, G03, G04, G08, N01, N06. None are closed by this
 version; several require an authority or capability contract decision before code.
 
+[2.0.2]: https://github.com/OnourImpram/claude-oauth/releases/tag/v2.0.2
 [2.0.1]: https://github.com/OnourImpram/claude-oauth/releases/tag/v2.0.1
 [2.0.0]: https://github.com/OnourImpram/claude-oauth/releases/tag/v2.0.0
 [0.1.0]: https://github.com/OnourImpram/claude-oauth
