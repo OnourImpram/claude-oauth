@@ -160,10 +160,50 @@ export async function gatewayModelsCacheStatus(path: string, liveBaseUrl: string
  * picker to protect and the ephemeral session writes the cache with its own address. An
  * unanswered probe ("unknown") keeps the conservative skip.
  */
-export function shouldWriteGatewayModelsCache(livePort: number, preferredPort: number, pinnedHolder: PinnedPortHolder = "unknown"): boolean {
+export function shouldWriteGatewayModelsCache(
+    livePort: number,
+    preferredPort: number,
+    pinnedHolder: PinnedPortHolder = "unknown",
+    cacheHolder?: PinnedPortHolder,
+): boolean {
     if (livePort === preferredPort)
         return true;
-    return pinnedHolder === "foreign" || pinnedHolder === "free";
+    if (pinnedHolder !== "foreign" && pinnedHolder !== "free")
+        return false;
+    // 2026-11-16 (OCR review of 71184c7): with a foreign holder on the pinned port, every window is
+    // ephemeral. The cache may already belong to another live window; that window's picker is protected
+    // exactly as the pinned session's is. cacheHolder is the answer of the port the cache points at;
+    // undefined means there is no readable cache, or it points at the pinned port or at this session.
+    return cacheHolder === undefined || cacheHolder === "foreign" || cacheHolder === "free";
+}
+
+/** The port the current picker cache points at, or undefined when there is no readable cache. */
+export async function cachedGatewayPort(path: string): Promise<number | undefined> {
+    let cache: GatewayModelsCache | undefined;
+    try {
+        cache = await readGatewayModelsCache(path);
+    }
+    catch {
+        return undefined;
+    }
+    if (cache === undefined)
+        return undefined;
+    try {
+        const port = Number.parseInt(new URL(cache.baseUrl).port, 10);
+        return Number.isInteger(port) && port > 0 ? port : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+
+/** Why an ephemeral session leaves the picker cache alone; named in the log and on stderr. */
+export function gatewayCacheSkipReason(pinnedHolder: PinnedPortHolder | undefined, cacheHolder: PinnedPortHolder | undefined): string {
+    if (pinnedHolder === "router")
+        return "another claude-oauth session holds it";
+    if (cacheHolder === "router")
+        return "it is held by another program, and another claude-oauth session on an ephemeral port owns the picker cache";
+    return "its holder did not answer, so it is treated as another claude-oauth session";
 }
 
 /** Doctor's pickerCache arm: a detector ships with its remedy; "matches" carries none. */

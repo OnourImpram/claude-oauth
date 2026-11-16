@@ -7,6 +7,16 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: a second ephemeral window no longer takes the picker from the first (2026-11-16)
+
+A review of the 2.0.1 fix with OpenCodeReview found the gap it left: when a foreign process holds port
+8791, every `claude-oauth` window is ephemeral, and each new window rewrote the picker cache with its own
+address, so the window before it lost its external models. The launcher now also asks who serves the
+port the current cache points at; a live router there keeps its cache, and the log names why
+(`gatewayCacheSkipReason`). The `loopback_pinned_port_foreign` warning no longer says the port is held
+when it is free. Tests in `test/pinned-port-holder.test.ts`; a mutation that ignores the cache's owner
+fails them.
+
 ## [2.0.1], 2026-11-16
 
 A patch release: the pinned-port fix below, and the status statements of 2026-11-15.

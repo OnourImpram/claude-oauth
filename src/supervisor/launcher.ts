@@ -25,7 +25,7 @@ import { startProviderSet } from "./provider-set.js";
 import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, autoCompactWindowForModel } from "../domain/model-contracts.js";
 import type { ClaudeClientMode } from "../runtime/install-lock.js";
 import { preferredLoopbackPort, probePinnedPortHolder, type PinnedPortHolder } from "../runtime/loopback-port.js";
-import { gatewayModelsCachePath, projectDiscoveryPayload, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
+import { cachedGatewayPort, gatewayCacheSkipReason, gatewayModelsCachePath, projectDiscoveryPayload, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
 import { routeConsoleToLog, writeSafeLog } from "../runtime/log.js";
 import type { McpToolBridge } from "../mcp/tool-bridge.js";
 
@@ -472,10 +472,18 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         const gatewayCachePath = gatewayModelsCachePath(environment);
         const pinnedPort = preferredLoopbackPort(environment);
         const pinnedHolder: PinnedPortHolder | undefined = router.port === pinnedPort ? undefined : await probePinnedPortHolder(pinnedPort);
-        if (!shouldWriteGatewayModelsCache(router.port, pinnedPort, pinnedHolder)) {
+        // A second ephemeral window must not take the picker from a first one (OCR review of
+        // 71184c7, 2026-11-16): ask who serves the port the current cache points at.
+        let cacheHolder: PinnedPortHolder | undefined;
+        if (pinnedHolder === "foreign" || pinnedHolder === "free") {
+            const cachedPort = await cachedGatewayPort(gatewayCachePath);
+            if (cachedPort !== undefined && cachedPort !== pinnedPort && cachedPort !== router.port)
+                cacheHolder = await probePinnedPortHolder(cachedPort);
+        }
+        if (!shouldWriteGatewayModelsCache(router.port, pinnedPort, pinnedHolder, cacheHolder)) {
             // A3: a session on an ephemeral port must not overwrite the picker of the session on
             // the fixed port.
-            const remedy = `Router is on an ephemeral port, not ${pinnedPort} (${pinnedHolder === "router" ? "another claude-oauth session holds it" : "its holder did not answer, so it is treated as another claude-oauth session"}): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`;
+            const remedy = `Router is on an ephemeral port, not ${pinnedPort} (${gatewayCacheSkipReason(pinnedHolder, cacheHolder)}): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`;
             writeSafeLog({ event: "gateway_models_cache_skipped", level: "warn", code: `port=${router.port}`, remedy });
             // Measured 2026-09-14: an operator with two windows read the missing picker as a
             // bug in one of them; the log line alone never reached the terminal.
@@ -487,7 +495,7 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
                     event: "loopback_pinned_port_foreign",
                     level: "warn",
                     code: `holder=${pinnedHolder};port=${router.port}`,
-                    remedy: `Port ${pinnedPort} is held by a process that is not a claude-oauth router, so no router session's picker is at stake: this session wrote the /model cache with its own address (port ${router.port}) and the picker lists external models here. To get the stable address back, stop the process on ${pinnedPort} (netstat -ano | findstr :${pinnedPort}) or set HEZARFEN_ROUTER_PORT.`,
+                    remedy: `Port ${pinnedPort} ${pinnedHolder === "free" ? "is no longer held" : "is held by a process that is not a claude-oauth router"}, and no other claude-oauth session owns the picker cache: this session wrote the /model cache with its own address (port ${router.port}) and the picker lists external models here. To get the stable address back, stop the process on ${pinnedPort} (netstat -ano | findstr :${pinnedPort}) or set HEZARFEN_ROUTER_PORT.`,
                 });
             }
             try {
