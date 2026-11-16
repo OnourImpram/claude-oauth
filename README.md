@@ -31,7 +31,7 @@ Claude path.** `claude` stays native. `claude-oauth` opens the router.
   [Known gaps](#known-gaps) and in [CHANGELOG.md](CHANGELOG.md); the router itself has only been
   exercised on Windows, macOS is unsupported, and no release builder is documented yet.
 
-> **Status: version 2.0.0, ready to use on Windows.**
+> **Status: version 2.0.1, ready to use on Windows.**
 > The defects that kept this README saying "not ready" since September are repaired and measured:
 > 23 of the 26 rows under [Known gaps](#known-gaps) are closed, B04 with a documented residual scope.
 > Three are open: N07 and N08 (Low, only in the non-default `patched-shadow` mode) and N09 (Medium,

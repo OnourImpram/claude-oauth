@@ -7,6 +7,10 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+## [2.0.1], 2026-11-16
+
+A patch release: the pinned-port fix below, and the status statements of 2026-11-15.
+
 ### Fixed: a foreign process on the pinned port no longer empties `/model` (2026-11-16)
 
 A local HTTP helper of another tool held port 8791 for hours. Each `claude-oauth` window then fell
@@ -993,5 +997,6 @@ passes and repaired where a repair was narrow enough to carry its own regression
 B01, B02, B03, B04, B05, B06, G01, G02, G03, G04, G08, N01, N06. None are closed by this
 version; several require an authority or capability contract decision before code.
 
+[2.0.1]: https://github.com/OnourImpram/claude-oauth/releases/tag/v2.0.1
 [2.0.0]: https://github.com/OnourImpram/claude-oauth/releases/tag/v2.0.0
 [0.1.0]: https://github.com/OnourImpram/claude-oauth

@@ -1,6 +1,6 @@
 # claude-oauth
 
-> Loopback router that starts a real Claude Code process so Google, xAI and OpenAI models run over your own OAuth sessions, alongside ChatGPT Web via Agent Web Bridge and router-held API-key lanes for Alibaba Token Plan, Z.AI and OpenAI API. Installing it does not degrade native Claude Code: `claude` still talks to `api.anthropic.com`. Version 2.0.0 is ready to use on Windows; open and repaired defects are listed by id.
+> Loopback router that starts a real Claude Code process so Google, xAI and OpenAI models run over your own OAuth sessions, alongside ChatGPT Web via Agent Web Bridge and router-held API-key lanes for Alibaba Token Plan, Z.AI and OpenAI API. Installing it does not degrade native Claude Code: `claude` still talks to `api.anthropic.com`. Version 2.0.1 is ready to use on Windows; open and repaired defects are listed by id.
 
 ## Core
 
