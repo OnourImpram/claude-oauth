@@ -27,6 +27,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { PinnedPortHolder } from "./loopback-port.js";
 
 export interface GatewayModelsCacheEntry {
     readonly id: string;
@@ -153,9 +154,16 @@ export async function gatewayModelsCacheStatus(path: string, liveBaseUrl: string
  * there the external models are still reachable by their identities (--model ...), only the
  * /model list stays empty, and that is logged BY NAME through the
  * gateway_models_cache_skipped event -- not silently.
+ *
+ * 2026-11-16: the rule protects a ROUTER session's picker. When the pinned port is held by a
+ * process that is not a router ("foreign"), or nobody holds it any more ("free"), there is no
+ * picker to protect and the ephemeral session writes the cache with its own address. An
+ * unanswered probe ("unknown") keeps the conservative skip.
  */
-export function shouldWriteGatewayModelsCache(livePort: number, preferredPort: number): boolean {
-    return livePort === preferredPort;
+export function shouldWriteGatewayModelsCache(livePort: number, preferredPort: number, pinnedHolder: PinnedPortHolder = "unknown"): boolean {
+    if (livePort === preferredPort)
+        return true;
+    return pinnedHolder === "foreign" || pinnedHolder === "free";
 }
 
 /** Doctor's pickerCache arm: a detector ships with its remedy; "matches" carries none. */

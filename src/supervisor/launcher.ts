@@ -24,7 +24,7 @@ import { readSupervisorStatus, startSupervisorIpc, type SupervisorStatus } from 
 import { startProviderSet } from "./provider-set.js";
 import { AGENT_MODEL_CONTRACTS, OPENAI_MODEL_CONTRACTS, autoCompactWindowForModel } from "../domain/model-contracts.js";
 import type { ClaudeClientMode } from "../runtime/install-lock.js";
-import { preferredLoopbackPort } from "../runtime/loopback-port.js";
+import { preferredLoopbackPort, probePinnedPortHolder, type PinnedPortHolder } from "../runtime/loopback-port.js";
 import { gatewayModelsCachePath, projectDiscoveryPayload, shouldWriteGatewayModelsCache, writeGatewayModelsCache } from "../runtime/gateway-models-cache.js";
 import { routeConsoleToLog, writeSafeLog } from "../runtime/log.js";
 import type { McpToolBridge } from "../mcp/tool-bridge.js";
@@ -471,16 +471,25 @@ export async function launchClaudeOAuth(options: ClaudeOAuthLaunchOptions): Prom
         // CONTINUES: an empty picker is a defect, `claude` not starting is a breakage.
         const gatewayCachePath = gatewayModelsCachePath(environment);
         const pinnedPort = preferredLoopbackPort(environment);
-        if (!shouldWriteGatewayModelsCache(router.port, pinnedPort)) {
+        const pinnedHolder: PinnedPortHolder | undefined = router.port === pinnedPort ? undefined : await probePinnedPortHolder(pinnedPort);
+        if (!shouldWriteGatewayModelsCache(router.port, pinnedPort, pinnedHolder)) {
             // A3: a session on an ephemeral port must not overwrite the picker of the session on
             // the fixed port.
-            const remedy = `Router is on an ephemeral port, not ${pinnedPort} (another claude session holds it): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`;
+            const remedy = `Router is on an ephemeral port, not ${pinnedPort} (${pinnedHolder === "router" ? "another claude-oauth session holds it" : "its holder did not answer, so it is treated as another claude-oauth session"}): the /model picker keeps the pinned session's cache and lists no external models here. External models still resolve by id (--model ...). Free port ${pinnedPort} and relaunch to get the picker back.`;
             writeSafeLog({ event: "gateway_models_cache_skipped", level: "warn", code: `port=${router.port}`, remedy });
             // Measured 2026-09-14: an operator with two windows read the missing picker as a
             // bug in one of them; the log line alone never reached the terminal.
             process.stderr.write(`claude-oauth: second window on port ${router.port}. ${remedy}\n`);
         }
         else {
+            if (pinnedHolder !== undefined) {
+                writeSafeLog({
+                    event: "loopback_pinned_port_foreign",
+                    level: "warn",
+                    code: `holder=${pinnedHolder};port=${router.port}`,
+                    remedy: `Port ${pinnedPort} is held by a process that is not a claude-oauth router, so no router session's picker is at stake: this session wrote the /model cache with its own address (port ${router.port}) and the picker lists external models here. To get the stable address back, stop the process on ${pinnedPort} (netstat -ano | findstr :${pinnedPort}) or set HEZARFEN_ROUTER_PORT.`,
+                });
+            }
             try {
                 const written = await writeGatewayModelsCache(gatewayCachePath, router.baseUrl, projectDiscoveryPayload(registry.discoveryPayload()));
                 writeSafeLog({ event: "gateway_models_cache_written", level: "info", code: `models=${written.models.length}`, remedy: `${written.baseUrl} -> ${gatewayCachePath}` });

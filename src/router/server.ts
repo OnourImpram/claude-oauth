@@ -8,6 +8,7 @@ import { ModelRegistry } from "../domain/registry.js";
 import { numericUsage, parseMessageEnvelope } from "../domain/validation.js";
 import { ReceiptStore } from "../runtime/receipt-store.js";
 import { writeSafeLog, type SafeLogEntry } from "../runtime/log.js";
+import { ROUTER_IDENTITY_HEADER } from "../runtime/loopback-port.js";
 import { nonceMatches, SESSION_HEADER } from "../security/nonce.js";
 import type { McpToolBridge } from "../mcp/tool-bridge.js";
 import { clientResponseHeaders, REQUEST_CLASS_HEADER } from "./headers.js";
@@ -172,7 +173,7 @@ export async function startRouterServer(options: RouterServerOptions): Promise<R
             event: "loopback_pinned_port_unavailable",
             level: "warn",
             code: listenFallbackReason,
-            remedy: `Pinned loopback port ${options.preferredPort} is taken, so this session listens on ${address.port} instead. The session works, but Claude Code caches gateway model discovery per base URL, so /model will not list external models until the pinned port is free. Free it, or set HEZARFEN_ROUTER_PORT to another stable port.`,
+            remedy: `Pinned loopback port ${options.preferredPort} is taken, so this session listens on ${address.port} instead. The session works, but Claude Code caches gateway model discovery per base URL, so /model may not list external models until the pinned port is free. Free it, or set HEZARFEN_ROUTER_PORT to another stable port.`,
         });
     }
     return {
@@ -227,7 +228,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     try {
         const { target, pathNonceValid } = routedTarget;
         if (request.method === "HEAD" && (target.pathname === "/api/hello" || target.pathname === "/")) {
-            response.writeHead(200);
+            // The identity marker lets a second launcher tell this router from a foreign process
+            // on the pinned port (loopback-port.ts, probePinnedPortHolder).
+            response.writeHead(200, { [ROUTER_IDENTITY_HEADER]: "1" });
             response.end();
             return;
         }

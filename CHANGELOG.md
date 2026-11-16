@@ -7,6 +7,19 @@ repository's own and are stable across the README, `SECURITY.md` and this file.
 
 ## [Unreleased]
 
+### Fixed: a foreign process on the pinned port no longer empties `/model` (2026-11-16)
+
+A local HTTP helper of another tool held port 8791 for hours. Each `claude-oauth` window then fell
+back to an ephemeral port, assumed another router session held 8791, skipped the picker cache, and
+`/model` listed only the native models. The skip exists to protect a router session's picker; a
+process that is not a router has none. The second launcher now asks the holder, without a
+credential: `HEAD /api/hello` carries a new `x-claude-oauth-router` header on this release, and an
+earlier release still answers `GET /v1/models` with `401 session_auth_required`. A holder that is
+neither, or a port nobody holds any more, lets the session write the cache with its own address and
+logs `loopback_pinned_port_foreign`; a holder that does not answer keeps the old, conservative skip.
+`test/pinned-port-holder.test.ts` covers each answer; three mutations (no header, holder ignored,
+earlier-release arm broken) each fail it.
+
 ### Docs: the status statements follow the defect ledger (2026-11-15)
 
 The README banner, `SECURITY.md`, the project page and `docs/llms.txt` still said "pre-release, not
